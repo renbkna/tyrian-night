@@ -1,0 +1,33 @@
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Build and Packaging
+*.vsix
+
+# Python (Development Artifacts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.py
+verify_colors.py
+check_parity.py
+wcag_check.py
+
+# Rust (Development Artifacts)
+target/
+Cargo.lock
+*.rs
+
+# General
+.DS_Store
+node_modules/
+dist/
+user.settings.json
+
+# Build artifacts
+out/*.map
+.vscode-test/

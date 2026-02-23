@@ -1,0 +1,41 @@
+{
+  "name": "tyrian-night",
+  "displayName": "Tyrian Night",
+  "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
+  "version": "1.0.0",
+  "publisher": "renbkna",
+  "icon": "public/icon.png",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/renbkna/tyrian-night.git"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Tyrian Night",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-night.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "bun run build",
+    "build": "bun esbuild.js",
+    "watch": "bun esbuild.js --watch"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.105.0",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.0"
+  }
+}
