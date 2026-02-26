@@ -2,7 +2,7 @@
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
   "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
@@ -42,13 +42,25 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "bun run build",
-    "build": "bun esbuild.js",
-    "watch": "bun esbuild.js --watch"
+    "vscode:prepublish": "bun run check && bun run lint && bun run format:check && bun run build",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "check": "tsc --noEmit",
+    "lint": "oxlint src/",
+    "lint:fix": "oxlint src/ --fix",
+    "format": "biome format . --write",
+    "format:check": "biome format .",
+    "package": "ln -sf $(which bun) /tmp/npm && PATH=\"/tmp:$PATH\" bunx @vscode/vsce package --no-dependencies; rm -f /tmp/npm"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bun run check && bun run lint && bun run format:check"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
     "@types/vscode": "^1.105.0",
-    "esbuild": "^0.27.0",
+    "oxlint": "^1.50.0",
+    "simple-git-hooks": "^2.13.1",
+    "tsup": "^8.5.1",
     "typescript": "^5.9.0"
   }
 }
