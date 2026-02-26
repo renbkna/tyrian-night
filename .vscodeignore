@@ -4,8 +4,9 @@
 src/**
 node_modules/**
 tsconfig.json
-esbuild.js
 bun.lock
 *.vsix
 public/preview.png
 **/*.map
+biome.json
+tsup.config.ts

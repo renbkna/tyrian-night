@@ -11,20 +11,22 @@
   --islands-item-radius: 6px;
   --islands-panel-gap: 6px;
   --islands-panel-top: 6px;
-  --islands-bg-canvas: #0C0C0C;
-  --islands-bg-surface: #0F0F0F;
+  --islands-bg-canvas: #0c0c0c;
+  --islands-bg-surface: #0f0f0f;
 }
 
 /* ===== Animatable Custom Properties ===== */
 @property --border-angle {
-  syntax: '<angle>';
+  syntax: "<angle>";
   initial-value: 0deg;
   inherits: false;
 }
 
 /* ===== Aurora Keyframes ===== */
 @keyframes islands-aurora {
-  to { --border-angle: 360deg; }
+  to {
+    --border-angle: 360deg;
+  }
 }
 
 /* Activity bar: liquid drop funnels into the active divot */
@@ -44,8 +46,12 @@
     opacity: 1;
     border-radius: 50%;
   }
-  70% { transform: scaleX(0.92) scaleY(1.08); }
-  85% { transform: scaleX(1.04) scaleY(0.96); }
+  70% {
+    transform: scaleX(0.92) scaleY(1.08);
+  }
+  85% {
+    transform: scaleX(1.04) scaleY(0.96);
+  }
   100% {
     transform: scaleX(1) scaleY(1);
     opacity: 1;
@@ -55,8 +61,13 @@
 
 /* Soft breathing glow on active indicator */
 @keyframes islands-breathe {
-  0%, 100% { filter: drop-shadow(0 0 2px rgba(139,106,189,0)); }
-  50% { filter: drop-shadow(0 0 8px rgba(139,106,189,0.3)); }
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(139, 106, 189, 0));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(139, 106, 189, 0.3));
+  }
 }
 
 /* Widget entrance — lift into place */
@@ -88,7 +99,7 @@
 }
 
 .part.sidebar {
-  font-family: 'Bear Sans UI', sans-serif !important;
+  font-family: "Bear Sans UI", sans-serif !important;
   margin: var(--islands-panel-top) var(--islands-panel-gap) 0 var(--islands-panel-gap);
   border-radius: var(--islands-panel-radius) !important;
   overflow: hidden !important;
@@ -108,7 +119,7 @@
 .part.editor::after,
 .part.auxiliarybar::after,
 .part.panel.bottom::after {
-  content: '' !important;
+  content: "" !important;
   display: block !important;
   position: absolute !important;
   inset: 0 !important;
@@ -118,9 +129,9 @@
     from var(--border-angle),
     transparent 0%,
     transparent 20%,
-    rgba(139,106,189,0.35) 27%,
-    rgba(160,136,192,0.2) 33%,
-    rgba(139,106,189,0.12) 38%,
+    rgba(139, 106, 189, 0.35) 27%,
+    rgba(160, 136, 192, 0.2) 33%,
+    rgba(139, 106, 189, 0.12) 38%,
     transparent 45%,
     transparent 100%
   ) !important;
@@ -153,7 +164,7 @@
 }
 
 .part.sidebar .title-label h2 {
-  font-family: 'Bear Sans UI Heading', sans-serif !important;
+  font-family: "Bear Sans UI Heading", sans-serif !important;
   font-size: 12px !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
@@ -207,7 +218,9 @@
   margin-left: 4px !important;
   margin-right: 4px !important;
   width: calc(100% - 8px) !important;
-  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition:
+    background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 .part.sidebar .monaco-list-row.selected {
@@ -273,7 +286,7 @@
   margin: 0 !important;
   border-right: none !important;
   border-radius: var(--islands-item-radius) var(--islands-item-radius) 0 0 !important;
-  font-family: 'Bear Sans UI', sans-serif !important;
+  font-family: "Bear Sans UI", sans-serif !important;
   display: flex !important;
   align-items: center !important;
 }
@@ -283,7 +296,9 @@
 }
 
 .tab.active {
-  box-shadow: inset -1px 0 0 0 #252530, inset 1px 0 0 0 #252530 !important;
+  box-shadow:
+    inset -1px 0 0 0 #252530,
+    inset 1px 0 0 0 #252530 !important;
   border-right: none !important;
 }
 
@@ -435,7 +450,11 @@
 }
 
 .part.activitybar .composite-bar {
-  background: color-mix(in srgb, var(--islands-bg-canvas), var(--islands-bg-surface) 30%) !important;
+  background: color-mix(
+    in srgb,
+    var(--islands-bg-canvas),
+    var(--islands-bg-surface) 30%
+  ) !important;
   border-radius: 9999px;
   overflow: hidden !important;
   width: calc(100% - 8px) !important;
@@ -450,7 +469,9 @@
   border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
-  box-shadow: inset 0 1px 3px 0 rgba(255, 255, 255, 0.06), 0 1px 4px 0 rgba(0, 0, 0, 0.3) !important;
+  box-shadow:
+    inset 0 1px 3px 0 rgba(255, 255, 255, 0.06),
+    0 1px 4px 0 rgba(0, 0, 0, 0.3) !important;
 }
 
 .part.activitybar .content > div:last-child {
@@ -470,7 +491,7 @@
 }
 
 .part.activitybar .action-item:hover .action-label {
-  filter: drop-shadow(0 0 5px rgba(139,106,189,0.25)) !important;
+  filter: drop-shadow(0 0 5px rgba(139, 106, 189, 0.25)) !important;
 }
 
 .part.activitybar .action-item .action-label .codicon {
@@ -491,7 +512,13 @@
   border-radius: 50% !important;
   width: 30px !important;
   height: 30px !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), inset 1px 0 0 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 0 rgba(255, 255, 255, 0.02), inset -1px 0 0 0 rgba(255, 255, 255, 0.02), inset 0 1px 2px 0 rgba(255, 255, 255, 0.05), 0 1px 3px 0 rgba(0, 0, 0, 0.3) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    inset 1px 0 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.02),
+    inset -1px 0 0 0 rgba(255, 255, 255, 0.02),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.05),
+    0 1px 3px 0 rgba(0, 0, 0, 0.3) !important;
   animation:
     islands-drop-morph 0.4s cubic-bezier(0.22, 1, 0.36, 1),
     islands-breathe 4s ease-in-out 0.5s infinite !important;
@@ -524,7 +551,7 @@
 
 .part.statusbar {
   background-color: var(--islands-bg-canvas) !important;
-  font-family: 'Bear Sans UI', sans-serif !important;
+  font-family: "Bear Sans UI", sans-serif !important;
 }
 
 .part.statusbar .statusbar-item-label {
@@ -559,7 +586,8 @@
 
 .letterpress {
   opacity: 0.4 !important;
-  filter: brightness(0) drop-shadow(2px 2px 1px rgba(255, 255, 255, 0.12)) drop-shadow(-2px -2px 1px rgba(0, 0, 0, 1)) !important;
+  filter: brightness(0) drop-shadow(2px 2px 1px rgba(255, 255, 255, 0.12))
+    drop-shadow(-2px -2px 1px rgba(0, 0, 0, 1)) !important;
 }
 
 .part.titlebar .action-label {
@@ -567,12 +595,22 @@
 }
 
 .command-center-center {
-  font-family: 'Bear Sans UI', sans-serif !important;
+  font-family: "Bear Sans UI", sans-serif !important;
   border-radius: 9999px !important;
   overflow: hidden !important;
   border: none !important;
-  background: color-mix(in srgb, var(--islands-bg-canvas), var(--islands-bg-surface) 30%) !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), inset 1px 0 0 0 rgba(255, 255, 255, 0.05), inset 0 -1px 0 0 rgba(255, 255, 255, 0.02), inset -1px 0 0 0 rgba(255, 255, 255, 0.02), inset 0 1px 3px 0 rgba(255, 255, 255, 0.04), 0 1px 4px 0 rgba(0, 0, 0, 0.25) !important;
+  background: color-mix(
+    in srgb,
+    var(--islands-bg-canvas),
+    var(--islands-bg-surface) 30%
+  ) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.02),
+    inset -1px 0 0 0 rgba(255, 255, 255, 0.02),
+    inset 0 1px 3px 0 rgba(255, 255, 255, 0.04),
+    0 1px 4px 0 rgba(0, 0, 0, 0.25) !important;
 }
 
 .command-center-center * {
@@ -730,7 +768,10 @@
 
 .notebookOverlay {
   border-radius: 0 0 var(--islands-panel-radius) var(--islands-panel-radius) !important;
-  clip-path: inset(0 18px var(--islands-panel-gap) var(--islands-panel-gap) round 0 0 var(--islands-panel-radius) var(--islands-panel-radius)) !important;
+  clip-path: inset(
+    0 18px var(--islands-panel-gap) var(--islands-panel-gap) round 0 0 var(--islands-panel-radius)
+      var(--islands-panel-radius)
+  ) !important;
 }
 
 .chat-editing-session-container {
