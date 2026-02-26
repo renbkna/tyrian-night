@@ -79,6 +79,19 @@ UI chrome elements (line numbers, breadcrumbs) use lower contrast (~2.8:1) to re
 
 </details>
 
+<details>
+<summary><strong>Recommended Icon Theme</strong> (optional)</summary>
+
+```jsonc
+{
+  "workbench.iconTheme": "vs-seti-folder"
+}
+```
+
+The Seti icon theme complements the dark aesthetic with clean, recognizable file icons.
+
+</details>
+
 ## Contributing
 
 Found a language or scope that needs work? [Open an issue](https://github.com/renbkna/tyrian-night/issues).
