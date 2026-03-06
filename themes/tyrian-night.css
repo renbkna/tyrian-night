@@ -802,3 +802,54 @@
   border-radius: var(--islands-widget-radius) !important;
   overflow: hidden !important;
 }
+
+/* Removes ugly internal borders from the bottom panel tabs */
+.part.panel.bottom .tabs-container {
+  border-bottom: none !important;
+  background-image: none !important;
+}
+
+/* Fixes bottom panel z-indexing and layout structure */
+.part.panel.bottom > .composite.title {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Adjusts the bottom panel content to fit perfectly inside the "island" gap */
+.part.panel.bottom > .content {
+  margin-top: -6px !important;
+  position: relative !important;
+  border-radius: 0 0 calc(var(--islands-panel-radius) - var(--islands-panel-gap))
+    calc(var(--islands-panel-radius) - var(--islands-panel-gap)) !important;
+  overflow: hidden !important;
+}
+
+/* Removes internal split-view borders in the bottom panel */
+.part.panel.bottom .pane,
+.part.panel.bottom .pane-body,
+.part.panel.bottom .split-view-view,
+.part.panel.bottom .composite,
+.part.panel.bottom .monaco-pane-view,
+.part.panel.bottom .output-view {
+  border-bottom: none !important;
+}
+
+/* Rounds the terminal to prevent it from clipping out of the bottom island */
+.part.panel.bottom .terminal-outer-container {
+  border-left: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 0 0 0 18px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+.part.panel.bottom .terminal.xterm {
+  border-radius: 0 0 0 18px !important;
+}
+
+/* Hides a legacy dropdown separator */
+.monaco-button-dropdown-separator {
+  display: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  width: 0 !important;
+  opacity: 0 !important;
+}
