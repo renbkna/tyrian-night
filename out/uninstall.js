@@ -1,0 +1,4 @@
+import o from"fs";import s from"os";import r from"path";function a(){let n=s.platform(),t=s.homedir();switch(n){case"win32":return r.join(process.env.APPDATA||r.join(t,"AppData","Roaming"),"Code","User","settings.json");case"darwin":return r.join(t,"Library","Application Support","Code","User","settings.json");default:return r.join(t,".config","Code","User","settings.json")}}async function l(){let n=a();if(o.existsSync(n))try{let t=o.readFileSync(n,"utf8");if(t.includes("tyrian-night.css")){let i=t.split(`
+`),e=i.filter(c=>!c.includes("tyrian-night.css"));e.length!==i.length&&(o.writeFileSync(n,e.join(`
+`)),console.log("Successfully removed Tyrian Night CSS from Custom UI Style imports."))}}catch(t){console.error("Error during Tyrian Night cleanup:",t)}}try{await l()}catch(n){console.error(n)}
+//# sourceMappingURL=uninstall.js.map
