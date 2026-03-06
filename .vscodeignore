@@ -10,3 +10,4 @@ public/preview.png
 **/*.map
 biome.json
 tsup.config.ts
+zed-tyrian-nights/
