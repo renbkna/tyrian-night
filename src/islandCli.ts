@@ -1,4 +1,9 @@
-import { applyIslandShell, readIslandShellStatus, restoreIslandShell } from './islandShell.js';
+import {
+  applyIslandShell,
+  readIslandShellStatus,
+  restoreAllIslandShells,
+  restoreIslandShell,
+} from './islandShell.js';
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
@@ -25,6 +30,13 @@ async function main(): Promise<void> {
         })
       );
       return;
+    case 'restore-all':
+      writeJson(
+        await restoreAllIslandShells({
+          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
+        })
+      );
+      return;
     case 'status':
       requireArg(args, 'app-root');
       writeJson(
@@ -34,7 +46,9 @@ async function main(): Promise<void> {
       );
       return;
     default:
-      throw new Error("Unknown Tyrian Night CLI command. Use 'apply', 'restore', or 'status'.");
+      throw new Error(
+        "Unknown Tyrian Night CLI command. Use 'apply', 'restore', 'restore-all', or 'status'."
+      );
   }
 }
 

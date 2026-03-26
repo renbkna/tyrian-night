@@ -1,13 +1,7 @@
-import { findInstalledAppRoots, restoreIslandShell } from './islandShell.js';
+import { restoreAllIslandShells } from './islandShell.js';
 
 async function cleanup(): Promise<void> {
-  const appRoots = await findInstalledAppRoots();
-
-  for (const appRoot of appRoots) {
-    await restoreIslandShell({
-      appRoot,
-    });
-  }
+  await restoreAllIslandShells();
 }
 
 try {

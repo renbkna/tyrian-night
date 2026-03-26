@@ -26,7 +26,7 @@ Behavior:
 
 - When **Tyrian Night** is the active color theme, the extension installs or repairs Island UI automatically
 - When you switch away from **Tyrian Night**, the extension restores the stock VS Code shell
-- On uninstall, Tyrian Night removes its own patch automatically
+- On uninstall, Tyrian Night removes its own patch automatically from every VS Code app root it has managed
 
 The patch surface is intentionally narrow:
 
@@ -34,6 +34,7 @@ The patch surface is intentionally narrow:
 - It copies one CSS asset into the workbench directory
 - It updates only the matching `product.json` checksum entry
 - It keeps Tyrian-owned backups next to the patched files for reliable rollback
+- It tracks patched app roots in a small user-level registry so uninstall can clean up completely even if VS Code moves or updates
 
 Important:
 
@@ -47,6 +48,10 @@ Commands:
 - `Tyrian Night: Enable Island UI`
 - `Tyrian Night: Repair Island UI`
 - `Tyrian Night: Restore Classic UI`
+
+## Known Issues
+
+- After installing or updating Island UI, VS Code can occasionally restore open editor tabs with a temporary gap between the editor border and the tab row. If that happens, close all editor tabs and reload or restart VS Code once to rebuild the editor layout cleanly.
 
 > Based on [vscode-dark-islands](https://github.com/bwya77/vscode-dark-islands) by [bwya77](https://github.com/bwya77).
 

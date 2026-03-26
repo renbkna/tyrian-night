@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 const WORKBENCH_DIR_RELATIVE_PATH = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
@@ -13,6 +14,8 @@ const ISLAND_CSS_FILE_NAME = 'tyrian-night.island.css';
 const ISLAND_MANIFEST_FILE_NAME = 'tyrian-night.island.json';
 const BACKUP_HTML_FILE_NAME = 'tyrian-night.workbench.backup.html';
 const BACKUP_PRODUCT_FILE_NAME = 'tyrian-night.product.backup.json';
+const MANAGED_ROOTS_DIR_NAME = '.tyrian-night';
+const MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
 
 const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
@@ -52,6 +55,11 @@ export type IslandShellResult = {
   active: boolean;
 };
 
+type ManagedRootsRegistry = {
+  version: 1;
+  appRoots: string[];
+};
+
 export async function applyIslandShell(options: {
   appRoot: string;
   cssSourcePath: string;
@@ -83,6 +91,7 @@ export async function applyIslandShell(options: {
   changed = (await writeIfChanged(paths.workbenchHtmlPath, patchedHtml)) || changed;
   changed = (await writeIfChanged(paths.productJsonPath, patchedProductJson)) || changed;
   changed = (await writeIfChanged(paths.manifestPath, manifest)) || changed;
+  changed = (await addManagedAppRoot(options.appRoot)) || changed;
 
   return {
     changed,
@@ -111,10 +120,43 @@ export async function restoreIslandShell(options: { appRoot: string }): Promise<
   changed = (await deleteIfExists(paths.manifestPath)) || changed;
   changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
   changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
+  changed = (await removeManagedAppRoot(options.appRoot)) || changed;
 
   return {
     changed,
     active: false,
+  };
+}
+
+export async function restoreAllIslandShells(options?: {
+  preferredAppRoots?: string[];
+}): Promise<{ changed: boolean; restoredAppRoots: string[] }> {
+  const appRoots = await listManagedAppRoots(options);
+  let changed = false;
+  const restoredAppRoots: string[] = [];
+
+  for (const appRoot of appRoots) {
+    try {
+      const result = await restoreIslandShell({ appRoot });
+
+      if (result.changed) {
+        changed = true;
+      }
+
+      restoredAppRoots.push(appRoot);
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        changed = (await removeManagedAppRoot(appRoot)) || changed;
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return {
+    changed,
+    restoredAppRoots,
   };
 }
 
@@ -195,6 +237,44 @@ export async function findInstalledAppRoots(): Promise<string[]> {
   return existingRoots;
 }
 
+export async function listManagedAppRoots(options?: {
+  preferredAppRoots?: string[];
+}): Promise<string[]> {
+  const candidates = new Set<string>();
+
+  for (const appRoot of options?.preferredAppRoots ?? []) {
+    candidates.add(appRoot);
+  }
+
+  for (const appRoot of await findInstalledAppRoots()) {
+    candidates.add(appRoot);
+  }
+
+  for (const appRoot of await readManagedAppRootsRegistry()) {
+    candidates.add(appRoot);
+  }
+
+  const existingRoots: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    const workbenchHtmlPath = path.join(candidate, WORKBENCH_HTML_RELATIVE_PATH);
+    const productJsonPath = path.join(candidate, PRODUCT_JSON_RELATIVE_PATH);
+
+    if ((await pathExists(workbenchHtmlPath)) && (await pathExists(productJsonPath))) {
+      existingRoots.push(candidate);
+      continue;
+    }
+
+    await removeManagedAppRoot(candidate);
+  }
+
+  return existingRoots;
+}
+
 function getPatchPaths(appRoot: string): PatchPaths {
   const workbenchDirPath = path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH);
 
@@ -207,6 +287,10 @@ function getPatchPaths(appRoot: string): PatchPaths {
     backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
     backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
   };
+}
+
+function getManagedRootsRegistryPath(): string {
+  return path.join(os.homedir(), MANAGED_ROOTS_DIR_NAME, MANAGED_ROOTS_FILE_NAME);
 }
 
 function stripTyrianBlock(html: string): string {
@@ -281,6 +365,80 @@ function sha256Base64(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
 }
 
+async function addManagedAppRoot(appRoot: string): Promise<boolean> {
+  const appRoots = await readManagedAppRootsRegistry();
+
+  if (appRoots.includes(appRoot)) {
+    return false;
+  }
+
+  appRoots.push(appRoot);
+  appRoots.sort();
+  await writeManagedAppRootsRegistry(appRoots);
+  return true;
+}
+
+async function removeManagedAppRoot(appRoot: string): Promise<boolean> {
+  const appRoots = await readManagedAppRootsRegistry();
+  const nextAppRoots = appRoots.filter((entry) => entry !== appRoot);
+
+  if (nextAppRoots.length === appRoots.length) {
+    return false;
+  }
+
+  await writeManagedAppRootsRegistry(nextAppRoots);
+  return true;
+}
+
+async function readManagedAppRootsRegistry(): Promise<string[]> {
+  const registryPath = getManagedRootsRegistryPath();
+  const content = await readTextFileIfExists(registryPath);
+
+  if (!content) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(content) as Partial<ManagedRootsRegistry>;
+
+    if (parsed.version !== 1 || !Array.isArray(parsed.appRoots)) {
+      return [];
+    }
+
+    return parsed.appRoots.filter((appRoot): appRoot is string => typeof appRoot === 'string');
+  } catch {
+    return [];
+  }
+}
+
+async function writeManagedAppRootsRegistry(appRoots: string[]): Promise<void> {
+  const registryPath = getManagedRootsRegistryPath();
+
+  if (appRoots.length === 0) {
+    await deleteIfExists(registryPath);
+
+    try {
+      await fs.rmdir(path.dirname(registryPath));
+    } catch (error) {
+      if (isFileNotFoundError(error) || isDirectoryNotEmptyError(error)) {
+        return;
+      }
+
+      throw error;
+    }
+
+    return;
+  }
+
+  await fs.mkdir(path.dirname(registryPath), { recursive: true });
+  const registry: ManagedRootsRegistry = {
+    version: 1,
+    appRoots,
+  };
+
+  await writeIfChanged(registryPath, JSON.stringify(registry, null, 2).concat('\n'));
+}
+
 async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
   const currentContent = await readTextFileIfExists(filePath);
 
@@ -334,6 +492,10 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 function isFileNotFoundError(error: unknown): boolean {
   return isNodeError(error) && error.code === 'ENOENT';
+}
+
+function isDirectoryNotEmptyError(error: unknown): boolean {
+  return isNodeError(error) && error.code === 'ENOTEMPTY';
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

@@ -184,7 +184,7 @@ async function restoreIslandUi(options: {
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
 }): Promise<void> {
-  const result = await runIslandCli(['restore', '--app-root', vscode.env.appRoot]);
+  const result = await runIslandCli(['restore-all', '--app-root', vscode.env.appRoot]);
 
   if (!result.changed) {
     if (options.notifyWhenUnchanged) {

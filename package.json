@@ -2,12 +2,12 @@
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
   "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.6.2",
+  "version": "1.6.5",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.110.0"
   },
   "categories": [
     "Themes"
@@ -62,12 +62,12 @@
     "pre-commit": "bun run check && bun run lint && bun run format:check"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.6",
-    "@types/node": "^25.3.5",
+    "@biomejs/biome": "^2.4.9",
+    "@types/node": "^25.5.0",
     "@types/vscode": "^1.109.0",
-    "oxlint": "^1.51.0",
+    "oxlint": "^1.57.0",
     "simple-git-hooks": "^2.13.1",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.2"
   }
 }
