@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/extension.ts', 'src/uninstall.ts'],
+  entry: ['src/extension.ts', 'src/uninstall.ts', 'src/islandCli.ts'],
   outDir: 'out',
   format: ['esm'],
   platform: 'node',

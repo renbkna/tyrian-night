@@ -11,22 +11,35 @@ A deep, ultra-saturated dark theme built on color science. Maximum depth and sat
 - **True dark background** — `#0C0C0C` canvas, optimized for OLED and dim environments
 - **Full semantic highlighting** — declared natively in the theme, no configuration needed
 - **Universal language support** — Works with any language using TextMate grammars (JavaScript, Python, Rust, Go, etc.)
-- **Optional Island UI layout** — rounded panels via [Custom UI Style](https://marketplace.visualstudio.com/items?itemName=subframe7536.custom-ui-style), consent-prompted on first run
+- **Self-managed Island UI layout** — Tyrian Night installs, repairs, and removes its own workbench patch without `Custom UI Style`
 
 ## Installation
 
 1. **Extensions** panel → search `Tyrian Night` → **Install**
-2. **Ctrl+K Ctrl+T** → select **Tyrian Night**
+2. Use the first-run prompt, or run **Ctrl+K Ctrl+T** and select **Tyrian Night**
 
-## Island UI Layout (Optional)
+## Island UI Layout
 
-Tyrian Night ships a CSS stylesheet for rounded, floating panels. It requires the [Custom UI Style](https://marketplace.visualstudio.com/items?itemName=subframe7536.custom-ui-style) extension.
+Tyrian Night now ships with its own Island UI installer. No external UI patching extension is required.
 
-1. Install **Custom UI Style**
-2. Reload — Tyrian Night will prompt to enable the Island layout
-3. Accept and reload again to apply
+Behavior:
 
-Decline the prompt to use the theme without layout modifications. The choice is stored and won't ask again.
+- When **Tyrian Night** is the active color theme, the extension installs or repairs Island UI automatically
+- When you switch away from **Tyrian Night**, the extension restores the stock VS Code shell
+- On uninstall, Tyrian Night removes its own patch automatically
+
+The patch surface is intentionally narrow:
+
+- It injects a single Tyrian stylesheet into `workbench.html`
+- It copies one CSS asset into the workbench directory
+- It updates only the matching `product.json` checksum entry
+- It keeps Tyrian-owned backups next to the patched files for reliable rollback
+
+Commands:
+
+- `Tyrian Night: Enable Island UI`
+- `Tyrian Night: Repair Island UI`
+- `Tyrian Night: Restore Classic UI`
 
 > Based on [vscode-dark-islands](https://github.com/bwya77/vscode-dark-islands) by [bwya77](https://github.com/bwya77).
 

@@ -2,7 +2,7 @@
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
   "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
@@ -30,13 +30,18 @@
     ],
     "commands": [
       {
-        "command": "tyrianNight.restoreClassicUi",
-        "title": "Tyrian Night: Restore Classic UI",
+        "command": "tyrianNight.enableIslandUi",
+        "title": "Tyrian Night: Enable Island UI",
         "category": "Tyrian Night"
       },
       {
-        "command": "tyrianNight.prepareUninstall",
-        "title": "Tyrian Night: Prepare for Uninstall",
+        "command": "tyrianNight.repairIslandUi",
+        "title": "Tyrian Night: Repair Island UI",
+        "category": "Tyrian Night"
+      },
+      {
+        "command": "tyrianNight.restoreClassicUi",
+        "title": "Tyrian Night: Restore Classic UI",
         "category": "Tyrian Night"
       }
     ]

@@ -1,175 +1,276 @@
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+
 import * as vscode from 'vscode';
 
-const CUSTOM_UI_EXT_ID = 'subframe7536.custom-ui-style';
-const CUSTOM_UI_IMPORTS = 'custom-ui-style.external.imports';
-const CUSTOM_UI_RELOAD = 'custom-ui-style.reload';
-
-const CONSENT_KEY = 'tyrianNight.islandUiConsent';
+const THEME_NAME = 'Tyrian Night';
+const ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
+const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
 
 let extContext: vscode.ExtensionContext;
+let syncQueue = Promise.resolve();
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
 
   try {
+    await initializeState();
     registerCommands();
-    await checkCustomUiDependency();
-    await setupIslandUi();
+    extContext.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('workbench.colorTheme')) {
+          void enqueueSync(() => syncIslandUi({ allowThemePrompt: false }));
+        }
+      })
+    );
+    await enqueueSync(() => syncIslandUi({ allowThemePrompt: true }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Tyrian Night: ${message}`);
   }
 }
 
+async function initializeState(): Promise<void> {
+  if (extContext.globalState.get<boolean | undefined>(ISLAND_UI_ENABLED_KEY) === undefined) {
+    await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, true);
+  }
+}
+
 function registerCommands(): void {
   extContext.subscriptions.push(
-    vscode.commands.registerCommand('tyrianNight.restoreClassicUi', restoreClassicUi),
-    vscode.commands.registerCommand('tyrianNight.prepareUninstall', prepareUninstall)
+    vscode.commands.registerCommand('tyrianNight.enableIslandUi', enableIslandUi),
+    vscode.commands.registerCommand('tyrianNight.repairIslandUi', repairIslandUi),
+    vscode.commands.registerCommand('tyrianNight.restoreClassicUi', restoreClassicUi)
   );
 }
 
-async function checkCustomUiDependency(): Promise<void> {
-  const customUi = vscode.extensions.getExtension(CUSTOM_UI_EXT_ID);
-  const imports = getImports();
-  const hasOurImport = imports.some((i) => i.includes('tyrian-night.css'));
-
-  if (!customUi && hasOurImport) {
-    const action = await vscode.window.showWarningMessage(
-      'Custom UI Style is missing but CSS imports remain. Clean up?',
-      'Clean Up',
-      'Ignore'
-    );
-
-    if (action === 'Clean Up') {
-      await removeTyrianNightImports();
-    }
-  }
+function enqueueSync(task: () => Promise<void>): Promise<void> {
+  syncQueue = syncQueue.then(task, task);
+  return syncQueue;
 }
 
-async function setupIslandUi(): Promise<void> {
-  const customUi = vscode.extensions.getExtension(CUSTOM_UI_EXT_ID);
-  if (!customUi) return;
+async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<void> {
+  const islandUiEnabled = extContext.globalState.get<boolean>(ISLAND_UI_ENABLED_KEY, true);
+  const activeTheme = getActiveTheme();
 
-  const consent = extContext.globalState.get<boolean | undefined>(CONSENT_KEY);
+  if (activeTheme !== THEME_NAME) {
+    if (options.allowThemePrompt) {
+      const switchedTheme = await maybePromptToSwitchTheme(activeTheme);
 
-  if (consent === false) return;
-
-  if (consent === undefined) {
-    const action = await vscode.window.showInformationMessage(
-      'Tyrian Night: Enable "Island" UI layout? (Requires Custom UI Style)',
-      'Yes',
-      'No'
-    );
-
-    if (action === 'Yes') {
-      await extContext.globalState.update(CONSENT_KEY, true);
-      await applyIslandUi();
-    } else if (action === 'No') {
-      await extContext.globalState.update(CONSENT_KEY, false);
+      if (switchedTheme) {
+        return;
+      }
     }
+
+    await restoreIslandUi({
+      notifyWhenUnchanged: false,
+      reloadMessage: 'Tyrian Night: Island UI was removed because another color theme is active.',
+    });
     return;
   }
 
-  await applyIslandUi();
-}
-
-async function applyIslandUi(): Promise<void> {
-  const customUi = vscode.extensions.getExtension(CUSTOM_UI_EXT_ID);
-  if (!customUi) return;
-
-  const sourceUri = vscode.Uri.joinPath(extContext.extensionUri, 'themes', 'tyrian-night.css');
-  const targetDir = extContext.globalStorageUri.fsPath;
-  const targetPath = `${targetDir}/tyrian-night.css`;
-  const targetUri = vscode.Uri.file(targetPath);
-
-  try {
-    await vscode.workspace.fs.createDirectory(extContext.globalStorageUri);
-  } catch {
-    // Directory may already exist
-  }
-
-  const content = await vscode.workspace.fs.readFile(sourceUri);
-  await vscode.workspace.fs.writeFile(targetUri, content);
-
-  // Use file:// scheme for Custom UI Style compatibility
-  const stableUri = targetUri.toString();
-  const currentImports = getImports();
-  const imports = currentImports.filter((i) => !isTyrianNightImport(i));
-
-  if (!imports.includes(stableUri)) {
-    imports.push(stableUri);
-  }
-
-  const importsChanged = JSON.stringify(currentImports) !== JSON.stringify(imports);
-
-  if (importsChanged) {
-    await vscode.workspace
-      .getConfiguration()
-      .update(CUSTOM_UI_IMPORTS, imports, vscode.ConfigurationTarget.Global);
-
-    await customUi.activate();
-    await vscode.commands.executeCommand(CUSTOM_UI_RELOAD);
-  }
-}
-
-async function restoreClassicUi(): Promise<void> {
-  const removed = await removeTyrianNightImports();
-
-  if (!removed) {
-    vscode.window.showInformationMessage('Tyrian Night: No CSS imports to remove.');
+  if (!islandUiEnabled) {
+    await restoreIslandUi({
+      notifyWhenUnchanged: false,
+      reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
+    });
     return;
   }
 
-  await extContext.globalState.update(CONSENT_KEY, false);
-  vscode.window.showInformationMessage('Tyrian Night: Classic UI restored.');
+  await applyIslandUi({
+    notifyWhenUnchanged: false,
+    reloadMessage: 'Tyrian Night: Island UI was updated. Reload VS Code to apply it.',
+  });
 }
 
-async function prepareUninstall(): Promise<void> {
-  await removeTyrianNightImports();
-  await extContext.globalState.update(CONSENT_KEY, undefined);
+async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promise<boolean> {
+  const promptShown = extContext.globalState.get<boolean>(THEME_PROMPT_KEY, false);
 
-  try {
-    const cssPath = `${extContext.globalStorageUri.fsPath}/tyrian-night.css`;
-    const cssUri = vscode.Uri.file(cssPath);
-    await vscode.workspace.fs.delete(cssUri);
-  } catch {
-    // File may not exist, ignore
+  if (promptShown || activeTheme === THEME_NAME) {
+    return false;
   }
 
-  vscode.window.showInformationMessage(
-    'Tyrian Night: Ready to uninstall. Please reload VSCode before uninstalling.'
+  await extContext.globalState.update(THEME_PROMPT_KEY, true);
+
+  const action = await vscode.window.showInformationMessage(
+    'Tyrian Night is installed. Switch to the Tyrian Night color theme and enable Island UI now?',
+    'Switch Theme',
+    'Later'
   );
-}
 
-async function removeTyrianNightImports(): Promise<boolean> {
-  const imports = getImports();
-  const filtered = imports.filter((i) => !isTyrianNightImport(i));
-
-  if (filtered.length === imports.length) {
+  if (action !== 'Switch Theme') {
     return false;
   }
 
   await vscode.workspace
-    .getConfiguration()
-    .update(CUSTOM_UI_IMPORTS, filtered, vscode.ConfigurationTarget.Global);
-
-  const customUi = vscode.extensions.getExtension(CUSTOM_UI_EXT_ID);
-  if (customUi) {
-    await customUi.activate();
-    await vscode.commands.executeCommand(CUSTOM_UI_RELOAD);
-  }
+    .getConfiguration('workbench')
+    .update('colorTheme', THEME_NAME, vscode.ConfigurationTarget.Global);
 
   return true;
 }
 
-function getImports(): string[] {
-  return vscode.workspace.getConfiguration().get<string[]>(CUSTOM_UI_IMPORTS) ?? [];
+async function enableIslandUi(): Promise<void> {
+  await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, true);
+
+  if (getActiveTheme() !== THEME_NAME) {
+    const action = await vscode.window.showInformationMessage(
+      'Tyrian Night: Island UI follows the Tyrian Night theme. Switch themes now?',
+      'Switch Theme',
+      'Later'
+    );
+
+    if (action === 'Switch Theme') {
+      await vscode.workspace
+        .getConfiguration('workbench')
+        .update('colorTheme', THEME_NAME, vscode.ConfigurationTarget.Global);
+    }
+
+    return;
+  }
+
+  await applyIslandUi({
+    notifyWhenUnchanged: true,
+    reloadMessage: 'Tyrian Night: Island UI installed. Reload VS Code to apply it.',
+  });
 }
 
-function isTyrianNightImport(importPath: string): boolean {
-  return importPath.includes('tyrian-night.css');
+async function repairIslandUi(): Promise<void> {
+  if (getActiveTheme() !== THEME_NAME) {
+    vscode.window.showInformationMessage(
+      'Tyrian Night: Switch to the Tyrian Night theme before repairing Island UI.'
+    );
+    return;
+  }
+
+  await applyIslandUi({
+    notifyWhenUnchanged: true,
+    reloadMessage: 'Tyrian Night: Island UI repaired. Reload VS Code to apply it.',
+  });
+}
+
+async function applyIslandUi(options: {
+  notifyWhenUnchanged: boolean;
+  reloadMessage: string;
+}): Promise<void> {
+  const result = await runIslandCli([
+    'apply',
+    '--app-root',
+    vscode.env.appRoot,
+    '--css-source',
+    path.join(extContext.extensionPath, 'themes', 'tyrian-night.css'),
+    '--theme-version',
+    String(extContext.extension.packageJSON.version ?? 'unknown'),
+  ]);
+
+  if (!result.changed) {
+    if (options.notifyWhenUnchanged) {
+      vscode.window.showInformationMessage('Tyrian Night: Island UI is already up to date.');
+    }
+    return;
+  }
+
+  await promptForReload(options.reloadMessage);
+}
+
+async function restoreClassicUi(): Promise<void> {
+  await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, false);
+  await restoreIslandUi({
+    notifyWhenUnchanged: true,
+    reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
+  });
+}
+
+async function restoreIslandUi(options: {
+  notifyWhenUnchanged: boolean;
+  reloadMessage: string;
+}): Promise<void> {
+  const result = await runIslandCli(['restore', '--app-root', vscode.env.appRoot]);
+
+  if (!result.changed) {
+    if (options.notifyWhenUnchanged) {
+      vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
+    }
+    return;
+  }
+
+  await promptForReload(options.reloadMessage);
+}
+
+function runIslandCli(argumentsList: string[]): Promise<{ changed: boolean }> {
+  const cliPath = path.join(extContext.extensionPath, 'out', 'islandCli.js');
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...argumentsList], {
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on('error', (error) => {
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(normalizeCliError(stderr || stdout)));
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(stdout) as { changed: boolean });
+      } catch (error) {
+        reject(
+          new Error(
+            `Tyrian Night CLI returned invalid output: ${error instanceof Error ? error.message : String(error)}`
+          )
+        );
+      }
+    });
+  });
+}
+
+function normalizeCliError(output: string): string {
+  const message = output.trim();
+
+  if (!message) {
+    return 'Island UI CLI failed without an error message.';
+  }
+
+  if (/EACCES|EPERM/i.test(message)) {
+    return `${message} Tyrian Night needs write access to the VS Code app files to manage Island UI.`;
+  }
+
+  return message;
+}
+
+function getActiveTheme(): string | undefined {
+  return vscode.workspace.getConfiguration('workbench').get<string>('colorTheme');
+}
+
+async function promptForReload(message: string): Promise<void> {
+  const action = await vscode.window.showInformationMessage(message, 'Reload Window', 'Later');
+
+  if (action === 'Reload Window') {
+    await vscode.commands.executeCommand('workbench.action.reloadWindow');
+  }
 }
 
 export function deactivate(): void {
-  // Cleanup happens automatically via prepareUninstall or orphaned import detection
+  // Island UI is managed explicitly by commands and the uninstall hook.
 }
