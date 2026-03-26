@@ -1,5 +1,6 @@
 import {
   applyIslandShell,
+  readAllIslandShellStatuses,
   readIslandShellStatus,
   restoreAllIslandShells,
   restoreIslandShell,
@@ -45,9 +46,16 @@ async function main(): Promise<void> {
         })
       );
       return;
+    case 'status-all':
+      writeJson(
+        await readAllIslandShellStatuses({
+          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
+        })
+      );
+      return;
     default:
       throw new Error(
-        "Unknown Tyrian Night CLI command. Use 'apply', 'restore', 'restore-all', or 'status'."
+        "Unknown Tyrian Night CLI command. Use 'apply', 'restore', 'restore-all', 'status', or 'status-all'."
       );
   }
 }

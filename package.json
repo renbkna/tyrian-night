@@ -2,7 +2,7 @@
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
   "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.6.5",
+  "version": "1.7.0",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
@@ -30,25 +30,29 @@
     ],
     "commands": [
       {
-        "command": "tyrianNight.enableIslandUi",
-        "title": "Tyrian Night: Enable Island UI",
+        "command": "tyrianNight.applyIslandUi",
+        "title": "Apply Island UI",
         "category": "Tyrian Night"
       },
       {
         "command": "tyrianNight.repairIslandUi",
-        "title": "Tyrian Night: Repair Island UI",
+        "title": "Repair Island UI",
         "category": "Tyrian Night"
       },
       {
         "command": "tyrianNight.restoreClassicUi",
-        "title": "Tyrian Night: Restore Classic UI",
+        "title": "Restore Classic UI",
+        "category": "Tyrian Night"
+      },
+      {
+        "command": "tyrianNight.doctorIslandUi",
+        "title": "Doctor Island UI",
         "category": "Tyrian Night"
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "bun run check && bun run lint && bun run format:check && bun run build",
-    "vscode:uninstall": "node ./out/uninstall.js",
     "build": "tsup",
     "watch": "tsup --watch",
     "check": "tsc --noEmit",
@@ -64,7 +68,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.9",
     "@types/node": "^25.5.0",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "^1.110.0",
     "oxlint": "^1.57.0",
     "simple-git-hooks": "^2.13.1",
     "tsup": "^8.5.1",

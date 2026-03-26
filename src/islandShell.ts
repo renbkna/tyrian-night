@@ -46,13 +46,30 @@ type IslandManifest = {
 };
 
 export type IslandShellStatus = {
+  appRoot: string;
   active: boolean;
   managed: boolean;
+  classification:
+    | 'clean'
+    | 'patched'
+    | 'managed-only'
+    | 'permission-denied'
+    | 'broken-backup'
+    | 'checksum-mismatch';
+  verificationPassed: boolean;
+  canSelfHeal: boolean;
+  issues: string[];
 };
 
 export type IslandShellResult = {
   changed: boolean;
   active: boolean;
+};
+
+export type IslandShellCleanupSummary = {
+  changed: boolean;
+  restoredAppRoots: string[];
+  failedAppRoots: Array<{ appRoot: string; reason: string }>;
 };
 
 type ManagedRootsRegistry = {
@@ -92,6 +109,7 @@ export async function applyIslandShell(options: {
   changed = (await writeIfChanged(paths.productJsonPath, patchedProductJson)) || changed;
   changed = (await writeIfChanged(paths.manifestPath, manifest)) || changed;
   changed = (await addManagedAppRoot(options.appRoot)) || changed;
+  await verifyAppliedShell(paths);
 
   return {
     changed,
@@ -120,6 +138,7 @@ export async function restoreIslandShell(options: { appRoot: string }): Promise<
   changed = (await deleteIfExists(paths.manifestPath)) || changed;
   changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
   changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
+  await verifyRestoredShell(paths);
   changed = (await removeManagedAppRoot(options.appRoot)) || changed;
 
   return {
@@ -130,10 +149,11 @@ export async function restoreIslandShell(options: { appRoot: string }): Promise<
 
 export async function restoreAllIslandShells(options?: {
   preferredAppRoots?: string[];
-}): Promise<{ changed: boolean; restoredAppRoots: string[] }> {
+}): Promise<IslandShellCleanupSummary> {
   const appRoots = await listManagedAppRoots(options);
   let changed = false;
   const restoredAppRoots: string[] = [];
+  const failedAppRoots: Array<{ appRoot: string; reason: string }> = [];
 
   for (const appRoot of appRoots) {
     try {
@@ -150,13 +170,54 @@ export async function restoreAllIslandShells(options?: {
         continue;
       }
 
-      throw error;
+      failedAppRoots.push({
+        appRoot,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   return {
     changed,
     restoredAppRoots,
+    failedAppRoots,
+  };
+}
+
+export async function bestEffortRestoreAllIslandShells(options?: {
+  preferredAppRoots?: string[];
+}): Promise<IslandShellCleanupSummary> {
+  const appRoots = await listManagedAppRoots(options);
+  let changed = false;
+  const restoredAppRoots: string[] = [];
+  const failedAppRoots: Array<{ appRoot: string; reason: string }> = [];
+
+  for (const appRoot of appRoots) {
+    try {
+      const result = await bestEffortRestoreIslandShell({ appRoot });
+
+      if (result.changed) {
+        changed = true;
+      }
+
+      restoredAppRoots.push(appRoot);
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        changed = (await removeManagedAppRoot(appRoot)) || changed;
+        continue;
+      }
+
+      failedAppRoots.push({
+        appRoot,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    changed,
+    restoredAppRoots,
+    failedAppRoots,
   };
 }
 
@@ -164,16 +225,108 @@ export async function readIslandShellStatus(options: {
   appRoot: string;
 }): Promise<IslandShellStatus> {
   const paths = getPatchPaths(options.appRoot);
-  const currentHtml = await readTextFileIfExists(paths.workbenchHtmlPath);
 
-  return {
-    active: currentHtml?.includes(TYRIAN_MARKER_START) ?? false,
-    managed:
-      (await pathExists(paths.manifestPath)) ||
-      (await pathExists(paths.backupHtmlPath)) ||
-      (await pathExists(paths.backupProductJsonPath)) ||
-      (await pathExists(paths.islandCssPath)),
-  };
+  try {
+    const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+    const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+    const active = currentHtml.includes(TYRIAN_MARKER_START);
+    const cssExists = await pathExists(paths.islandCssPath);
+    const manifestContent = await readTextFileIfExists(paths.manifestPath);
+    const manifestExists = manifestContent !== undefined;
+    const manifestValid = manifestExists && parseManifest(manifestContent) !== undefined;
+    const backupHtmlExists = await pathExists(paths.backupHtmlPath);
+    const backupProductExists = await pathExists(paths.backupProductJsonPath);
+    const managed = cssExists || manifestExists || backupHtmlExists || backupProductExists;
+    const issues: string[] = [];
+    const checksumMatches = doesWorkbenchChecksumMatch(currentProductJson, currentHtml);
+    const backupMismatch = backupHtmlExists !== backupProductExists;
+    const brokenBackup =
+      backupMismatch ||
+      (manifestExists && !manifestValid) ||
+      (active && (!cssExists || !manifestExists));
+
+    if (active) {
+      issues.push('Tyrian workbench marker is present.');
+    }
+
+    if (managed) {
+      issues.push('Tyrian-managed sidecar files are present.');
+    }
+
+    if (!checksumMatches) {
+      issues.push('product.json checksum does not match the current workbench HTML.');
+    }
+
+    if (backupMismatch) {
+      issues.push('Tyrian backup files are incomplete.');
+    }
+
+    if (manifestExists && !manifestValid) {
+      issues.push('Tyrian manifest exists but is invalid.');
+    }
+
+    if (active && !cssExists) {
+      issues.push('Tyrian marker is present but the injected CSS file is missing.');
+    }
+
+    if (active && !manifestExists) {
+      issues.push('Tyrian marker is present but the manifest file is missing.');
+    }
+
+    let classification: IslandShellStatus['classification'] = 'clean';
+
+    if (brokenBackup) {
+      classification = 'broken-backup';
+    } else if (!checksumMatches) {
+      classification = 'checksum-mismatch';
+    } else if (active) {
+      classification = 'patched';
+    } else if (managed) {
+      classification = 'managed-only';
+    }
+
+    const verificationPassed = classification === 'clean' || classification === 'patched';
+
+    return {
+      appRoot: options.appRoot,
+      active,
+      managed,
+      classification,
+      verificationPassed,
+      canSelfHeal:
+        classification === 'managed-only' ||
+        classification === 'broken-backup' ||
+        classification === 'checksum-mismatch',
+      issues,
+    };
+  } catch (error) {
+    if (isPermissionError(error)) {
+      return {
+        appRoot: options.appRoot,
+        active: false,
+        managed: false,
+        classification: 'permission-denied',
+        verificationPassed: false,
+        canSelfHeal: false,
+        issues: ['Tyrian could not read the VS Code installation files due to permissions.'],
+      };
+    }
+
+    throw error;
+  }
+}
+
+export async function readAllIslandShellStatuses(options?: {
+  preferredAppRoots?: string[];
+}): Promise<IslandShellStatus[]> {
+  const appRoots = await listManagedAppRoots(options);
+  const statuses: IslandShellStatus[] = [];
+
+  for (const appRoot of appRoots) {
+    statuses.push(await readIslandShellStatus({ appRoot }));
+  }
+
+  return statuses;
 }
 
 export async function findInstalledAppRoots(): Promise<string[]> {
@@ -293,6 +446,95 @@ function getManagedRootsRegistryPath(): string {
   return path.join(os.homedir(), MANAGED_ROOTS_DIR_NAME, MANAGED_ROOTS_FILE_NAME);
 }
 
+async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+
+  if (!currentHtml.includes(TYRIAN_MARKER_START)) {
+    throw new Error(
+      'Tyrian Night verification failed: workbench.html is missing the Island UI marker after apply.'
+    );
+  }
+
+  if (!(await pathExists(paths.islandCssPath))) {
+    throw new Error('Tyrian Night verification failed: island CSS file is missing after apply.');
+  }
+
+  if (!(await pathExists(paths.manifestPath))) {
+    throw new Error('Tyrian Night verification failed: island manifest is missing after apply.');
+  }
+
+  if (setWorkbenchChecksum(currentProductJson, currentHtml) !== currentProductJson) {
+    throw new Error(
+      'Tyrian Night verification failed: product.json checksum does not match the patched workbench after apply.'
+    );
+  }
+}
+
+async function bestEffortRestoreIslandShell(options: {
+  appRoot: string;
+}): Promise<IslandShellResult> {
+  const paths = getPatchPaths(options.appRoot);
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+  const restoredHtml = stripTyrianBlock(currentHtml);
+  const restoredProductJson = setWorkbenchChecksum(currentProductJson, restoredHtml);
+
+  let changed = false;
+
+  changed = (await writeIfChanged(paths.workbenchHtmlPath, restoredHtml)) || changed;
+  changed = (await writeIfChanged(paths.productJsonPath, restoredProductJson)) || changed;
+  changed = (await deleteIfExists(paths.islandCssPath)) || changed;
+  changed = (await deleteIfExists(paths.manifestPath)) || changed;
+  changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
+  changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
+
+  if ((await fs.readFile(paths.workbenchHtmlPath, 'utf8')).includes(TYRIAN_MARKER_START)) {
+    throw new Error('Tyrian marker block still exists after best-effort restore.');
+  }
+
+  if (!doesWorkbenchChecksumMatch(await fs.readFile(paths.productJsonPath, 'utf8'), restoredHtml)) {
+    throw new Error('product.json checksum still does not match after best-effort restore.');
+  }
+
+  changed = (await removeManagedAppRoot(options.appRoot)) || changed;
+
+  return {
+    changed,
+    active: false,
+  };
+}
+
+async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+
+  if (currentHtml.includes(TYRIAN_MARKER_START)) {
+    throw new Error(
+      'Tyrian Night verification failed: workbench.html still contains the Island UI marker after restore.'
+    );
+  }
+
+  for (const filePath of [
+    paths.islandCssPath,
+    paths.manifestPath,
+    paths.backupHtmlPath,
+    paths.backupProductJsonPath,
+  ]) {
+    if (await pathExists(filePath)) {
+      throw new Error(
+        `Tyrian Night verification failed: '${path.basename(filePath)}' still exists after restore.`
+      );
+    }
+  }
+
+  if (setWorkbenchChecksum(currentProductJson, currentHtml) !== currentProductJson) {
+    throw new Error(
+      'Tyrian Night verification failed: product.json checksum does not match the restored workbench after restore.'
+    );
+  }
+}
+
 function stripTyrianBlock(html: string): string {
   return html.replace(TYRIAN_BLOCK_PATTERN, '').trimEnd().concat('\n');
 }
@@ -327,6 +569,14 @@ function setWorkbenchChecksum(productJsonContent: string, workbenchHtml: string)
 
   parsed.checksums[WORKBENCH_CHECKSUM_KEY] = sha256Base64(workbenchHtml);
   return JSON.stringify(parsed, null, '\t').concat('\n');
+}
+
+function doesWorkbenchChecksumMatch(productJsonContent: string, workbenchHtml: string): boolean {
+  try {
+    return setWorkbenchChecksum(productJsonContent, workbenchHtml) === productJsonContent;
+  } catch {
+    return false;
+  }
 }
 
 function serializeManifest(manifest: IslandManifest): string {
@@ -496,6 +746,10 @@ function isFileNotFoundError(error: unknown): boolean {
 
 function isDirectoryNotEmptyError(error: unknown): boolean {
   return isNodeError(error) && error.code === 'ENOTEMPTY';
+}
+
+function isPermissionError(error: unknown): boolean {
+  return isNodeError(error) && (error.code === 'EACCES' || error.code === 'EPERM');
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
