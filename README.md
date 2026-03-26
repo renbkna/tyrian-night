@@ -6,7 +6,7 @@ A deep, ultra-saturated dark theme built on color science. Maximum depth and sat
 
 ## Features
 
-- **WCAG AA compliant** — 12:1 main text contrast (AAA), 4.5–7:1 for all syntax tokens
+- **WCAG AA tuned across the family** — Night, Dusk, and Dawn keep AAA main text and AA syntax contrast
 - **Perceptually distinct colors** — every syntax category separated by CIEDE2000 ΔE > 12
 - **True dark background** — `#0C0C0C` canvas, optimized for OLED and dim environments
 - **Full semantic highlighting** — declared natively, no configuration needed

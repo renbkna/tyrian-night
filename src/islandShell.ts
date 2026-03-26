@@ -90,7 +90,8 @@ export async function applyIslandShell(options: {
 
   const baseHtml = stripTyrianBlock(currentHtml);
   const baseProductJson = setWorkbenchChecksum(currentProductJson, baseHtml);
-  const patchedHtml = injectIslandStylesheet(baseHtml);
+  const cssHash = sha256Base64(cssSource).substring(0, 12);
+  const patchedHtml = injectIslandStylesheet(baseHtml, cssHash);
   const patchedProductJson = setWorkbenchChecksum(baseProductJson, patchedHtml);
   const manifest = serializeManifest({
     version: 1,
@@ -539,7 +540,7 @@ function stripTyrianBlock(html: string): string {
   return html.replace(TYRIAN_BLOCK_PATTERN, '').trimEnd().concat('\n');
 }
 
-function injectIslandStylesheet(html: string): string {
+function injectIslandStylesheet(html: string, cacheBuster: string): string {
   if (!html.includes(WORKBENCH_CSS_LINK)) {
     throw new Error(
       'Unsupported VS Code workbench HTML layout. Could not locate the stylesheet anchor.'
@@ -548,7 +549,7 @@ function injectIslandStylesheet(html: string): string {
 
   const islandBlock =
     `${TYRIAN_MARKER_START}\n` +
-    '\t\t<link rel="stylesheet" href="./tyrian-night.island.css">\n' +
+    `\t\t<link rel="stylesheet" href="./tyrian-night.island.css?v=${cacheBuster}">\n` +
     `\t\t${TYRIAN_MARKER_END}\n\t\t`;
 
   return html.replace(WORKBENCH_CSS_LINK, `${islandBlock}${WORKBENCH_CSS_LINK}`);

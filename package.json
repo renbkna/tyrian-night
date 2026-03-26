@@ -26,6 +26,16 @@
         "label": "Tyrian Night",
         "uiTheme": "vs-dark",
         "path": "./themes/tyrian-night.json"
+      },
+      {
+        "label": "Tyrian Dusk",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-dusk.json"
+      },
+      {
+        "label": "Tyrian Dawn",
+        "uiTheme": "vs",
+        "path": "./themes/tyrian-dawn.json"
       }
     ],
     "commands": [

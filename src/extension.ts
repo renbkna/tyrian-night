@@ -3,7 +3,11 @@ import { spawn } from 'node:child_process';
 
 import * as vscode from 'vscode';
 
-const THEME_NAME = 'Tyrian Night';
+const TYRIAN_THEMES: Record<string, string> = {
+  'Tyrian Night': 'tyrian-night.css',
+  'Tyrian Dusk': 'tyrian-dusk.css',
+  'Tyrian Dawn': 'tyrian-dawn.css',
+};
 const ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
 const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
 const UNINSTALL_WARNING_ACKNOWLEDGED_KEY = 'tyrianNight.uninstallWarningAcknowledged';
@@ -12,6 +16,14 @@ const UNINSTALL_WARNING_MESSAGE =
 
 let extContext: vscode.ExtensionContext;
 let syncQueue = Promise.resolve();
+
+function isTyrianTheme(theme: string | undefined): theme is string {
+  return theme !== undefined && theme in TYRIAN_THEMES;
+}
+
+function getCssFileForTheme(theme: string): string {
+  return TYRIAN_THEMES[theme] ?? 'tyrian-night.css';
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -57,7 +69,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
   const islandUiEnabled = extContext.globalState.get<boolean>(ISLAND_UI_ENABLED_KEY, true);
   const activeTheme = getActiveTheme();
 
-  if (activeTheme !== THEME_NAME) {
+  if (!isTyrianTheme(activeTheme)) {
     if (options.allowThemePrompt) {
       const switchedTheme = await maybePromptToSwitchTheme(activeTheme);
 
@@ -95,7 +107,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
 async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promise<boolean> {
   const promptShown = extContext.globalState.get<boolean>(THEME_PROMPT_KEY, false);
 
-  if (promptShown || activeTheme === THEME_NAME) {
+  if (promptShown || isTyrianTheme(activeTheme)) {
     return false;
   }
 
@@ -113,15 +125,15 @@ async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promis
 
   await vscode.workspace
     .getConfiguration('workbench')
-    .update('colorTheme', THEME_NAME, vscode.ConfigurationTarget.Global);
+    .update('colorTheme', 'Tyrian Night', vscode.ConfigurationTarget.Global);
 
   return true;
 }
 
 async function applyIslandUiCommand(): Promise<void> {
-  if (getActiveTheme() !== THEME_NAME) {
+  if (!isTyrianTheme(getActiveTheme())) {
     const action = await vscode.window.showInformationMessage(
-      'Tyrian Night: Apply Island UI with the Tyrian Night theme?',
+      'Tyrian Night: Apply Island UI with a Tyrian theme?',
       'Switch Theme',
       'Cancel'
     );
@@ -132,7 +144,7 @@ async function applyIslandUiCommand(): Promise<void> {
 
     await vscode.workspace
       .getConfiguration('workbench')
-      .update('colorTheme', THEME_NAME, vscode.ConfigurationTarget.Global);
+      .update('colorTheme', 'Tyrian Night', vscode.ConfigurationTarget.Global);
   }
 
   if (!(await ensureUninstallWarningAcknowledged({ interactive: true }))) {
@@ -147,9 +159,9 @@ async function applyIslandUiCommand(): Promise<void> {
 }
 
 async function repairIslandUi(): Promise<void> {
-  if (getActiveTheme() !== THEME_NAME) {
+  if (!isTyrianTheme(getActiveTheme())) {
     vscode.window.showInformationMessage(
-      'Tyrian Night: Switch to the Tyrian Night theme before repairing Island UI.'
+      'Tyrian Night: Switch to a Tyrian theme before repairing Island UI.'
     );
     return;
   }
@@ -164,12 +176,14 @@ async function applyIslandUi(options: {
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
 }): Promise<void> {
+  const activeTheme = getActiveTheme() ?? 'Tyrian Night';
+  const cssFile = getCssFileForTheme(activeTheme);
   const result = (await runIslandCli([
     'apply',
     '--app-root',
     vscode.env.appRoot,
     '--css-source',
-    path.join(extContext.extensionPath, 'themes', 'tyrian-night.css'),
+    path.join(extContext.extensionPath, 'themes', cssFile),
     '--theme-version',
     String(extContext.extension.packageJSON.version ?? 'unknown'),
   ])) as { changed: boolean };
