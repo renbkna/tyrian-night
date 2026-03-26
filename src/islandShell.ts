@@ -61,6 +61,7 @@ export async function applyIslandShell(options: {
   const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
   const cssSource = await fs.readFile(options.cssSourcePath, 'utf8');
+  const existingManifest = parseManifest(await readTextFileIfExists(paths.manifestPath));
 
   const baseHtml = stripTyrianBlock(currentHtml);
   const baseProductJson = setWorkbenchChecksum(currentProductJson, baseHtml);
@@ -69,7 +70,7 @@ export async function applyIslandShell(options: {
   const manifest = serializeManifest({
     version: 1,
     themeVersion: options.themeVersion,
-    installedAt: new Date().toISOString(),
+    installedAt: existingManifest?.installedAt ?? new Date().toISOString(),
     checksum: sha256Base64(patchedHtml),
   });
 
@@ -246,6 +247,34 @@ function setWorkbenchChecksum(productJsonContent: string, workbenchHtml: string)
 
 function serializeManifest(manifest: IslandManifest): string {
   return JSON.stringify(manifest, null, 2).concat('\n');
+}
+
+function parseManifest(content: string | undefined): IslandManifest | undefined {
+  if (!content) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as Partial<IslandManifest>;
+
+    if (
+      parsed.version !== 1 ||
+      typeof parsed.themeVersion !== 'string' ||
+      typeof parsed.installedAt !== 'string' ||
+      typeof parsed.checksum !== 'string'
+    ) {
+      return undefined;
+    }
+
+    return {
+      version: 1,
+      themeVersion: parsed.themeVersion,
+      installedAt: parsed.installedAt,
+      checksum: parsed.checksum,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function sha256Base64(content: string): string {

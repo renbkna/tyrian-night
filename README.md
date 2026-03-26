@@ -35,6 +35,13 @@ The patch surface is intentionally narrow:
 - It updates only the matching `product.json` checksum entry
 - It keeps Tyrian-owned backups next to the patched files for reliable rollback
 
+Important:
+
+- Island UI works by patching VS Code's `workbench.html`
+- Because of that, VS Code may show `Your installation appears to be corrupt` while Island UI is active
+- That warning is expected for this unsupported customization path and does not mean Tyrian left broken files behind
+- Running `Tyrian Night: Restore Classic UI` or uninstalling Tyrian Night restores the stock shell and removes Tyrian's patch
+
 Commands:
 
 - `Tyrian Night: Enable Island UI`

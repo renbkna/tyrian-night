@@ -10,4 +10,4 @@ tsup.config.ts
 biome.json
 bun.lock
 preview_example.rs
-zed-tyrian-nights/**
+zed-tyrian-night/**
