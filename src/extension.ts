@@ -147,11 +147,10 @@ async function applyIslandUiCommand(): Promise<void> {
       .update('colorTheme', 'Tyrian Night', vscode.ConfigurationTarget.Global);
   }
 
-  if (!(await ensureUninstallWarningAcknowledged({ interactive: true }))) {
+  if (!(await enableIslandUiAfterWarning())) {
     return;
   }
 
-  await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, true);
   await applyIslandUi({
     notifyWhenUnchanged: true,
     reloadMessage: 'Tyrian Night: Island UI applied. Reload VS Code to apply it.',
@@ -163,6 +162,10 @@ async function repairIslandUi(): Promise<void> {
     vscode.window.showInformationMessage(
       'Tyrian Night: Switch to a Tyrian theme before repairing Island UI.'
     );
+    return;
+  }
+
+  if (!(await enableIslandUiAfterWarning())) {
     return;
   }
 
@@ -428,6 +431,15 @@ async function ensureUninstallWarningAcknowledged(options: {
   }
 
   await extContext.globalState.update(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
+  return true;
+}
+
+async function enableIslandUiAfterWarning(): Promise<boolean> {
+  if (!(await ensureUninstallWarningAcknowledged({ interactive: true }))) {
+    return false;
+  }
+
+  await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, true);
   return true;
 }
 

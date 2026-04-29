@@ -264,10 +264,7 @@
   outline: none !important;
 }
 
-.monaco-workbench.linux .part.editor > .content {
-  padding-top: 20px !important;
-}
-
+/* The island offset belongs on the editor part, not inside VS Code's tab content. */
 .part.editor {
   margin: var(--islands-panel-top) var(--islands-panel-gap) 0 var(--islands-panel-gap);
   border-radius: var(--islands-panel-radius) !important;
@@ -294,12 +291,14 @@
 }
 
 .tab {
-  margin: 0 !important;
   border-right: none !important;
   border-radius: var(--islands-item-radius) var(--islands-item-radius) 0 0 !important;
   font-family: "Bear Sans UI", sans-serif !important;
-  display: flex !important;
-  align-items: center !important;
+}
+
+.part.editor .tabs-container > .tab .tab-label,
+.part.editor .tabs-container > .tab .tab-actions {
+  align-self: center !important;
 }
 
 .tab .tab-actions .action-label {

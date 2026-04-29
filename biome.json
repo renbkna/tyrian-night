@@ -25,6 +25,6 @@
     }
   },
   "files": {
-    "includes": ["**", "!out/**", "!node_modules/**", "!*.vsix"]
+    "includes": ["**", "!.codex-logs/**", "!out/**", "!node_modules/**", "!*.vsix"]
   }
 }

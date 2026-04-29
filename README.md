@@ -82,6 +82,7 @@ When **Tyrian Night** is the active theme, the extension can install or repair I
 The patch surface is intentionally narrow: a single Tyrian stylesheet injected into `workbench.html`, one CSS asset copied into the workbench directory, and a matching `product.json` checksum update. Tyrian-owned backups sit next to patched files for reliable rollback, and a small user-level registry tracks managed app roots so `Restore Classic UI` can clean up completely.
 
 **Required uninstall steps:**
+
 1. Run `Tyrian Night: Restore Classic UI`.
 2. Reload VS Code.
 3. Confirm the custom UI is gone.
@@ -95,10 +96,6 @@ The patch surface is intentionally narrow: a single Tyrian stylesheet injected i
 > Because Island UI patches `workbench.html`, VS Code may show *"Your installation appears to be corrupt"* while it is active. This is expected and does not indicate broken files.
 
 > Based on [vscode-dark-islands](https://github.com/bwya77/vscode-dark-islands) by [bwya77](https://github.com/bwya77).
-
-## Known Issues
-
-After installing or updating Island UI, VS Code can occasionally restore open editor tabs with a temporary gap between the editor border and the tab row. Close all tabs and reload VS Code once to rebuild the layout.
 
 ## Contributing
 

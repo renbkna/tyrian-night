@@ -26,6 +26,9 @@ jobs:
       - name: Run oxlint
         run: bun run lint
 
+      - name: Run tests
+        run: bun run test
+
       - name: Check formatting with Biome
         run: bun run format:check
 

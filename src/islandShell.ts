@@ -49,6 +49,7 @@ export type IslandShellStatus = {
   appRoot: string;
   active: boolean;
   managed: boolean;
+  registered: boolean;
   classification:
     | 'clean'
     | 'patched'
@@ -77,10 +78,53 @@ type ManagedRootsRegistry = {
   appRoots: string[];
 };
 
+type IslandShellEnvironment = {
+  registryHome?: string;
+};
+
+type RootCandidate = {
+  appRoot: string;
+  registered: boolean;
+};
+
+type IslandRootState = {
+  paths: PatchPaths;
+  currentHtml: string;
+  currentProductJson: string;
+  backupHtml: string | undefined;
+  backupProductJson: string | undefined;
+  hasTyrianSidecars: boolean;
+  checksumMatches: boolean;
+  status: IslandShellStatus;
+};
+
+type RestorePlan =
+  | {
+      kind: 'noop';
+      removeRegistry: boolean;
+    }
+  | {
+      kind: 'remove-managed-state';
+      removeRegistry: boolean;
+    }
+  | {
+      kind: 'restore-from-backup';
+      html: string;
+      productJson: string;
+      removeRegistry: boolean;
+    }
+  | {
+      kind: 'strip-tyrian-block';
+      html: string;
+      productJson: string;
+      removeRegistry: boolean;
+    };
+
 export async function applyIslandShell(options: {
   appRoot: string;
   cssSourcePath: string;
   themeVersion: string;
+  registryHome?: string;
 }): Promise<IslandShellResult> {
   const paths = getPatchPaths(options.appRoot);
   const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
@@ -109,7 +153,7 @@ export async function applyIslandShell(options: {
   changed = (await writeIfChanged(paths.workbenchHtmlPath, patchedHtml)) || changed;
   changed = (await writeIfChanged(paths.productJsonPath, patchedProductJson)) || changed;
   changed = (await writeIfChanged(paths.manifestPath, manifest)) || changed;
-  changed = (await addManagedAppRoot(options.appRoot)) || changed;
+  changed = (await addManagedAppRoot(options.appRoot, options)) || changed;
   await verifyAppliedShell(paths);
 
   return {
@@ -118,29 +162,16 @@ export async function applyIslandShell(options: {
   };
 }
 
-export async function restoreIslandShell(options: { appRoot: string }): Promise<IslandShellResult> {
-  const paths = getPatchPaths(options.appRoot);
-  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-
-  const backupHtml = await readTextFileIfExists(paths.backupHtmlPath);
-  const backupProductJson = await readTextFileIfExists(paths.backupProductJsonPath);
-
-  const restoredHtml = backupHtml ?? stripTyrianBlock(currentHtml);
-  const restoredProductJson =
-    backupProductJson ?? setWorkbenchChecksum(currentProductJson, restoredHtml);
-
-  let changed = false;
-
-  changed = (await writeIfChanged(paths.workbenchHtmlPath, restoredHtml)) || changed;
-  changed = (await writeIfChanged(paths.productJsonPath, restoredProductJson)) || changed;
-
-  changed = (await deleteIfExists(paths.islandCssPath)) || changed;
-  changed = (await deleteIfExists(paths.manifestPath)) || changed;
-  changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
-  changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
-  await verifyRestoredShell(paths);
-  changed = (await removeManagedAppRoot(options.appRoot)) || changed;
+export async function restoreIslandShell(options: {
+  appRoot: string;
+  registered?: boolean;
+  registryHome?: string;
+}): Promise<IslandShellResult> {
+  const registered =
+    options.registered ?? (await isManagedAppRootRegistered(options.appRoot, options));
+  const state = await inspectIslandRoot(options.appRoot, registered);
+  const plan = buildRestorePlan(state);
+  const changed = await commitRestorePlan(state, plan, options);
 
   return {
     changed,
@@ -150,66 +181,33 @@ export async function restoreIslandShell(options: { appRoot: string }): Promise<
 
 export async function restoreAllIslandShells(options?: {
   preferredAppRoots?: string[];
+  registryHome?: string;
 }): Promise<IslandShellCleanupSummary> {
-  const appRoots = await listManagedAppRoots(options);
+  const appRoots = await listIslandShellRoots(options);
   let changed = false;
   const restoredAppRoots: string[] = [];
   const failedAppRoots: Array<{ appRoot: string; reason: string }> = [];
 
   for (const appRoot of appRoots) {
     try {
-      const result = await restoreIslandShell({ appRoot });
-
-      if (result.changed) {
-        changed = true;
-      }
-
-      restoredAppRoots.push(appRoot);
-    } catch (error) {
-      if (isFileNotFoundError(error)) {
-        changed = (await removeManagedAppRoot(appRoot)) || changed;
-        continue;
-      }
-
-      failedAppRoots.push({
-        appRoot,
-        reason: error instanceof Error ? error.message : String(error),
+      const result = await restoreIslandShell({
+        ...appRoot,
+        registryHome: options?.registryHome,
       });
-    }
-  }
-
-  return {
-    changed,
-    restoredAppRoots,
-    failedAppRoots,
-  };
-}
-
-export async function bestEffortRestoreAllIslandShells(options?: {
-  preferredAppRoots?: string[];
-}): Promise<IslandShellCleanupSummary> {
-  const appRoots = await listManagedAppRoots(options);
-  let changed = false;
-  const restoredAppRoots: string[] = [];
-  const failedAppRoots: Array<{ appRoot: string; reason: string }> = [];
-
-  for (const appRoot of appRoots) {
-    try {
-      const result = await bestEffortRestoreIslandShell({ appRoot });
 
       if (result.changed) {
         changed = true;
       }
 
-      restoredAppRoots.push(appRoot);
+      restoredAppRoots.push(appRoot.appRoot);
     } catch (error) {
       if (isFileNotFoundError(error)) {
-        changed = (await removeManagedAppRoot(appRoot)) || changed;
+        changed = (await removeManagedAppRoot(appRoot.appRoot, options)) || changed;
         continue;
       }
 
       failedAppRoots.push({
-        appRoot,
+        appRoot: appRoot.appRoot,
         reason: error instanceof Error ? error.message : String(error),
       });
     }
@@ -224,88 +222,21 @@ export async function bestEffortRestoreAllIslandShells(options?: {
 
 export async function readIslandShellStatus(options: {
   appRoot: string;
+  registered?: boolean;
+  registryHome?: string;
 }): Promise<IslandShellStatus> {
-  const paths = getPatchPaths(options.appRoot);
+  const registered =
+    options.registered ?? (await isManagedAppRootRegistered(options.appRoot, options));
 
   try {
-    const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-    const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-    const active = currentHtml.includes(TYRIAN_MARKER_START);
-    const cssExists = await pathExists(paths.islandCssPath);
-    const manifestContent = await readTextFileIfExists(paths.manifestPath);
-    const manifestExists = manifestContent !== undefined;
-    const manifestValid = manifestExists && parseManifest(manifestContent) !== undefined;
-    const backupHtmlExists = await pathExists(paths.backupHtmlPath);
-    const backupProductExists = await pathExists(paths.backupProductJsonPath);
-    const managed = cssExists || manifestExists || backupHtmlExists || backupProductExists;
-    const issues: string[] = [];
-    const checksumMatches = doesWorkbenchChecksumMatch(currentProductJson, currentHtml);
-    const backupMismatch = backupHtmlExists !== backupProductExists;
-    const brokenBackup =
-      backupMismatch ||
-      (manifestExists && !manifestValid) ||
-      (active && (!cssExists || !manifestExists));
-
-    if (active) {
-      issues.push('Tyrian workbench marker is present.');
-    }
-
-    if (managed) {
-      issues.push('Tyrian-managed sidecar files are present.');
-    }
-
-    if (!checksumMatches) {
-      issues.push('product.json checksum does not match the current workbench HTML.');
-    }
-
-    if (backupMismatch) {
-      issues.push('Tyrian backup files are incomplete.');
-    }
-
-    if (manifestExists && !manifestValid) {
-      issues.push('Tyrian manifest exists but is invalid.');
-    }
-
-    if (active && !cssExists) {
-      issues.push('Tyrian marker is present but the injected CSS file is missing.');
-    }
-
-    if (active && !manifestExists) {
-      issues.push('Tyrian marker is present but the manifest file is missing.');
-    }
-
-    let classification: IslandShellStatus['classification'] = 'clean';
-
-    if (brokenBackup) {
-      classification = 'broken-backup';
-    } else if (!checksumMatches) {
-      classification = 'checksum-mismatch';
-    } else if (active) {
-      classification = 'patched';
-    } else if (managed) {
-      classification = 'managed-only';
-    }
-
-    const verificationPassed = classification === 'clean' || classification === 'patched';
-
-    return {
-      appRoot: options.appRoot,
-      active,
-      managed,
-      classification,
-      verificationPassed,
-      canSelfHeal:
-        classification === 'managed-only' ||
-        classification === 'broken-backup' ||
-        classification === 'checksum-mismatch',
-      issues,
-    };
+    return (await inspectIslandRoot(options.appRoot, registered)).status;
   } catch (error) {
     if (isPermissionError(error)) {
       return {
         appRoot: options.appRoot,
         active: false,
-        managed: false,
+        managed: registered,
+        registered,
         classification: 'permission-denied',
         verificationPassed: false,
         canSelfHeal: false,
@@ -319,132 +250,229 @@ export async function readIslandShellStatus(options: {
 
 export async function readAllIslandShellStatuses(options?: {
   preferredAppRoots?: string[];
+  registryHome?: string;
 }): Promise<IslandShellStatus[]> {
-  const appRoots = await listManagedAppRoots(options);
+  const appRoots = await listIslandShellRoots(options);
   const statuses: IslandShellStatus[] = [];
 
   for (const appRoot of appRoots) {
-    statuses.push(await readIslandShellStatus({ appRoot }));
+    statuses.push(
+      await readIslandShellStatus({
+        appRoot: appRoot.appRoot,
+        registered: appRoot.registered,
+        registryHome: options?.registryHome,
+      })
+    );
   }
 
   return statuses;
 }
 
-export async function findInstalledAppRoots(): Promise<string[]> {
-  const candidates = new Set<string>();
-  const executableDir = path.dirname(process.execPath);
+async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<IslandRootState> {
+  const paths = getPatchPaths(appRoot);
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+  const backupHtml = await readTextFileIfExists(paths.backupHtmlPath);
+  const backupProductJson = await readTextFileIfExists(paths.backupProductJsonPath);
+  const active = currentHtml.includes(TYRIAN_MARKER_START);
+  const cssExists = await pathExists(paths.islandCssPath);
+  const manifestContent = await readTextFileIfExists(paths.manifestPath);
+  const manifestExists = manifestContent !== undefined;
+  const manifestValid = manifestExists && parseManifest(manifestContent) !== undefined;
+  const backupHtmlExists = backupHtml !== undefined;
+  const backupProductExists = backupProductJson !== undefined;
+  const hasTyrianSidecars = cssExists || manifestExists || backupHtmlExists || backupProductExists;
+  const managed = registered || hasTyrianSidecars;
+  const issues: string[] = [];
+  const checksumMatches = doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml);
+  const backupMismatch = backupHtmlExists !== backupProductExists;
+  const backupPairInvalid =
+    backupHtml !== undefined &&
+    backupProductJson !== undefined &&
+    !doesWorkbenchChecksumValueMatch(backupProductJson, backupHtml);
+  const brokenBackup =
+    backupMismatch ||
+    backupPairInvalid ||
+    (manifestExists && !manifestValid) ||
+    (active && (!cssExists || !manifestExists));
+  const hasTyrianEvidence = active || managed;
 
-  if (process.env.VSCODE_APP_ROOT) {
-    candidates.add(process.env.VSCODE_APP_ROOT);
+  if (active) {
+    issues.push('Tyrian workbench marker is present.');
   }
 
-  if (process.env.APPIMAGE) {
-    candidates.add(path.join(path.dirname(process.env.APPIMAGE), 'resources', 'app'));
+  if (hasTyrianSidecars) {
+    issues.push('Tyrian-managed sidecar files are present.');
   }
 
-  candidates.add(path.join(executableDir, 'resources', 'app'));
-  candidates.add(path.join(executableDir, '..', 'resources', 'app'));
-  candidates.add(path.join(executableDir, '..', '..', 'resources', 'app'));
-
-  switch (process.platform) {
-    case 'win32':
-      if (process.env.LOCALAPPDATA) {
-        candidates.add(
-          path.join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'resources', 'app')
-        );
-      }
-      if (process.env['ProgramFiles']) {
-        candidates.add(
-          path.join(process.env['ProgramFiles'], 'Microsoft VS Code', 'resources', 'app')
-        );
-      }
-      if (process.env['ProgramFiles(x86)']) {
-        candidates.add(
-          path.join(process.env['ProgramFiles(x86)'], 'Microsoft VS Code', 'resources', 'app')
-        );
-      }
-      break;
-    case 'darwin':
-      candidates.add('/Applications/Visual Studio Code.app/Contents/Resources/app');
-      break;
-    default:
-      candidates.add('/opt/visual-studio-code/resources/app');
-      candidates.add('/usr/share/code/resources/app');
-      break;
+  if (registered) {
+    issues.push('Tyrian registry contains this app root.');
   }
 
-  const existingRoots: string[] = [];
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-
-    const workbenchHtmlPath = path.join(candidate, WORKBENCH_HTML_RELATIVE_PATH);
-    const productJsonPath = path.join(candidate, PRODUCT_JSON_RELATIVE_PATH);
-
-    if ((await pathExists(workbenchHtmlPath)) && (await pathExists(productJsonPath))) {
-      existingRoots.push(candidate);
-    }
+  if (!checksumMatches) {
+    issues.push('product.json checksum does not match the current workbench HTML.');
   }
 
-  return existingRoots;
-}
-
-export async function listManagedAppRoots(options?: {
-  preferredAppRoots?: string[];
-}): Promise<string[]> {
-  const candidates = new Set<string>();
-
-  for (const appRoot of options?.preferredAppRoots ?? []) {
-    candidates.add(appRoot);
+  if (backupMismatch) {
+    issues.push('Tyrian backup files are incomplete.');
   }
 
-  for (const appRoot of await findInstalledAppRoots()) {
-    candidates.add(appRoot);
+  if (backupPairInvalid) {
+    issues.push('Tyrian backup checksum does not match the backup workbench HTML.');
   }
 
-  for (const appRoot of await readManagedAppRootsRegistry()) {
-    candidates.add(appRoot);
+  if (manifestExists && !manifestValid) {
+    issues.push('Tyrian manifest exists but is invalid.');
   }
 
-  const existingRoots: string[] = [];
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-
-    const workbenchHtmlPath = path.join(candidate, WORKBENCH_HTML_RELATIVE_PATH);
-    const productJsonPath = path.join(candidate, PRODUCT_JSON_RELATIVE_PATH);
-
-    if ((await pathExists(workbenchHtmlPath)) && (await pathExists(productJsonPath))) {
-      existingRoots.push(candidate);
-      continue;
-    }
-
-    await removeManagedAppRoot(candidate);
+  if (active && !cssExists) {
+    issues.push('Tyrian marker is present but the injected CSS file is missing.');
   }
 
-  return existingRoots;
-}
+  if (active && !manifestExists) {
+    issues.push('Tyrian marker is present but the manifest file is missing.');
+  }
 
-function getPatchPaths(appRoot: string): PatchPaths {
-  const workbenchDirPath = path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH);
+  let classification: IslandShellStatus['classification'] = 'clean';
+
+  if (brokenBackup) {
+    classification = 'broken-backup';
+  } else if (!checksumMatches) {
+    classification = 'checksum-mismatch';
+  } else if (active) {
+    classification = 'patched';
+  } else if (managed) {
+    classification = 'managed-only';
+  }
+
+  const verificationPassed = classification === 'clean' || classification === 'patched';
 
   return {
-    workbenchDirPath,
-    workbenchHtmlPath: path.join(appRoot, WORKBENCH_HTML_RELATIVE_PATH),
-    productJsonPath: path.join(appRoot, PRODUCT_JSON_RELATIVE_PATH),
-    islandCssPath: path.join(workbenchDirPath, ISLAND_CSS_FILE_NAME),
-    manifestPath: path.join(workbenchDirPath, ISLAND_MANIFEST_FILE_NAME),
-    backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
-    backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
+    paths,
+    currentHtml,
+    currentProductJson,
+    backupHtml,
+    backupProductJson,
+    hasTyrianSidecars,
+    checksumMatches,
+    status: {
+      appRoot,
+      active,
+      managed,
+      registered,
+      classification,
+      verificationPassed,
+      canSelfHeal:
+        classification === 'managed-only' ||
+        (hasTyrianEvidence &&
+          (classification === 'broken-backup' || classification === 'checksum-mismatch')),
+      issues,
+    },
   };
 }
 
-function getManagedRootsRegistryPath(): string {
-  return path.join(os.homedir(), MANAGED_ROOTS_DIR_NAME, MANAGED_ROOTS_FILE_NAME);
+async function listIslandShellRoots(options?: {
+  preferredAppRoots?: string[];
+  registryHome?: string;
+}): Promise<RootCandidate[]> {
+  const candidates = new Map<string, RootCandidate>();
+
+  for (const appRoot of options?.preferredAppRoots ?? []) {
+    candidates.set(appRoot, { appRoot, registered: false });
+  }
+
+  for (const appRoot of await readManagedAppRootsRegistry(options)) {
+    candidates.set(appRoot, { appRoot, registered: true });
+  }
+
+  const existingRoots: RootCandidate[] = [];
+
+  for (const candidate of candidates.values()) {
+    if (!candidate.appRoot) {
+      continue;
+    }
+
+    if (await isAppRootReadable(candidate.appRoot)) {
+      existingRoots.push(candidate);
+      continue;
+    }
+
+    if (candidate.registered) {
+      await removeManagedAppRoot(candidate.appRoot, options);
+    }
+  }
+
+  return existingRoots;
+}
+
+function buildRestorePlan(state: IslandRootState): RestorePlan {
+  const removeRegistry = state.status.registered;
+  const hasTyrianEvidence =
+    state.status.active || state.hasTyrianSidecars || state.status.registered;
+
+  if (!hasTyrianEvidence) {
+    return {
+      kind: 'noop',
+      removeRegistry: false,
+    };
+  }
+
+  if (state.status.active && hasValidBackupPair(state)) {
+    return {
+      kind: 'restore-from-backup',
+      html: state.backupHtml,
+      productJson: state.backupProductJson,
+      removeRegistry,
+    };
+  }
+
+  // Restore must not leave a Tyrian-evidenced root in checksum-mismatch state,
+  // even when a higher-priority status classification reports broken sidecars.
+  if (state.status.active || !state.checksumMatches) {
+    const html = stripTyrianBlock(state.currentHtml);
+
+    return {
+      kind: 'strip-tyrian-block',
+      html,
+      productJson: setWorkbenchChecksum(state.currentProductJson, html),
+      removeRegistry,
+    };
+  }
+
+  return {
+    kind: 'remove-managed-state',
+    removeRegistry,
+  };
+}
+
+async function commitRestorePlan(
+  state: IslandRootState,
+  plan: RestorePlan,
+  environment: IslandShellEnvironment
+): Promise<boolean> {
+  let changed = false;
+
+  switch (plan.kind) {
+    case 'noop':
+      return false;
+    case 'remove-managed-state':
+      changed = (await deleteSidecars(state.paths)) || changed;
+      await verifyManagedStateRemoved(state.paths);
+      break;
+    case 'restore-from-backup':
+    case 'strip-tyrian-block':
+      changed = (await writeIfChanged(state.paths.workbenchHtmlPath, plan.html)) || changed;
+      changed = (await writeIfChanged(state.paths.productJsonPath, plan.productJson)) || changed;
+      changed = (await deleteSidecars(state.paths)) || changed;
+      await verifyRestoredShell(state.paths);
+      break;
+  }
+
+  if (plan.removeRegistry) {
+    changed = (await removeManagedAppRoot(state.status.appRoot, environment)) || changed;
+  }
+
+  return changed;
 }
 
 async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
@@ -465,45 +493,11 @@ async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
     throw new Error('Tyrian Night verification failed: island manifest is missing after apply.');
   }
 
-  if (setWorkbenchChecksum(currentProductJson, currentHtml) !== currentProductJson) {
+  if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
     throw new Error(
       'Tyrian Night verification failed: product.json checksum does not match the patched workbench after apply.'
     );
   }
-}
-
-async function bestEffortRestoreIslandShell(options: {
-  appRoot: string;
-}): Promise<IslandShellResult> {
-  const paths = getPatchPaths(options.appRoot);
-  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-  const restoredHtml = stripTyrianBlock(currentHtml);
-  const restoredProductJson = setWorkbenchChecksum(currentProductJson, restoredHtml);
-
-  let changed = false;
-
-  changed = (await writeIfChanged(paths.workbenchHtmlPath, restoredHtml)) || changed;
-  changed = (await writeIfChanged(paths.productJsonPath, restoredProductJson)) || changed;
-  changed = (await deleteIfExists(paths.islandCssPath)) || changed;
-  changed = (await deleteIfExists(paths.manifestPath)) || changed;
-  changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
-  changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
-
-  if ((await fs.readFile(paths.workbenchHtmlPath, 'utf8')).includes(TYRIAN_MARKER_START)) {
-    throw new Error('Tyrian marker block still exists after best-effort restore.');
-  }
-
-  if (!doesWorkbenchChecksumMatch(await fs.readFile(paths.productJsonPath, 'utf8'), restoredHtml)) {
-    throw new Error('product.json checksum still does not match after best-effort restore.');
-  }
-
-  changed = (await removeManagedAppRoot(options.appRoot)) || changed;
-
-  return {
-    changed,
-    active: false,
-  };
 }
 
 async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
@@ -516,6 +510,16 @@ async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
     );
   }
 
+  await verifyManagedStateRemoved(paths);
+
+  if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
+    throw new Error(
+      'Tyrian Night verification failed: product.json checksum does not match the restored workbench after restore.'
+    );
+  }
+}
+
+async function verifyManagedStateRemoved(paths: PatchPaths): Promise<void> {
   for (const filePath of [
     paths.islandCssPath,
     paths.manifestPath,
@@ -528,12 +532,50 @@ async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
       );
     }
   }
+}
 
-  if (setWorkbenchChecksum(currentProductJson, currentHtml) !== currentProductJson) {
-    throw new Error(
-      'Tyrian Night verification failed: product.json checksum does not match the restored workbench after restore.'
-    );
-  }
+async function deleteSidecars(paths: PatchPaths): Promise<boolean> {
+  let changed = false;
+
+  changed = (await deleteIfExists(paths.islandCssPath)) || changed;
+  changed = (await deleteIfExists(paths.manifestPath)) || changed;
+  changed = (await deleteIfExists(paths.backupHtmlPath)) || changed;
+  changed = (await deleteIfExists(paths.backupProductJsonPath)) || changed;
+
+  return changed;
+}
+
+function hasValidBackupPair(state: IslandRootState): state is IslandRootState & {
+  backupHtml: string;
+  backupProductJson: string;
+} {
+  return (
+    state.backupHtml !== undefined &&
+    state.backupProductJson !== undefined &&
+    doesWorkbenchChecksumValueMatch(state.backupProductJson, state.backupHtml)
+  );
+}
+
+function getPatchPaths(appRoot: string): PatchPaths {
+  const workbenchDirPath = path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH);
+
+  return {
+    workbenchDirPath,
+    workbenchHtmlPath: path.join(appRoot, WORKBENCH_HTML_RELATIVE_PATH),
+    productJsonPath: path.join(appRoot, PRODUCT_JSON_RELATIVE_PATH),
+    islandCssPath: path.join(workbenchDirPath, ISLAND_CSS_FILE_NAME),
+    manifestPath: path.join(workbenchDirPath, ISLAND_MANIFEST_FILE_NAME),
+    backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
+    backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
+  };
+}
+
+function getManagedRootsRegistryPath(environment?: IslandShellEnvironment): string {
+  return path.join(
+    environment?.registryHome ?? os.homedir(),
+    MANAGED_ROOTS_DIR_NAME,
+    MANAGED_ROOTS_FILE_NAME
+  );
 }
 
 function stripTyrianBlock(html: string): string {
@@ -556,6 +598,31 @@ function injectIslandStylesheet(html: string, cacheBuster: string): string {
 }
 
 function setWorkbenchChecksum(productJsonContent: string, workbenchHtml: string): string {
+  const parsed = parseProductJson(productJsonContent);
+
+  parsed.checksums[WORKBENCH_CHECKSUM_KEY] = sha256Base64(workbenchHtml);
+  return JSON.stringify(parsed, null, '\t').concat('\n');
+}
+
+function doesWorkbenchChecksumValueMatch(
+  productJsonContent: string,
+  workbenchHtml: string
+): boolean {
+  try {
+    return readWorkbenchChecksum(productJsonContent) === sha256Base64(workbenchHtml);
+  } catch {
+    return false;
+  }
+}
+
+function readWorkbenchChecksum(productJsonContent: string): string {
+  const parsed = parseProductJson(productJsonContent);
+  return parsed.checksums[WORKBENCH_CHECKSUM_KEY];
+}
+
+function parseProductJson(productJsonContent: string): ProductJson & {
+  checksums: Record<string, string>;
+} {
   const parsed = JSON.parse(productJsonContent) as ProductJson;
 
   if (!parsed.checksums) {
@@ -568,16 +635,7 @@ function setWorkbenchChecksum(productJsonContent: string, workbenchHtml: string)
     );
   }
 
-  parsed.checksums[WORKBENCH_CHECKSUM_KEY] = sha256Base64(workbenchHtml);
-  return JSON.stringify(parsed, null, '\t').concat('\n');
-}
-
-function doesWorkbenchChecksumMatch(productJsonContent: string, workbenchHtml: string): boolean {
-  try {
-    return setWorkbenchChecksum(productJsonContent, workbenchHtml) === productJsonContent;
-  } catch {
-    return false;
-  }
+  return parsed as ProductJson & { checksums: Record<string, string> };
 }
 
 function serializeManifest(manifest: IslandManifest): string {
@@ -616,8 +674,11 @@ function sha256Base64(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
 }
 
-async function addManagedAppRoot(appRoot: string): Promise<boolean> {
-  const appRoots = await readManagedAppRootsRegistry();
+async function addManagedAppRoot(
+  appRoot: string,
+  environment?: IslandShellEnvironment
+): Promise<boolean> {
+  const appRoots = await readManagedAppRootsRegistry(environment);
 
   if (appRoots.includes(appRoot)) {
     return false;
@@ -625,24 +686,36 @@ async function addManagedAppRoot(appRoot: string): Promise<boolean> {
 
   appRoots.push(appRoot);
   appRoots.sort();
-  await writeManagedAppRootsRegistry(appRoots);
+  await writeManagedAppRootsRegistry(appRoots, environment);
   return true;
 }
 
-async function removeManagedAppRoot(appRoot: string): Promise<boolean> {
-  const appRoots = await readManagedAppRootsRegistry();
+async function removeManagedAppRoot(
+  appRoot: string,
+  environment?: IslandShellEnvironment
+): Promise<boolean> {
+  const appRoots = await readManagedAppRootsRegistry(environment);
   const nextAppRoots = appRoots.filter((entry) => entry !== appRoot);
 
   if (nextAppRoots.length === appRoots.length) {
     return false;
   }
 
-  await writeManagedAppRootsRegistry(nextAppRoots);
+  await writeManagedAppRootsRegistry(nextAppRoots, environment);
   return true;
 }
 
-async function readManagedAppRootsRegistry(): Promise<string[]> {
-  const registryPath = getManagedRootsRegistryPath();
+async function isManagedAppRootRegistered(
+  appRoot: string,
+  environment?: IslandShellEnvironment
+): Promise<boolean> {
+  return (await readManagedAppRootsRegistry(environment)).includes(appRoot);
+}
+
+async function readManagedAppRootsRegistry(
+  environment?: IslandShellEnvironment
+): Promise<string[]> {
+  const registryPath = getManagedRootsRegistryPath(environment);
   const content = await readTextFileIfExists(registryPath);
 
   if (!content) {
@@ -662,8 +735,11 @@ async function readManagedAppRootsRegistry(): Promise<string[]> {
   }
 }
 
-async function writeManagedAppRootsRegistry(appRoots: string[]): Promise<void> {
-  const registryPath = getManagedRootsRegistryPath();
+async function writeManagedAppRootsRegistry(
+  appRoots: string[],
+  environment?: IslandShellEnvironment
+): Promise<void> {
+  const registryPath = getManagedRootsRegistryPath(environment);
 
   if (appRoots.length === 0) {
     await deleteIfExists(registryPath);
@@ -730,6 +806,11 @@ async function readTextFileIfExists(filePath: string): Promise<string | undefine
 
     throw error;
   }
+}
+
+async function isAppRootReadable(appRoot: string): Promise<boolean> {
+  const paths = getPatchPaths(appRoot);
+  return (await pathExists(paths.workbenchHtmlPath)) && (await pathExists(paths.productJsonPath));
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

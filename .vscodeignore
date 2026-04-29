@@ -1,10 +1,14 @@
 .gitignore
 .claude/**
+.codex
+.codex/**
 .codex-logs/**
 .github/**
+*.vsix
 node_modules/**
 out/**/*.map
 src/**
+tests/**
 tsconfig.json
 tsup.config.ts
 biome.json

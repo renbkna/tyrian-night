@@ -2,15 +2,18 @@
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
   "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
   "engines": {
-    "vscode": "^1.110.0"
+    "vscode": "^1.116.0"
   },
   "categories": [
     "Themes"
+  ],
+  "extensionKind": [
+    "ui"
   ],
   "repository": {
     "type": "git",
@@ -62,23 +65,25 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "bun run check && bun run lint && bun run format:check && bun run build",
+    "vscode:prepublish": "bun run check && bun run lint && bun run test && bun run format:check && bun run build",
     "build": "tsup",
     "watch": "tsup --watch",
     "check": "tsc --noEmit",
-    "lint": "oxlint src/",
-    "lint:fix": "oxlint src/ --fix",
+    "test": "bun test",
+    "lint": "oxlint src/ tests/",
+    "lint:fix": "oxlint src/ tests/ --fix",
     "format": "biome format . --write",
     "format:check": "biome format .",
-    "package": "ln -sf $(which bun) /tmp/npm && PATH=\"/tmp:$PATH\" bunx @vscode/vsce package --no-dependencies; rm -f /tmp/npm"
+    "package": "sh -c 'ln -sf \"$(command -v bun)\" /tmp/npm && trap \"rm -f /tmp/npm\" EXIT && PATH=\"/tmp:$PATH\" vsce package --no-dependencies'"
   },
   "simple-git-hooks": {
-    "pre-commit": "bun run check && bun run lint && bun run format:check"
+    "pre-commit": "bun run check && bun run lint && bun run test && bun run format:check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.9",
     "@types/node": "^25.5.0",
-    "@types/vscode": "^1.110.0",
+    "@types/vscode": "^1.116.0",
+    "@vscode/vsce": "^3.9.1",
     "oxlint": "^1.57.0",
     "simple-git-hooks": "^2.13.1",
     "tsup": "^8.5.1",
