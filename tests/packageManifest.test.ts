@@ -38,6 +38,14 @@ test('manifest declares the VS Code host and contribution contracts this extensi
   }
 });
 
+test('VS Code package excludes the standalone Zed extension files', () => {
+  const ignoredFiles = fs.readFileSync('.vscodeignore', 'utf8').split(/\r?\n/);
+
+  expect(ignoredFiles).toContain('scripts/**');
+  expect(ignoredFiles).toContain('zed/**');
+  expect(ignoredFiles).not.toContain('zed-tyrian-night/**');
+});
+
 function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
 }

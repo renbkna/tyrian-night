@@ -9,9 +9,10 @@ node_modules/**
 out/**/*.map
 src/**
 tests/**
+scripts/**
 tsconfig.json
 tsup.config.ts
 biome.json
 bun.lock
 preview_example.rs
-zed-tyrian-night/**
+zed/**
