@@ -11,8 +11,8 @@
   --islands-item-radius: 6px;
   --islands-panel-gap: 6px;
   --islands-panel-top: 6px;
-  --islands-bg-canvas: #f5f2f8;
-  --islands-bg-surface: #eae6f0;
+  --islands-bg-canvas: #f8f1f7;
+  --islands-bg-surface: #eee5f0;
 }
 
 /* ===== Animatable Custom Properties ===== */
@@ -63,10 +63,10 @@
 @keyframes islands-breathe {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px rgba(112, 80, 160, 0));
+    filter: drop-shadow(0 0 2px rgba(118, 80, 168, 0));
   }
   50% {
-    filter: drop-shadow(0 0 8px rgba(112, 80, 160, 0.25));
+    filter: drop-shadow(0 0 8px rgba(118, 80, 168, 0.25));
   }
 }
 
@@ -129,9 +129,9 @@
     from var(--border-angle),
     transparent 0%,
     transparent 20%,
-    rgba(112, 80, 160, 0.25) 27%,
-    rgba(140, 116, 172, 0.15) 33%,
-    rgba(112, 80, 160, 0.08) 38%,
+    rgba(118, 80, 168, 0.25) 27%,
+    rgba(158, 128, 178, 0.15) 33%,
+    rgba(118, 80, 168, 0.08) 38%,
     transparent 45%,
     transparent 100%
   ) !important;
@@ -227,8 +227,8 @@
 .part.sidebar .monaco-list-row.focused {
   background: linear-gradient(
     135deg,
-    rgba(204, 196, 220, 0.5),
-    rgba(224, 220, 232, 0.4)
+    rgba(210, 198, 216, 0.5),
+    rgba(232, 223, 234, 0.4)
   ) !important;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
   outline: none !important;
@@ -237,8 +237,8 @@
 .part.sidebar .monaco-list-row.focused.selected {
   background: linear-gradient(
     135deg,
-    rgba(204, 196, 220, 0.6),
-    rgba(224, 220, 232, 0.5)
+    rgba(210, 198, 216, 0.6),
+    rgba(232, 223, 234, 0.5)
   ) !important;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.07) !important;
   outline: none !important;
@@ -247,8 +247,8 @@
 .part.sidebar .monaco-list:focus .monaco-list-row.focused {
   background: linear-gradient(
     135deg,
-    rgba(196, 184, 216, 0.6),
-    rgba(212, 204, 228, 0.5)
+    rgba(203, 187, 212, 0.6),
+    rgba(222, 208, 228, 0.5)
   ) !important;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
   outline: none !important;
@@ -257,8 +257,8 @@
 .part.sidebar .monaco-list-row:hover {
   background: linear-gradient(
     135deg,
-    rgba(204, 196, 220, 0.3),
-    rgba(224, 220, 232, 0.2)
+    rgba(210, 198, 216, 0.3),
+    rgba(232, 223, 234, 0.2)
   ) !important;
   border-radius: var(--islands-item-radius) !important;
   outline: none !important;
@@ -279,13 +279,13 @@
 
 .editor-actions {
   padding-right: 20px !important;
-  background-image: linear-gradient(to top, #ccc4dc 1px, transparent 1px) !important;
+  background-image: linear-gradient(to top, #d2c6d8 1px, transparent 1px) !important;
   background-repeat: no-repeat !important;
   background-position: bottom !important;
 }
 
 .tabs-container {
-  background-image: linear-gradient(to top, #ccc4dc 1px, transparent 1px) !important;
+  background-image: linear-gradient(to top, #d2c6d8 1px, transparent 1px) !important;
   background-repeat: no-repeat !important;
   background-position: bottom !important;
 }
@@ -307,21 +307,21 @@
 
 .tab.active {
   box-shadow:
-    inset -1px 0 0 0 #ccc4dc,
-    inset 1px 0 0 0 #ccc4dc !important;
+    inset -1px 0 0 0 #d2c6d8,
+    inset 1px 0 0 0 #d2c6d8 !important;
   border-right: none !important;
 }
 
 .tab:not(.active) {
-  box-shadow: inset 0 -1px 0 0 #ccc4dc !important;
+  box-shadow: inset 0 -1px 0 0 #d2c6d8 !important;
 }
 
 .tab.active:first-child {
-  box-shadow: inset -1px 0 0 0 #ccc4dc !important;
+  box-shadow: inset -1px 0 0 0 #d2c6d8 !important;
 }
 
 .tab:hover .label-name {
-  text-shadow: 0 0 5px rgba(112, 80, 160, 0.12) !important;
+  text-shadow: 0 0 5px rgba(118, 80, 168, 0.12) !important;
   transition: text-shadow 0.3s ease !important;
 }
 
@@ -501,7 +501,7 @@
 }
 
 .part.activitybar .action-item:hover .action-label {
-  filter: drop-shadow(0 0 5px rgba(112, 80, 160, 0.2)) !important;
+  filter: drop-shadow(0 0 5px rgba(118, 80, 168, 0.2)) !important;
 }
 
 .part.activitybar .action-item .action-label .codicon {
@@ -521,7 +521,7 @@
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.8),
-    rgba(228, 224, 236, 0.7)
+    rgba(232, 222, 234, 0.7)
   ) !important;
   border-radius: 50% !important;
   width: 30px !important;
@@ -577,11 +577,11 @@
 }
 
 .part.statusbar:hover .statusbar-item-label {
-  color: #484060 !important;
+  color: #6e6178 !important;
 }
 
 .part.statusbar:hover .codicon {
-  color: #484060 !important;
+  color: #6e6178 !important;
 }
 
 .part.statusbar .items-container {
@@ -736,8 +736,8 @@
 .quick-input-widget .monaco-list-row.focused {
   background: linear-gradient(
     135deg,
-    rgba(204, 196, 220, 0.6),
-    rgba(224, 220, 232, 0.5)
+    rgba(210, 198, 216, 0.6),
+    rgba(232, 223, 234, 0.5)
   ) !important;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06) !important;
 }

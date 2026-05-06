@@ -11,8 +11,8 @@
   --islands-item-radius: 6px;
   --islands-panel-gap: 6px;
   --islands-panel-top: 6px;
-  --islands-bg-canvas: #1f1d28;
-  --islands-bg-surface: #262434;
+  --islands-bg-canvas: #1d1725;
+  --islands-bg-surface: #292033;
 }
 
 /* ===== Animatable Custom Properties ===== */
@@ -63,10 +63,10 @@
 @keyframes islands-breathe {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px rgba(139, 106, 189, 0));
+    filter: drop-shadow(0 0 2px rgba(160, 111, 208, 0));
   }
   50% {
-    filter: drop-shadow(0 0 8px rgba(139, 106, 189, 0.35));
+    filter: drop-shadow(0 0 8px rgba(160, 111, 208, 0.35));
   }
 }
 
@@ -129,9 +129,9 @@
     from var(--border-angle),
     transparent 0%,
     transparent 20%,
-    rgba(139, 106, 189, 0.3) 27%,
-    rgba(160, 136, 192, 0.18) 33%,
-    rgba(139, 106, 189, 0.1) 38%,
+    rgba(160, 111, 208, 0.3) 27%,
+    rgba(176, 154, 204, 0.18) 33%,
+    rgba(160, 111, 208, 0.1) 38%,
     transparent 45%,
     transparent 100%
   ) !important;
@@ -225,25 +225,25 @@
 }
 
 .part.sidebar .monaco-list-row.focused {
-  background: linear-gradient(135deg, rgba(62, 58, 78, 0.6), rgba(50, 46, 66, 0.4)) !important;
+  background: linear-gradient(135deg, rgba(61, 48, 75, 0.6), rgba(48, 38, 61, 0.4)) !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
   outline: none !important;
 }
 
 .part.sidebar .monaco-list-row.focused.selected {
-  background: linear-gradient(135deg, rgba(62, 58, 78, 0.7), rgba(50, 46, 66, 0.5)) !important;
+  background: linear-gradient(135deg, rgba(61, 48, 75, 0.7), rgba(48, 38, 61, 0.5)) !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07) !important;
   outline: none !important;
 }
 
 .part.sidebar .monaco-list:focus .monaco-list-row.focused {
-  background: linear-gradient(135deg, rgba(62, 58, 78, 0.8), rgba(50, 46, 66, 0.6)) !important;
+  background: linear-gradient(135deg, rgba(61, 48, 75, 0.8), rgba(48, 38, 61, 0.6)) !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
   outline: none !important;
 }
 
 .part.sidebar .monaco-list-row:hover {
-  background: linear-gradient(135deg, rgba(62, 58, 78, 0.3), rgba(50, 46, 66, 0.2)) !important;
+  background: linear-gradient(135deg, rgba(61, 48, 75, 0.3), rgba(48, 38, 61, 0.2)) !important;
   border-radius: var(--islands-item-radius) !important;
   outline: none !important;
 }
@@ -263,13 +263,13 @@
 
 .editor-actions {
   padding-right: 20px !important;
-  background-image: linear-gradient(to top, #3a3650 1px, transparent 1px) !important;
+  background-image: linear-gradient(to top, #3a3046 1px, transparent 1px) !important;
   background-repeat: no-repeat !important;
   background-position: bottom !important;
 }
 
 .tabs-container {
-  background-image: linear-gradient(to top, #3a3650 1px, transparent 1px) !important;
+  background-image: linear-gradient(to top, #3a3046 1px, transparent 1px) !important;
   background-repeat: no-repeat !important;
   background-position: bottom !important;
 }
@@ -291,17 +291,17 @@
 
 .tab.active {
   box-shadow:
-    inset -1px 0 0 0 #3a3650,
-    inset 1px 0 0 0 #3a3650 !important;
+    inset -1px 0 0 0 #3a3046,
+    inset 1px 0 0 0 #3a3046 !important;
   border-right: none !important;
 }
 
 .tab:not(.active) {
-  box-shadow: inset 0 -1px 0 0 #3a3650 !important;
+  box-shadow: inset 0 -1px 0 0 #3a3046 !important;
 }
 
 .tab.active:first-child {
-  box-shadow: inset -1px 0 0 0 #3a3650 !important;
+  box-shadow: inset -1px 0 0 0 #3a3046 !important;
 }
 
 .tab:hover .label-name {
@@ -485,7 +485,7 @@
 }
 
 .part.activitybar .action-item:hover .action-label {
-  filter: drop-shadow(0 0 5px rgba(139, 106, 189, 0.3)) !important;
+  filter: drop-shadow(0 0 5px rgba(160, 111, 208, 0.3)) !important;
 }
 
 .part.activitybar .action-item .action-label .codicon {
@@ -502,7 +502,7 @@
 }
 
 .part.activitybar .action-item.checked .action-label {
-  background: linear-gradient(180deg, rgba(68, 64, 84, 0.9), rgba(52, 48, 68, 0.7)) !important;
+  background: linear-gradient(180deg, rgba(68, 56, 82, 0.9), rgba(48, 38, 61, 0.7)) !important;
   border-radius: 50% !important;
   width: 30px !important;
   height: 30px !important;
@@ -557,11 +557,11 @@
 }
 
 .part.statusbar:hover .statusbar-item-label {
-  color: #a0a4b0 !important;
+  color: #a89cb8 !important;
 }
 
 .part.statusbar:hover .codicon {
-  color: #a0a4b0 !important;
+  color: #a89cb8 !important;
 }
 
 .part.statusbar .items-container {
@@ -714,7 +714,7 @@
 }
 
 .quick-input-widget .monaco-list-row.focused {
-  background: linear-gradient(135deg, rgba(62, 58, 78, 0.7), rgba(50, 46, 66, 0.5)) !important;
+  background: linear-gradient(135deg, rgba(61, 48, 75, 0.7), rgba(48, 38, 61, 0.5)) !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
 }
 
