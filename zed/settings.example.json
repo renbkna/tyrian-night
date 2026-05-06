@@ -1,14 +1,41 @@
 {
   "theme": {
-    "mode": "system",
-    "dark": "Tyrian Night",
-    "light": "Tyrian Dawn"
+    "mode": "dark",
+    "light": "Tyrian Dawn",
+    "dark": "Tyrian Night"
+  },
+  "icon_theme": {
+    "mode": "light",
+    "light": "Colored Zed Icons Theme Dark",
+    "dark": "Colored Zed Icons Theme Dark"
+  },
+  "semantic_tokens": "off",
+  "colorize_brackets": true,
+  "current_line_highlight": "line",
+  "show_whitespaces": "selection",
+  "show_wrap_guides": false,
+  "sticky_scroll": {
+    "enabled": true
+  },
+  "minimap": {
+    "show": "auto",
+    "thumb": "always"
+  },
+  "gutter": {
+    "min_line_number_digits": 3
+  },
+  "indent_guides": {
+    "enabled": true,
+    "line_width": 1,
+    "active_line_width": 1,
+    "coloring": "indent_aware",
+    "background_coloring": "disabled"
   },
   "buffer_font_family": "Monaspace Neon",
   "buffer_font_size": 15,
   "buffer_font_weight": 450,
   "buffer_line_height": {
-    "custom": 1.5
+    "custom": 1.45
   },
   "buffer_font_features": {
     "calt": true,
@@ -25,24 +52,20 @@
     "ss09": true,
     "ss10": true
   },
-  "ui_font_family": ".SystemUIFont",
+  "ui_font_family": ".ZedSans",
   "ui_font_size": 16,
   "ui_font_weight": 400,
-  "semantic_tokens": "combined",
-  "colorize_brackets": true,
-  "indent_guides": {
-    "enabled": true,
-    "line_width": 1,
-    "active_line_width": 1,
-    "coloring": "indent_aware",
-    "background_coloring": "disabled"
-  },
   "terminal": {
     "font_family": "Monaspace Neon",
     "font_size": 14,
     "line_height": {
       "custom": 1.4
     },
+    "cursor_shape": "bar",
+    "blinking": "terminal_controlled",
     "minimum_contrast": 0
-  }
+  },
+  "soft_wrap": "bounded",
+  "preferred_line_length": 120,
+  "tab_size": 4
 }
