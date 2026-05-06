@@ -1,6 +1,21 @@
+// @ts-check
+
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
+ * @typedef {{
+ *   name: string;
+ *   colors: Record<string, string>;
+ *   semanticTokenColors: Record<string, HighlightSettings>;
+ *   tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
+ * }} VscodeTheme
+ * @typedef {'dark' | 'light'} ZedAppearance
+ * @typedef {{ red: number; green: number; blue: number; alpha: number; hex: string }} ParsedHexColor
+ */
+
+/** @type {Array<{ sourcePath: string; appearance: ZedAppearance }>} */
 const SOURCE_THEMES = [
   {
     sourcePath: 'themes/tyrian-night.json',
@@ -250,17 +265,28 @@ export const ZED_SYNTAX_CAPTURE_KEYS = [
   'variant',
 ];
 
+/**
+ * @param {string} [repoRoot]
+ * @returns {{ $schema: string; name: string; author: string; themes: unknown[] }}
+ */
 export function buildZedThemeFamily(repoRoot = process.cwd()) {
   return {
     $schema: 'https://zed.dev/schema/themes/v0.2.0.json',
     name: 'Tyrian Night',
     author: 'renbkna',
     themes: SOURCE_THEMES.map(({ sourcePath, appearance }) =>
-      buildZedTheme(readJson(path.join(repoRoot, sourcePath)), appearance)
+      buildZedTheme(
+        /** @type {VscodeTheme} */ (readJson(path.join(repoRoot, sourcePath))),
+        appearance
+      )
     ),
   };
 }
 
+/**
+ * @param {string} [repoRoot]
+ * @returns {void}
+ */
 export function writeZedThemeFamily(repoRoot = process.cwd()) {
   const outputPath = path.join(repoRoot, OUTPUT_PATH);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -271,6 +297,11 @@ export function writeZedThemeFamily(repoRoot = process.cwd()) {
   );
 }
 
+/**
+ * @param {VscodeTheme} vscodeTheme
+ * @param {ZedAppearance} appearance
+ * @returns {unknown}
+ */
 function buildZedTheme(vscodeTheme, appearance) {
   const colors = vscodeTheme.colors;
   const semantic = vscodeTheme.semanticTokenColors;
@@ -459,6 +490,10 @@ function buildZedTheme(vscodeTheme, appearance) {
   });
 }
 
+/**
+ * @param {VscodeTheme} vscodeTheme
+ * @returns {Record<string, unknown>}
+ */
 function buildSyntax(vscodeTheme) {
   const semantic = vscodeTheme.semanticTokenColors;
   const comment = tokenSettings(vscodeTheme, 'comment');
@@ -555,7 +590,12 @@ function buildSyntax(vscodeTheme) {
   };
 }
 
+/**
+ * @param {HighlightSettings} settings
+ * @returns {{ color?: string; font_style?: string; font_weight?: number }}
+ */
 function highlight(settings) {
+  /** @type {{ color?: string; font_style?: string; font_weight?: number }} */
   const style = {
     color: settings.foreground,
   };
@@ -571,10 +611,20 @@ function highlight(settings) {
   return clean(style);
 }
 
+/**
+ * @param {VscodeTheme} vscodeTheme
+ * @param {string} scope
+ * @returns {string | undefined}
+ */
 function tokenColor(vscodeTheme, scope) {
   return tokenSettings(vscodeTheme, scope).foreground;
 }
 
+/**
+ * @param {VscodeTheme} vscodeTheme
+ * @param {string} scope
+ * @returns {HighlightSettings}
+ */
 function tokenSettings(vscodeTheme, scope) {
   for (const token of vscodeTheme.tokenColors) {
     const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
@@ -587,10 +637,19 @@ function tokenSettings(vscodeTheme, scope) {
   throw new Error(`Missing token scope '${scope}' in ${vscodeTheme.name}`);
 }
 
+/**
+ * @template T
+ * @param {string} filePath
+ * @returns {T}
+ */
 function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  return /** @type {T} */ (JSON.parse(fs.readFileSync(filePath, 'utf8')));
 }
 
+/**
+ * @param {Record<string, string>} colors
+ * @returns {Record<string, string>}
+ */
 function buildDimAnsi(colors) {
   return {
     black: colors['terminal.ansiBlack'],
@@ -604,6 +663,10 @@ function buildDimAnsi(colors) {
   };
 }
 
+/**
+ * @param {Record<string, string>} colors
+ * @returns {string}
+ */
 function zedBracketMatchBackground(colors) {
   const background = colors['editorBracketMatch.background'];
 
@@ -618,12 +681,20 @@ function zedBracketMatchBackground(colors) {
   return withHexAlpha(border, alpha);
 }
 
+/**
+ * @param {string} color
+ * @returns {boolean}
+ */
 function isTransparentHex(color) {
   const parsed = parseHexColor(color);
 
   return parsed.alpha === 0;
 }
 
+/**
+ * @param {string} color
+ * @returns {boolean}
+ */
 function isLightHex(color) {
   const { red, green, blue } = parseHexColor(color);
   const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
@@ -631,12 +702,21 @@ function isLightHex(color) {
   return luminance > 0.5;
 }
 
+/**
+ * @param {string} color
+ * @param {string} alpha
+ * @returns {string}
+ */
 function withHexAlpha(color, alpha) {
   const parsed = parseHexColor(color);
 
   return `#${parsed.hex}${alpha.toUpperCase()}`;
 }
 
+/**
+ * @param {string} color
+ * @returns {ParsedHexColor}
+ */
 function parseHexColor(color) {
   const normalized = color.replace(/^#/, '');
 
@@ -658,6 +738,10 @@ function parseHexColor(color) {
   };
 }
 
+/**
+ * @param {any} value
+ * @returns {any}
+ */
 function clean(value) {
   if (Array.isArray(value)) {
     return value.map(clean);

@@ -1,13 +1,13 @@
 # Tyrian Night
 
-A deep, ultra-saturated dark theme built on color science. Maximum depth and saturation within WCAG AA compliance.
+A deep, ultra-saturated theme family built on color science. Main editor text and syntax colors are tuned for WCAG AA contrast while quieter UI chrome stays intentionally lower contrast.
 
 ![Theme Preview](public/preview.png)
 
 ## Features
 
 - **WCAG AA tuned across the family** — Night, Dusk, and Dawn keep AAA main text and AA syntax contrast
-- **Perceptually distinct colors** — every syntax category separated by CIEDE2000 ΔE > 12
+- **Perceptually distinct core palette** — advertised syntax roles are separated by CIEDE2000 ΔE > 12
 - **True dark background** — `#0C0C0C` canvas, optimized for OLED and dim environments
 - **Full semantic highlighting** — declared natively, no configuration needed
 - **Universal language support** — works with any TextMate grammar
@@ -71,7 +71,7 @@ UI chrome elements (line numbers, breadcrumbs) use lower contrast (~2.8:1) to re
 
 Tyrian Night ships its own Island UI installer — no external UI patching extension required.
 
-When **Tyrian Night** is the active theme, the extension can install or repair Island UI. Switching away from the theme restores the stock VS Code shell.
+When a Tyrian theme is active, the extension can install or repair Island UI. Switching away from the Tyrian theme family restores the stock VS Code shell.
 
 > [!WARNING]
 > If Island UI is active, you must run `Tyrian Night: Restore Classic UI` before uninstalling the extension. Uninstalling Tyrian Night does not remove the custom UI patch.

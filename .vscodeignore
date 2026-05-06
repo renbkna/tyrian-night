@@ -10,6 +10,7 @@ out/**/*.map
 src/**
 tests/**
 scripts/**
+themes/island/**
 tsconfig.json
 tsup.config.ts
 biome.json

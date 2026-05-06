@@ -4,14 +4,16 @@
     "target": "ESNext",
     "lib": ["ESNext"],
     "sourceMap": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "out",
     "strict": true,
+    "allowJs": true,
+    "checkJs": true,
     "types": ["node"],
     "moduleResolution": "NodeNext",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src", "scripts"]
 }

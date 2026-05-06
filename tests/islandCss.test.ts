@@ -2,11 +2,19 @@ import fs from 'node:fs';
 
 import { expect, test } from 'bun:test';
 
+import { buildAllIslandCss } from '../scripts/islandCss.mjs';
+
 const ISLAND_CSS_FILES = [
   'themes/tyrian-night.css',
   'themes/tyrian-dusk.css',
   'themes/tyrian-dawn.css',
 ];
+
+test('Island UI CSS assets match the generated template and theme tokens', () => {
+  for (const { outputPath, css } of buildAllIslandCss()) {
+    expect(fs.readFileSync(outputPath, 'utf8')).toBe(css);
+  }
+});
 
 test('Island UI keeps the editor island offset outside VS Code tab internals', () => {
   for (const cssFile of ISLAND_CSS_FILES) {

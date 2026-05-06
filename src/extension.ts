@@ -1,5 +1,5 @@
-import path from 'node:path';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 import * as vscode from 'vscode';
 
@@ -181,7 +181,7 @@ async function applyIslandUi(options: {
 }): Promise<void> {
   const activeTheme = getActiveTheme() ?? 'Tyrian Night';
   const cssFile = getCssFileForTheme(activeTheme);
-  const result = (await runIslandCli([
+  const result = await runIslandCli<{ changed: boolean }>([
     'apply',
     '--app-root',
     vscode.env.appRoot,
@@ -189,7 +189,7 @@ async function applyIslandUi(options: {
     path.join(extContext.extensionPath, 'themes', cssFile),
     '--theme-version',
     String(extContext.extension.packageJSON.version ?? 'unknown'),
-  ])) as { changed: boolean };
+  ]);
 
   if (!result.changed) {
     if (options.notifyWhenUnchanged) {
@@ -281,11 +281,11 @@ async function restoreIslandUi(options: {
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
 }): Promise<void> {
-  const result = (await runIslandCli(['restore-all', '--app-root', vscode.env.appRoot])) as {
+  const result = await runIslandCli<{
     changed: boolean;
     restoredAppRoots: string[];
     failedAppRoots: Array<{ appRoot: string; reason: string }>;
-  };
+  }>(['restore-all', '--app-root', vscode.env.appRoot]);
 
   if (result.failedAppRoots.length > 0) {
     throw new Error(

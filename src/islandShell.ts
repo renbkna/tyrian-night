@@ -20,7 +20,7 @@ const MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
 const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
 const TYRIAN_BLOCK_PATTERN = new RegExp(
-  `${escapeRegExp(TYRIAN_MARKER_START)}[\\s\\S]*?${escapeRegExp(TYRIAN_MARKER_END)}\\s*`,
+  String.raw`${escapeRegExp(TYRIAN_MARKER_START)}[\s\S]*?${escapeRegExp(TYRIAN_MARKER_END)}\s*`,
   'g'
 );
 
@@ -685,7 +685,7 @@ async function addManagedAppRoot(
   }
 
   appRoots.push(appRoot);
-  appRoots.sort();
+  appRoots.sort((left, right) => left.localeCompare(right));
   await writeManagedAppRootsRegistry(appRoots, environment);
   return true;
 }
@@ -839,5 +839,5 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }

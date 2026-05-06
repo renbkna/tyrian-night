@@ -1,13 +1,13 @@
 {
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
-  "description": "Ultra Saturated Dark Theme - Maximum depth & saturation within WCAG AA compliance",
-  "version": "1.9.0",
+  "description": "Ultra-saturated Tyrian Night, Dusk, and Dawn themes with built-in Island UI controls",
+  "version": "2.0.0",
   "type": "module",
   "publisher": "renbkna",
   "icon": "public/icon.png",
   "engines": {
-    "vscode": "^1.116.0"
+    "vscode": "^1.118.0"
   },
   "categories": [
     "Themes"
@@ -65,28 +65,34 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "bun run check && bun run lint && bun run test && bun run format:check && bun run build",
+    "verify": "bun run check && bun run lint && bun run test && bun run format:check && bun run check:island-css",
+    "package:check": "bun run verify && bun run build",
+    "build:island-css": "node scripts/islandCss.mjs",
+    "check:island-css": "node scripts/islandCss.mjs --check",
     "build": "tsup",
     "watch": "tsup --watch",
     "check": "tsc --noEmit",
     "test": "bun test",
-    "lint": "oxlint src/ tests/",
-    "lint:fix": "oxlint src/ tests/ --fix",
+    "lint": "oxlint src/ tests/ scripts/",
+    "lint:fix": "oxlint src/ tests/ scripts/ --fix",
     "format": "biome format . --write",
     "format:check": "biome format .",
-    "package": "sh -c 'ln -sf \"$(command -v bun)\" /tmp/npm && trap \"rm -f /tmp/npm\" EXIT && PATH=\"/tmp:$PATH\" vsce package --no-dependencies'"
+    "package": "bun run package:check && vsce package --no-dependencies"
   },
   "simple-git-hooks": {
-    "pre-commit": "bun run check && bun run lint && bun run test && bun run format:check"
+    "pre-commit": "bun run verify"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.9",
-    "@types/node": "^25.5.0",
-    "@types/vscode": "^1.116.0",
+    "@biomejs/biome": "^2.4.14",
+    "@types/node": "^22.19.17",
+    "@types/vscode": "^1.118.0",
     "@vscode/vsce": "^3.9.1",
-    "oxlint": "^1.57.0",
+    "oxlint": "^1.63.0",
     "simple-git-hooks": "^2.13.1",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "picomatch": "^4.0.4"
   }
 }

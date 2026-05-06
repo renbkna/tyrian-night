@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
   "assist": {
     "enabled": true,
     "actions": {
@@ -25,6 +25,15 @@
     }
   },
   "files": {
-    "includes": ["**", "!.codex-logs/**", "!out/**", "!node_modules/**", "!*.vsix"]
+    "includes": [
+      "**",
+      "!.codex-logs/**",
+      "!out/**",
+      "!node_modules/**",
+      "!*.vsix",
+      "!themes/tyrian-dawn.css",
+      "!themes/tyrian-dusk.css",
+      "!themes/tyrian-night.css"
+    ]
   }
 }
