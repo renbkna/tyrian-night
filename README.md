@@ -91,7 +91,7 @@ The patch surface is intentionally narrow: a single Tyrian stylesheet injected i
 **Commands:**
 `Tyrian Night: Apply Island UI` · `Repair Island UI` · `Restore Classic UI` · `Doctor Island UI`
 
-**Doctor** classifies each managed app root as `clean`, `patched`, `managed-only`, `permission-denied`, `broken-backup`, or `checksum-mismatch`, and offers automatic repair when it finds self-healable state.
+**Doctor** classifies each managed app root as `clean`, `patched`, `managed-only`, `missing`, `permission-denied`, `broken-backup`, or `checksum-mismatch`, and offers automatic repair when it finds self-healable state.
 
 > Because Island UI patches `workbench.html`, VS Code may show *"Your installation appears to be corrupt"* while it is active. This is expected and does not indicate broken files.
 

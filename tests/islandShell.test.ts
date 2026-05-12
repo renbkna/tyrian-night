@@ -20,6 +20,7 @@ const ISLAND_MANIFEST = path.join(WORKBENCH_DIR, 'tyrian-night.island.json');
 const WORKBENCH_CHECKSUM_KEY = 'vs/code/electron-browser/workbench/workbench.html';
 const WORKBENCH_CSS_LINK =
   '<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">';
+const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 
 let previousHome: string | undefined;
 let registryHome: string;
@@ -53,6 +54,72 @@ test('status-all reports explicit and registered roots without probing installed
 
   expect(statuses.map((status) => status.appRoot)).toEqual([appRoot]);
   expect(statuses[0]?.classification).toBe('clean');
+});
+
+test('status-all reports registered missing roots without mutating the registry', async () => {
+  const missingAppRoot = path.join(testRoot, 'missing-root');
+  const registryPath = await writeManagedRootsRegistry([missingAppRoot]);
+  const before = await fs.readFile(registryPath, 'utf8');
+
+  const statuses = await readAllIslandShellStatuses({ registryHome });
+
+  expect(statuses).toHaveLength(1);
+  expect(statuses[0]).toMatchObject({
+    appRoot: missingAppRoot,
+    classification: 'missing',
+    managed: true,
+    registered: true,
+    verificationPassed: false,
+    canSelfHeal: false,
+  });
+  expect(await fs.readFile(registryPath, 'utf8')).toBe(before);
+});
+
+test('status-all fails loudly when the managed root registry is corrupt', async () => {
+  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
+  await fs.writeFile(
+    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
+    '{ broken registry\n',
+    'utf8'
+  );
+
+  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
+    'Tyrian managed app roots registry is invalid JSON'
+  );
+});
+
+test('status-all fails loudly when the managed root registry contains empty roots', async () => {
+  await writeManagedRootsRegistry(['']);
+
+  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
+    'every app root must be a non-empty string'
+  );
+});
+
+test('status-all fails loudly when the managed root registry file is empty', async () => {
+  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
+  await fs.writeFile(
+    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
+    '',
+    'utf8'
+  );
+
+  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
+    'Tyrian managed app roots registry is invalid JSON'
+  );
+});
+
+test('status-all fails loudly when the managed root registry contains no roots', async () => {
+  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
+  await fs.writeFile(
+    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
+    JSON.stringify({ version: 1, appRoots: [] }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
+    'expected at least one app root or no registry file'
+  );
 });
 
 test('clean roots with semantically correct checksum are not rewritten during restore-all', async () => {
@@ -96,6 +163,51 @@ test('restore-all removes registered clean roots without touching workbench file
   expect(result.changed).toBe(true);
   expect(result.failedAppRoots).toEqual([]);
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
+  await expect(readAllIslandShellStatuses({ registryHome })).resolves.toEqual([]);
+});
+
+test('restore cleans an explicit active root even when the managed root registry is corrupt', async () => {
+  const appRoot = await createAppRoot('explicit-restore-corrupt-registry');
+  const cssSource = path.join(testRoot, 'theme.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: rebeccapurple; }\n', 'utf8');
+  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
+  await writeCorruptManagedRootsRegistry();
+
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    changed: true,
+    active: false,
+  });
+  await expectRestoredAppRoot(appRoot);
+});
+
+test('restore-all cleans preferred active roots even when the managed root registry is corrupt', async () => {
+  const appRoot = await createAppRoot('restore-all-corrupt-registry');
+  const cssSource = path.join(testRoot, 'theme.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: rebeccapurple; }\n', 'utf8');
+  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
+  await writeCorruptManagedRootsRegistry();
+
+  await expect(
+    restoreAllIslandShells({ preferredAppRoots: [appRoot], registryHome })
+  ).resolves.toEqual({
+    changed: true,
+    restoredAppRoots: [appRoot],
+    failedAppRoots: [],
+  });
+  await expectRestoredAppRoot(appRoot);
+});
+
+test('restore-all prunes registered missing roots as an explicit cleanup action', async () => {
+  const missingAppRoot = path.join(testRoot, 'missing-root');
+  await writeManagedRootsRegistry([missingAppRoot]);
+
+  const result = await restoreAllIslandShells({ registryHome });
+
+  expect(result).toEqual({
+    changed: true,
+    restoredAppRoots: [],
+    failedAppRoots: [],
+  });
   await expect(readAllIslandShellStatuses({ registryHome })).resolves.toEqual([]);
 });
 
@@ -157,6 +269,37 @@ test('restore repairs checksum when broken sidecars mask the mismatch classifica
     registered: false,
   });
   await expect(fs.readdir(path.join(appRoot, WORKBENCH_DIR))).resolves.toEqual(['workbench.html']);
+});
+
+test('status treats a stale Island manifest checksum as self-healable broken state', async () => {
+  const appRoot = await createAppRoot('stale-manifest-checksum');
+  const cssSource = path.join(testRoot, 'theme.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: purple; }\n', 'utf8');
+  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
+
+  const manifestPath = path.join(appRoot, ISLAND_MANIFEST);
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+  manifest.checksum = 'not-the-current-workbench-checksum';
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2).concat('\n'), 'utf8');
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    active: true,
+    classification: 'broken-backup',
+    canSelfHeal: true,
+    issues: expect.arrayContaining([
+      'Tyrian manifest checksum does not match the current workbench HTML.',
+    ]),
+  });
+
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    changed: true,
+    active: false,
+  });
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'clean',
+    managed: false,
+    registered: false,
+  });
 });
 
 test('restore validates and uses a complete backup pair before deleting managed sidecars', async () => {
@@ -226,4 +369,35 @@ function productJson(checksum: string, indent: number | string = '\t'): string {
 
 function sha256Base64(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
+}
+
+async function expectRestoredAppRoot(appRoot: string): Promise<void> {
+  const html = await fs.readFile(path.join(appRoot, WORKBENCH_HTML), 'utf8');
+  const product = await fs.readFile(path.join(appRoot, PRODUCT_JSON), 'utf8');
+
+  expect(html).not.toContain(TYRIAN_MARKER_START);
+  expect(JSON.parse(product).checksums[WORKBENCH_CHECKSUM_KEY]).toBe(sha256Base64(html));
+  await expect(fs.readdir(path.join(appRoot, WORKBENCH_DIR))).resolves.toEqual(['workbench.html']);
+}
+
+async function writeManagedRootsRegistry(appRoots: string[]): Promise<string> {
+  const registryPath = path.join(registryHome, '.tyrian-night', 'managed-app-roots.json');
+
+  await fs.mkdir(path.dirname(registryPath), { recursive: true });
+  await fs.writeFile(
+    registryPath,
+    JSON.stringify({ version: 1, appRoots }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  return registryPath;
+}
+
+async function writeCorruptManagedRootsRegistry(): Promise<void> {
+  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
+  await fs.writeFile(
+    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
+    '{ broken registry\n',
+    'utf8'
+  );
 }

@@ -219,6 +219,7 @@ async function doctorIslandUi(): Promise<void> {
         | 'clean'
         | 'patched'
         | 'managed-only'
+        | 'missing'
         | 'permission-denied'
         | 'broken-backup'
         | 'checksum-mismatch';
@@ -377,6 +378,7 @@ function formatDoctorClassification(
     | 'clean'
     | 'patched'
     | 'managed-only'
+    | 'missing'
     | 'permission-denied'
     | 'broken-backup'
     | 'checksum-mismatch'
@@ -388,6 +390,8 @@ function formatDoctorClassification(
       return 'Patched';
     case 'managed-only':
       return 'Managed-only';
+    case 'missing':
+      return 'Missing';
     case 'permission-denied':
       return 'Permission denied';
     case 'broken-backup':

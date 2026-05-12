@@ -54,6 +54,7 @@ export type IslandShellStatus = {
     | 'clean'
     | 'patched'
     | 'managed-only'
+    | 'missing'
     | 'permission-denied'
     | 'broken-backup'
     | 'checksum-mismatch';
@@ -168,7 +169,7 @@ export async function restoreIslandShell(options: {
   registryHome?: string;
 }): Promise<IslandShellResult> {
   const registered =
-    options.registered ?? (await isManagedAppRootRegistered(options.appRoot, options));
+    options.registered ?? (await tryReadManagedAppRootRegistration(options.appRoot, options));
   const state = await inspectIslandRoot(options.appRoot, registered);
   const plan = buildRestorePlan(state);
   const changed = await commitRestorePlan(state, plan, options);
@@ -183,7 +184,9 @@ export async function restoreAllIslandShells(options?: {
   preferredAppRoots?: string[];
   registryHome?: string;
 }): Promise<IslandShellCleanupSummary> {
-  const appRoots = await listIslandShellRoots(options);
+  const appRoots = await listIslandShellRoots(options, {
+    tolerateRegistryFailureWithPreferredRoots: true,
+  });
   let changed = false;
   const restoredAppRoots: string[] = [];
   const failedAppRoots: Array<{ appRoot: string; reason: string }> = [];
@@ -244,6 +247,19 @@ export async function readIslandShellStatus(options: {
       };
     }
 
+    if (isFileNotFoundError(error)) {
+      return {
+        appRoot: options.appRoot,
+        active: false,
+        managed: registered,
+        registered,
+        classification: 'missing',
+        verificationPassed: false,
+        canSelfHeal: false,
+        issues: ['Tyrian could not find the registered VS Code installation files.'],
+      };
+    }
+
     throw error;
   }
 }
@@ -277,8 +293,11 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
   const active = currentHtml.includes(TYRIAN_MARKER_START);
   const cssExists = await pathExists(paths.islandCssPath);
   const manifestContent = await readTextFileIfExists(paths.manifestPath);
+  const manifest = parseManifest(manifestContent);
   const manifestExists = manifestContent !== undefined;
-  const manifestValid = manifestExists && parseManifest(manifestContent) !== undefined;
+  const manifestValid = manifestExists && manifest !== undefined;
+  const manifestChecksumMismatch =
+    manifest !== undefined && manifest.checksum !== sha256Base64(currentHtml);
   const backupHtmlExists = backupHtml !== undefined;
   const backupProductExists = backupProductJson !== undefined;
   const hasTyrianSidecars = cssExists || manifestExists || backupHtmlExists || backupProductExists;
@@ -294,6 +313,7 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
     backupMismatch ||
     backupPairInvalid ||
     (manifestExists && !manifestValid) ||
+    manifestChecksumMismatch ||
     (active && (!cssExists || !manifestExists));
   const hasTyrianEvidence = active || managed;
 
@@ -323,6 +343,10 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
 
   if (manifestExists && !manifestValid) {
     issues.push('Tyrian manifest exists but is invalid.');
+  }
+
+  if (manifestChecksumMismatch) {
+    issues.push('Tyrian manifest checksum does not match the current workbench HTML.');
   }
 
   if (active && !cssExists) {
@@ -371,17 +395,35 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
   };
 }
 
-async function listIslandShellRoots(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<RootCandidate[]> {
+async function listIslandShellRoots(
+  options?: {
+    preferredAppRoots?: string[];
+    registryHome?: string;
+  },
+  behavior?: {
+    tolerateRegistryFailureWithPreferredRoots?: boolean;
+  }
+): Promise<RootCandidate[]> {
   const candidates = new Map<string, RootCandidate>();
+  const preferredAppRoots = options?.preferredAppRoots ?? [];
 
-  for (const appRoot of options?.preferredAppRoots ?? []) {
+  for (const appRoot of preferredAppRoots) {
     candidates.set(appRoot, { appRoot, registered: false });
   }
 
-  for (const appRoot of await readManagedAppRootsRegistry(options)) {
+  let registeredAppRoots: string[];
+
+  try {
+    registeredAppRoots = await readManagedAppRootsRegistry(options);
+  } catch (error) {
+    if (behavior?.tolerateRegistryFailureWithPreferredRoots && preferredAppRoots.length > 0) {
+      registeredAppRoots = [];
+    } else {
+      throw error;
+    }
+  }
+
+  for (const appRoot of registeredAppRoots) {
     candidates.set(appRoot, { appRoot, registered: true });
   }
 
@@ -392,14 +434,7 @@ async function listIslandShellRoots(options?: {
       continue;
     }
 
-    if (await isAppRootReadable(candidate.appRoot)) {
-      existingRoots.push(candidate);
-      continue;
-    }
-
-    if (candidate.registered) {
-      await removeManagedAppRoot(candidate.appRoot, options);
-    }
+    existingRoots.push(candidate);
   }
 
   return existingRoots;
@@ -491,6 +526,14 @@ async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
 
   if (!(await pathExists(paths.manifestPath))) {
     throw new Error('Tyrian Night verification failed: island manifest is missing after apply.');
+  }
+
+  const manifest = parseManifest(await fs.readFile(paths.manifestPath, 'utf8'));
+
+  if (!manifest || manifest.checksum !== sha256Base64(currentHtml)) {
+    throw new Error(
+      'Tyrian Night verification failed: island manifest checksum does not match the patched workbench after apply.'
+    );
   }
 
   if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
@@ -712,27 +755,56 @@ async function isManagedAppRootRegistered(
   return (await readManagedAppRootsRegistry(environment)).includes(appRoot);
 }
 
+async function tryReadManagedAppRootRegistration(
+  appRoot: string,
+  environment?: IslandShellEnvironment
+): Promise<boolean> {
+  try {
+    return await isManagedAppRootRegistered(appRoot, environment);
+  } catch {
+    return false;
+  }
+}
+
 async function readManagedAppRootsRegistry(
   environment?: IslandShellEnvironment
 ): Promise<string[]> {
   const registryPath = getManagedRootsRegistryPath(environment);
   const content = await readTextFileIfExists(registryPath);
 
-  if (!content) {
+  if (content === undefined) {
     return [];
   }
+
+  let parsed: Partial<ManagedRootsRegistry>;
 
   try {
-    const parsed = JSON.parse(content) as Partial<ManagedRootsRegistry>;
-
-    if (parsed.version !== 1 || !Array.isArray(parsed.appRoots)) {
-      return [];
-    }
-
-    return parsed.appRoots.filter((appRoot): appRoot is string => typeof appRoot === 'string');
+    parsed = JSON.parse(content) as Partial<ManagedRootsRegistry>;
   } catch {
-    return [];
+    throw new Error(`Tyrian managed app roots registry is invalid JSON at '${registryPath}'.`);
   }
+
+  if (parsed.version !== 1 || !Array.isArray(parsed.appRoots)) {
+    throw new Error(
+      `Tyrian managed app roots registry is invalid: expected version 1 with an appRoots array at '${registryPath}'.`
+    );
+  }
+
+  if (parsed.appRoots.length === 0) {
+    throw new Error(
+      `Tyrian managed app roots registry is invalid: expected at least one app root or no registry file at '${registryPath}'.`
+    );
+  }
+
+  if (
+    parsed.appRoots.some((appRoot) => typeof appRoot !== 'string' || appRoot.trim().length === 0)
+  ) {
+    throw new Error(
+      `Tyrian managed app roots registry is invalid: every app root must be a non-empty string at '${registryPath}'.`
+    );
+  }
+
+  return [...new Set(parsed.appRoots)].sort((left, right) => left.localeCompare(right));
 }
 
 async function writeManagedAppRootsRegistry(
@@ -808,17 +880,16 @@ async function readTextFileIfExists(filePath: string): Promise<string | undefine
   }
 }
 
-async function isAppRootReadable(appRoot: string): Promise<boolean> {
-  const paths = getPatchPaths(appRoot);
-  return (await pathExists(paths.workbenchHtmlPath)) && (await pathExists(paths.productJsonPath));
-}
-
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
   }
 }
 
