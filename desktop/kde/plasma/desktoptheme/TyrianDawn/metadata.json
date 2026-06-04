@@ -1,0 +1,19 @@
+{
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "renbkna"
+      }
+    ],
+    "Category": "",
+    "Description": "Tyrian Dawn Plasma desktop theme with generated Tyrian colors, launcher surfaces, taskbar states, and edge glow.",
+    "EnabledByDefault": true,
+    "Id": "TyrianDawn",
+    "License": "Apache-2.0",
+    "Name": "Tyrian Dawn",
+    "ServiceTypes": ["Plasma/Theme"],
+    "Version": "2.0.1",
+    "Website": "https://github.com/renbkna/tyrian-night"
+  },
+  "X-Plasma-API": "5.0"
+}

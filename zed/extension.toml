@@ -1,7 +1,0 @@
-id = "tyrian-night-theme"
-name = "Tyrian Night"
-version = "2.0.0"
-schema_version = 1
-authors = ["renbkna"]
-description = "Ultra saturated Tyrian Night, Dusk, and Dawn themes for Zed."
-repository = "https://github.com/renbkna/tyrian-night"

@@ -11,7 +11,7 @@ import {
   readIslandShellStatus,
   restoreAllIslandShells,
   restoreIslandShell,
-} from '../src/islandShell';
+} from '../apps/vscode/src/islandShell';
 
 const WORKBENCH_DIR = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
 const WORKBENCH_HTML = path.join(WORKBENCH_DIR, 'workbench.html');
@@ -70,7 +70,7 @@ test('status-all reports registered missing roots without mutating the registry'
     managed: true,
     registered: true,
     verificationPassed: false,
-    canSelfHeal: false,
+    canSelfHeal: true,
   });
   expect(await fs.readFile(registryPath, 'utf8')).toBe(before);
 });

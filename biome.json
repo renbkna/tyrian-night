@@ -27,13 +27,15 @@
   "files": {
     "includes": [
       "**",
+      "!.machine-backups/**",
       "!.codex-logs/**",
       "!out/**",
       "!node_modules/**",
       "!*.vsix",
-      "!themes/tyrian-dawn.css",
-      "!themes/tyrian-dusk.css",
-      "!themes/tyrian-night.css"
+      "!apps/vscode/island/tyrian-dawn.css",
+      "!apps/vscode/island/tyrian-night.css",
+      "!apps/vscode/island/tyrian-night-old.css",
+      "!apps/zed/themes/tyrian-night.json"
     ]
   }
 }

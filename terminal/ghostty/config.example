@@ -1,0 +1,13 @@
+theme = dark:tyrian-night,light:tyrian-dawn
+background-opacity = 0.78
+background-blur = true
+font-family = JetBrainsMono Nerd Font
+font-size = 13
+font-thicken = false
+cursor-style = bar
+cursor-style-blink = true
+window-titlebar-background = #0C0C0C
+window-titlebar-foreground = #D0C8E0
+window-padding-x = 10
+window-padding-y = 8
+minimum-contrast = 1

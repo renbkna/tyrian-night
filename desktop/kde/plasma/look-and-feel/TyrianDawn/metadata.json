@@ -1,0 +1,18 @@
+{
+  "KPackageStructure": "Plasma/LookAndFeel",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "renbkna"
+      }
+    ],
+    "Category": "",
+    "Description": "Tyrian Dawn look-and-feel using Tyrian-owned theme defaults.",
+    "EnabledByDefault": true,
+    "Id": "TyrianDawn",
+    "License": "Apache-2.0",
+    "Name": "Tyrian Dawn",
+    "Version": "2.0.1",
+    "Website": "https://github.com/renbkna/tyrian-night"
+  }
+}

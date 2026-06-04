@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "owner": "Tyrian Night rice",
+  "requirements": "rice/plasma-layout/requirements.md",
+  "wallpaperAsset": "assets/wallpaper-tyrian.png",
+  "layoutFiles": [
+    {
+      "homePath": ".config/plasma-org.kde.plasma.desktop-appletsrc",
+      "snapshotPath": "rice/plasma-layout/config/plasma-org.kde.plasma.desktop-appletsrc",
+      "portableWallpaper": true
+    },
+    {
+      "homePath": ".config/plasmashellrc",
+      "snapshotPath": "rice/plasma-layout/config/plasmashellrc",
+      "portableWallpaper": false
+    }
+  ]
+}

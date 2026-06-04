@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isLightHex, isTransparentHex, withHexAlpha } from './colorUtils.mjs';
+import { SOURCE_THEMES, readJson } from './themeSources.mjs';
+
 /**
  * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
  * @typedef {{
@@ -12,26 +15,9 @@ import path from 'node:path';
  *   tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
  * }} VscodeTheme
  * @typedef {'dark' | 'light'} ZedAppearance
- * @typedef {{ red: number; green: number; blue: number; alpha: number; hex: string }} ParsedHexColor
  */
 
-/** @type {Array<{ sourcePath: string; appearance: ZedAppearance }>} */
-const SOURCE_THEMES = [
-  {
-    sourcePath: 'themes/tyrian-night.json',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'themes/tyrian-dusk.json',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'themes/tyrian-dawn.json',
-    appearance: 'light',
-  },
-];
-
-const OUTPUT_PATH = 'zed/themes/tyrian-night.json';
+const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
 
 /**
  * @param {string} [repoRoot]
@@ -406,15 +392,6 @@ function tokenSettings(vscodeTheme, scope) {
 }
 
 /**
- * @template T
- * @param {string} filePath
- * @returns {T}
- */
-function readJson(filePath) {
-  return /** @type {T} */ (JSON.parse(fs.readFileSync(filePath, 'utf8')));
-}
-
-/**
  * @param {Record<string, string>} colors
  * @returns {Record<string, string>}
  */
@@ -447,63 +424,6 @@ function zedBracketMatchBackground(colors) {
   const alpha = isLightHex(colors['editor.background']) ? '1F' : '35';
 
   return withHexAlpha(border, alpha);
-}
-
-/**
- * @param {string} color
- * @returns {boolean}
- */
-function isTransparentHex(color) {
-  const parsed = parseHexColor(color);
-
-  return parsed.alpha === 0;
-}
-
-/**
- * @param {string} color
- * @returns {boolean}
- */
-function isLightHex(color) {
-  const { red, green, blue } = parseHexColor(color);
-  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-
-  return luminance > 0.5;
-}
-
-/**
- * @param {string} color
- * @param {string} alpha
- * @returns {string}
- */
-function withHexAlpha(color, alpha) {
-  const parsed = parseHexColor(color);
-
-  return `#${parsed.hex}${alpha.toUpperCase()}`;
-}
-
-/**
- * @param {string} color
- * @returns {ParsedHexColor}
- */
-function parseHexColor(color) {
-  const normalized = color.replace(/^#/, '');
-
-  if (![3, 4, 6, 8].includes(normalized.length)) {
-    throw new Error(`Unsupported hex color '${color}'`);
-  }
-
-  const expanded =
-    normalized.length <= 4
-      ? [...normalized].map((character) => `${character}${character}`).join('')
-      : normalized;
-
-  return {
-    hex: expanded.slice(0, 6).toUpperCase(),
-    red: Number.parseInt(expanded.slice(0, 2), 16),
-    green: Number.parseInt(expanded.slice(2, 4), 16),
-    blue: Number.parseInt(expanded.slice(4, 6), 16),
-    alpha: expanded.length === 8 ? Number.parseInt(expanded.slice(6, 8), 16) : 255,
-  };
 }
 
 /**

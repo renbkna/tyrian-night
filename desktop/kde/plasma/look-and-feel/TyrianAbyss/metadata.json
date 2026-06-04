@@ -1,0 +1,18 @@
+{
+  "KPackageStructure": "Plasma/LookAndFeel",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "renbkna"
+      }
+    ],
+    "Category": "",
+    "Description": "Tyrian Abyss look-and-feel using Tyrian-owned theme defaults.",
+    "EnabledByDefault": true,
+    "Id": "TyrianAbyss",
+    "License": "Apache-2.0",
+    "Name": "Tyrian Abyss",
+    "Version": "2.0.1",
+    "Website": "https://github.com/renbkna/tyrian-night"
+  }
+}

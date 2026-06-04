@@ -3,16 +3,38 @@ import fs from 'node:fs';
 import { expect, test } from 'bun:test';
 
 import { buildAllIslandCss } from '../scripts/islandCss.mjs';
+import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 const ISLAND_CSS_FILES = [
-  'themes/tyrian-night.css',
-  'themes/tyrian-dusk.css',
-  'themes/tyrian-dawn.css',
+  'apps/vscode/island/tyrian-night.css',
+  'apps/vscode/island/tyrian-night-old.css',
+  'apps/vscode/island/tyrian-abyss.css',
+  'apps/vscode/island/tyrian-dawn.css',
 ];
+
+test('Island UI theme list stays in lockstep with source themes', () => {
+  expect(ISLAND_CSS_FILES).toEqual(
+    SOURCE_THEMES.map((source) => `apps/vscode/island/${source.slug}.css`)
+  );
+});
 
 test('Island UI CSS assets match the generated template and theme tokens', () => {
   for (const { outputPath, css } of buildAllIslandCss()) {
     expect(fs.readFileSync(outputPath, 'utf8')).toBe(css);
+  }
+});
+
+test('Island UI canvas and surface palette tokens derive from source themes', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<{ colors: Record<string, string> }>(source);
+    const css = fs.readFileSync(`apps/vscode/island/${source.slug}.css`, 'utf8');
+
+    expect(css).toContain(
+      `--islands-bg-canvas: ${theme.colors['editor.background'].toLowerCase()};`
+    );
+    expect(css).toContain(
+      `--islands-bg-surface: ${theme.colors['sideBar.background'].toLowerCase()};`
+    );
   }
 });
 

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { expect, test } from 'bun:test';
 
 import { buildZedThemeFamily } from '../scripts/zedTheme.mjs';
+import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type ZedThemeFamily = {
   $schema: string;
@@ -265,20 +266,20 @@ const EXPECTED_ZED_SYNTAX_CAPTURE_KEYS = [
   'variant',
 ];
 
-test('Zed extension manifest is theme-only and installable from the zed directory', () => {
-  const manifest = fs.readFileSync('zed/extension.toml', 'utf8');
+test('Zed extension manifest is theme-only and installable from the apps/zed directory', () => {
+  const manifest = fs.readFileSync('apps/zed/extension.toml', 'utf8');
   const packageJson = readJson<{ version: string }>('package.json');
 
   expect(manifest).toContain('id = "tyrian-night-theme"');
   expect(manifest).toContain('name = "Tyrian Night"');
   expect(manifest).toContain(`version = "${packageJson.version}"`);
   expect(manifest).toContain('schema_version = 1');
-  expect(fs.existsSync('zed/themes/tyrian-night.json')).toBe(true);
-  expect(fs.existsSync('zed/Cargo.toml')).toBe(false);
+  expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
+  expect(fs.existsSync('apps/zed/Cargo.toml')).toBe(false);
 });
 
 test('Zed theme asset matches the generated Zed schema port of the VS Code themes', () => {
-  const zedTheme = readJson<ZedThemeFamily>('zed/themes/tyrian-night.json');
+  const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
   const generated = buildZedThemeFamily() as ZedThemeFamily;
 
   expect(zedTheme).toEqual(generated);
@@ -287,13 +288,14 @@ test('Zed theme asset matches the generated Zed schema port of the VS Code theme
   expect(zedTheme.author).toBe('renbkna');
   expect(zedTheme.themes.map((theme) => [theme.name, theme.appearance])).toEqual([
     ['Tyrian Night', 'dark'],
-    ['Tyrian Dusk', 'dark'],
+    ['Tyrian Night Old', 'dark'],
+    ['Tyrian Abyss', 'dark'],
     ['Tyrian Dawn', 'light'],
   ]);
 });
 
 test('Zed theme covers the current schema and built-in style and syntax surfaces', () => {
-  const zedTheme = readJson<ZedThemeFamily>('zed/themes/tyrian-night.json');
+  const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
 
   for (const theme of zedTheme.themes) {
     expect(Object.keys(theme.style).sort()).toEqual([...EXPECTED_ZED_THEME_STYLE_KEYS].sort());
@@ -304,7 +306,7 @@ test('Zed theme covers the current schema and built-in style and syntax surfaces
 });
 
 test('Zed theme keeps the core palette and syntax colors tied to the VS Code sources', () => {
-  const zedTheme = readJson<ZedThemeFamily>('zed/themes/tyrian-night.json');
+  const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
 
   for (const theme of zedTheme.themes) {
     const vscodeTheme = readJson<{
@@ -393,7 +395,7 @@ test('Zed example settings close non-theme parity gaps without becoming extensio
     ui_font_family: string;
     ui_font_size: number;
     ui_font_weight: number;
-  }>('zed/settings.example.json');
+  }>('apps/zed/settings.example.json');
 
   expect(settings.theme).toEqual({
     mode: 'dark',
@@ -457,7 +459,7 @@ test('Zed example settings close non-theme parity gaps without becoming extensio
 });
 
 test('Zed theme files do not expose VS Code-only theme fields', () => {
-  const zedTheme = readJson<Record<string, unknown>>('zed/themes/tyrian-night.json');
+  const zedTheme = readJson<Record<string, unknown>>('apps/zed/themes/tyrian-night.json');
 
   for (const forbiddenField of ['type', 'colors', 'semanticHighlighting', 'semanticTokenColors']) {
     expect(zedTheme).not.toHaveProperty(forbiddenField);
@@ -472,16 +474,15 @@ test('Zed theme files do not expose VS Code-only theme fields', () => {
 });
 
 function sourceThemePath(themeName: string): string {
-  switch (themeName) {
-    case 'Tyrian Night':
-      return 'themes/tyrian-night.json';
-    case 'Tyrian Dusk':
-      return 'themes/tyrian-dusk.json';
-    case 'Tyrian Dawn':
-      return 'themes/tyrian-dawn.json';
-    default:
-      throw new Error(`Unexpected theme '${themeName}'`);
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<{ name: string }>(source);
+
+    if (theme.name === themeName) {
+      return source.sourcePath;
+    }
   }
+
+  throw new Error(`Unexpected theme '${themeName}'`);
 }
 
 function readJson<T>(filePath: string): T {

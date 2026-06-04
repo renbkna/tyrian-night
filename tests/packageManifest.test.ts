@@ -13,17 +13,19 @@ type ExtensionPackage = {
     vscode: string;
   };
   extensionKind?: string[];
+  icon: string;
   main: string;
   scripts: Record<string, string | undefined>;
 };
 
 test('manifest declares the VS Code host and contribution contracts this extension depends on', () => {
   const manifest = readJson<ExtensionPackage>('package.json');
-  const extensionSource = fs.readFileSync('src/extension.ts', 'utf8');
+  const extensionSource = fs.readFileSync('apps/vscode/src/extension.ts', 'utf8');
 
   expect(manifest.engines.vscode).toBe('^1.118.0');
   expect(manifest.extensionKind).toEqual(['ui']);
   expect(manifest.activationEvents).toContain('onStartupFinished');
+  expect(fs.existsSync(stripRelativePrefix(manifest.icon))).toBe(true);
   expect(fs.existsSync(stripRelativePrefix(manifest.main))).toBe(true);
 
   for (const { command } of manifest.contributes.commands) {
@@ -37,16 +39,31 @@ test('manifest declares the VS Code host and contribution contracts this extensi
 
     expect(theme.name).toBe(themeContribution.label);
     expect(theme.type).toBe(themeContribution.uiTheme === 'vs' ? 'light' : 'dark');
+    expect(extensionSource).toContain(`'${themeContribution.label}':`);
+    expect(extensionSource).toContain(`'${pathBasename(themeContribution.path, '.json')}.css'`);
   }
 });
 
-test('VS Code package excludes the standalone Zed extension files', () => {
+test('VS Code package includes only VS Code runtime and marketplace assets', () => {
   const ignoredFiles = fs.readFileSync('.vscodeignore', 'utf8').split(/\r?\n/);
 
   expect(ignoredFiles).toContain('scripts/**');
-  expect(ignoredFiles).toContain('themes/island/**');
-  expect(ignoredFiles).toContain('zed/**');
-  expect(ignoredFiles).not.toContain('zed-tyrian-night/**');
+  expect(ignoredFiles).toContain('apps/vscode/src/**');
+  expect(ignoredFiles).toContain('apps/vscode/island/base.css');
+  expect(ignoredFiles).toContain('apps/zed/**');
+  expect(ignoredFiles).toContain('terminal/**');
+  expect(ignoredFiles).toContain('desktop/**');
+  expect(ignoredFiles).toContain('rice/**');
+  expect(ignoredFiles).toContain('assets/tyrian-fetch.webp');
+  expect(ignoredFiles).toContain('assets/tyrian.png');
+  expect(ignoredFiles).toContain('assets/wallpaper-tyrian.png');
+  expect(ignoredFiles).not.toContain('assets/icon.png');
+  expect(ignoredFiles).not.toContain('assets/preview.png');
+  expect(ignoredFiles).not.toContain('source/**');
+});
+
+test('repo does not keep stale packaged VSIX artifacts as proof surfaces', () => {
+  expect(fs.readdirSync('.').filter((fileName) => fileName.endsWith('.vsix'))).toEqual([]);
 });
 
 test('package scripts own the full verification path without npm shims', () => {
@@ -60,17 +77,24 @@ test('package scripts own the full verification path without npm shims', () => {
 
   expect(manifest.scripts['vscode:prepublish']).toBeUndefined();
   expect(manifest.scripts.verify).toContain('bun run check:island-css');
+  expect(manifest.scripts.verify).toContain('bun run check:rice');
   expect(manifest.scripts['package:check']).toBe('bun run verify && bun run build');
-  expect(manifest.scripts.package).toBe('bun run package:check && vsce package --no-dependencies');
+  expect(manifest.scripts.package).toBe(
+    'bun run package:check && mkdir -p dist && vsce package --no-dependencies --out dist/tyrian-night.vsix'
+  );
+  expect(manifest.scripts.package).toContain('--out dist/tyrian-night.vsix');
   expect(manifest.scripts.package).not.toContain('/tmp/npm');
   expect(manifest.devDependencies['@types/node']).toBe('^22.19.17');
   expect(manifest).not.toHaveProperty('dependencies');
   expect(manifest).toHaveProperty('overrides.picomatch', '^4.0.4');
+  expect(manifest.scripts.lint).toContain('apps/vscode/src/');
   expect(manifest.scripts.lint).toContain('scripts/');
   expect(tsconfig.compilerOptions.allowJs).toBe(true);
   expect(tsconfig.compilerOptions.checkJs).toBe(true);
+  expect(tsconfig.include).toContain('apps/vscode/src');
   expect(tsconfig.include).toContain('scripts');
   expect(tsupConfig).toContain("VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22'");
+  expect(tsupConfig).toContain('apps/vscode/src/extension.ts');
   expect(tsupConfig).not.toContain("target: 'esnext'");
   expect(ciWorkflow).toContain('bun-version: 1.3.11');
   expect(ciWorkflow).toContain('run: bun install --frozen-lockfile');
@@ -83,4 +107,8 @@ function readJson<T>(filePath: string): T {
 
 function stripRelativePrefix(filePath: string): string {
   return filePath.replace(/^\.\//, '');
+}
+
+function pathBasename(filePath: string, extension: string): string {
+  return filePath.replace(/^\.\//, '').split('/').at(-1)!.slice(0, -extension.length);
 }

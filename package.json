@@ -1,11 +1,11 @@
 {
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
-  "description": "Ultra-saturated Tyrian Night, Dusk, and Dawn themes with built-in Island UI controls",
-  "version": "2.0.0",
+  "description": "Ultra-saturated Tyrian Abyss, Night, Night Old comparison, and Dawn themes with built-in Island UI controls",
+  "version": "2.0.1",
   "type": "module",
   "publisher": "renbkna",
-  "icon": "public/icon.png",
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -26,19 +26,24 @@
   "contributes": {
     "themes": [
       {
-        "label": "Tyrian Night",
+        "label": "Tyrian Abyss",
         "uiTheme": "vs-dark",
-        "path": "./themes/tyrian-night.json"
+        "path": "./source/themes/tyrian-abyss.json"
       },
       {
-        "label": "Tyrian Dusk",
+        "label": "Tyrian Night",
         "uiTheme": "vs-dark",
-        "path": "./themes/tyrian-dusk.json"
+        "path": "./source/themes/tyrian-night.json"
+      },
+      {
+        "label": "Tyrian Night Old",
+        "uiTheme": "vs-dark",
+        "path": "./source/themes/tyrian-night-old.json"
       },
       {
         "label": "Tyrian Dawn",
         "uiTheme": "vs",
-        "path": "./themes/tyrian-dawn.json"
+        "path": "./source/themes/tyrian-dawn.json"
       }
     ],
     "commands": [
@@ -65,19 +70,25 @@
     ]
   },
   "scripts": {
-    "verify": "bun run check && bun run lint && bun run test && bun run format:check && bun run check:island-css",
+    "verify": "bun run check && bun run lint && bun run test && bun run format:check && bun run check:island-css && bun run check:terminal-themes && bun run check:desktop-themes && bun run check:rice",
     "package:check": "bun run verify && bun run build",
     "build:island-css": "node scripts/islandCss.mjs",
     "check:island-css": "node scripts/islandCss.mjs --check",
+    "build:terminal-themes": "node scripts/terminalThemes.mjs",
+    "check:terminal-themes": "node scripts/terminalThemes.mjs --check",
+    "build:desktop-themes": "node scripts/desktopThemes.mjs",
+    "check:desktop-themes": "node scripts/desktopThemes.mjs --check",
+    "rice": "node scripts/rice.mjs",
+    "check:rice": "node scripts/rice.mjs --check",
     "build": "tsup",
     "watch": "tsup --watch",
     "check": "tsc --noEmit",
     "test": "bun test",
-    "lint": "oxlint src/ tests/ scripts/",
-    "lint:fix": "oxlint src/ tests/ scripts/ --fix",
+    "lint": "oxlint apps/vscode/src/ tests/ scripts/",
+    "lint:fix": "oxlint apps/vscode/src/ tests/ scripts/ --fix",
     "format": "biome format . --write",
     "format:check": "biome format .",
-    "package": "bun run package:check && vsce package --no-dependencies"
+    "package": "bun run package:check && mkdir -p dist && vsce package --no-dependencies --out dist/tyrian-night.vsix"
   },
   "simple-git-hooks": {
     "pre-commit": "bun run verify"

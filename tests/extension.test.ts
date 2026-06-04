@@ -1,3 +1,4 @@
+import * as childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
 import { beforeEach, expect, mock, test } from 'bun:test';
@@ -13,15 +14,18 @@ const globalStateUpdates: Array<[string, unknown]> = [];
 const spawnCalls: Array<{ command: string; args: string[] }> = [];
 const warningMessages: unknown[][] = [];
 const informationMessages: unknown[][] = [];
+const pendingSpawnClosers: Array<() => void> = [];
 
 let activeTheme = 'Tyrian Night';
 let warningResponse: string | undefined = 'I Understand';
+let holdSpawnClose = false;
 
 class FakeStream extends EventEmitter {
   setEncoding(_encoding: BufferEncoding): void {}
 }
 
 mock.module('node:child_process', () => ({
+  ...childProcess,
   spawn(command: string, args: string[]) {
     spawnCalls.push({ command, args });
 
@@ -32,13 +36,19 @@ mock.module('node:child_process', () => ({
     child.stdout = new FakeStream();
     child.stderr = new FakeStream();
 
-    queueMicrotask(() => {
+    const close = () => {
       child.stdout.emit(
         'data',
         JSON.stringify({ changed: false, restoredAppRoots: [], failedAppRoots: [] })
       );
       child.emit('close', 0);
-    });
+    };
+
+    if (holdSpawnClose) {
+      pendingSpawnClosers.push(close);
+    } else {
+      queueMicrotask(close);
+    }
 
     return child;
   },
@@ -86,6 +96,7 @@ mock.module('vscode', () => ({
 beforeEach(() => {
   activeTheme = 'Tyrian Night';
   warningResponse = 'I Understand';
+  holdSpawnClose = false;
   registeredCommands.clear();
   globalStateStore.clear();
   resetObservations();
@@ -116,8 +127,45 @@ test('repair Island UI does not patch when warning acknowledgement is cancelled'
   expect(spawnCalls).toHaveLength(0);
 });
 
+test('commands serialize Island UI mutations through the sync queue', async () => {
+  holdSpawnClose = true;
+
+  const { activate } = await import('../apps/vscode/src/extension');
+  const activation = activate(createExtensionContext());
+  await waitForRegisteredCommand('tyrianNight.restoreClassicUi');
+
+  const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
+  expect(restoreCommand).toBeFunction();
+  const restore = restoreCommand?.();
+
+  try {
+    expect(spawnCalls).toHaveLength(1);
+    pendingSpawnClosers.shift()?.();
+    await activation;
+    await Promise.resolve();
+    expect(spawnCalls).toHaveLength(2);
+    pendingSpawnClosers.shift()?.();
+    await restore;
+  } finally {
+    while (pendingSpawnClosers.length > 0) {
+      pendingSpawnClosers.shift()?.();
+    }
+  }
+});
+
+test('cancelled uninstall warning restores any existing Island patch before disabling state', async () => {
+  globalStateStore.set(ISLAND_UI_ENABLED_KEY, true);
+  warningResponse = 'Cancel';
+
+  const { activate } = await import('../apps/vscode/src/extension');
+  await activate(createExtensionContext());
+
+  expect(globalStateUpdates).toContainEqual([ISLAND_UI_ENABLED_KEY, false]);
+  expect(spawnCalls.some((call) => call.args.includes('restore-all'))).toBe(true);
+});
+
 async function activateAndGetRepairCommand(): Promise<CommandHandler> {
-  const { activate } = await import('../src/extension');
+  const { activate } = await import('../apps/vscode/src/extension');
   await activate(createExtensionContext());
 
   const repairCommand = registeredCommands.get('tyrianNight.repairIslandUi');
@@ -158,4 +206,15 @@ function resetObservations(): void {
   spawnCalls.length = 0;
   warningMessages.length = 0;
   informationMessages.length = 0;
+  pendingSpawnClosers.length = 0;
+}
+
+async function waitForRegisteredCommand(command: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (registeredCommands.has(command)) {
+      return;
+    }
+
+    await Promise.resolve();
+  }
 }
