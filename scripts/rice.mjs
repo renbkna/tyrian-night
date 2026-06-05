@@ -515,7 +515,7 @@ function makeWallpaperPortable(desktopLayout, wallpaperSource) {
  */
 function sanitizePlasmaDesktopLayout(desktopLayout) {
   return desktopLayout
-    .replaceAll(/^ItemGeometries(?:-[^=]+)?=.*$/gmu, '')
+    .replaceAll(/^ItemGeometries[^=]*=.*$/gmu, '')
     .replaceAll(/^activityId=.+$/gmu, 'activityId=')
     .replaceAll(/^lastResolution=.+$/gmu, '')
     .replaceAll(/^lastScreen=.+$/gmu, '')
@@ -543,7 +543,7 @@ function assertPortablePlasmaLayoutSnapshot(desktopLayout) {
     [/^(?:Image|PreviewImage)=\//mu, 'absolute wallpaper path'],
     [/^(?:Image|PreviewImage)=file:\/\//mu, 'file URI wallpaper path'],
     [/^activityId=.+$/mu, 'KDE activity UUID'],
-    [/^ItemGeometries(?:-[^=]+)?=.+$/mu, 'display geometry state'],
+    [/^ItemGeometries[^=]*=.+$/mu, 'display geometry state'],
     [/^lastResolution=.+$/mu, 'display resolution state'],
     [/^lastScreen=.+$/mu, 'display screen assignment state'],
     [/^positions=.+desktop:\//mu, 'desktop icon positions'],

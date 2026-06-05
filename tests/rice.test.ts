@@ -79,7 +79,7 @@ test('rice snapshot is complete and portable', () => {
   expect(desktopLayout).not.toMatch(/^PreviewImage=\//mu);
   expect(desktopLayout).not.toMatch(/^(?:Image|PreviewImage)=file:\/\//mu);
   expect(desktopLayout).not.toMatch(/^activityId=.+$/mu);
-  expect(desktopLayout).not.toMatch(/^ItemGeometries(?:-[^=]+)?=.+$/mu);
+  expect(desktopLayout).not.toMatch(/^ItemGeometries[^=]*=.+$/mu);
   expect(desktopLayout).not.toMatch(/^lastResolution=.+$/mu);
   expect(desktopLayout).not.toMatch(/^lastScreen=.+$/mu);
   expect(desktopLayout).not.toMatch(/^positions=.+desktop:\//mu);
@@ -116,6 +116,7 @@ test('capturing rice keeps the requirements manifest pointer', () => {
         '[Containments][1]',
         'activityId=machine-specific',
         'ItemGeometries-2560x1440=Applet-1:128,256,592,336,0;',
+        'ItemGeometriesHorizontal=Applet-2:128,256,592,336,0;',
         'lastResolution=2048x1152',
         'lastScreen=0',
         'plugin=org.kde.desktopcontainment',
