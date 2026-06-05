@@ -147,11 +147,22 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
     'theme = dark:tyrian-night,light:tyrian-dawn'
   );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.78');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.82');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('cursor-style = bar');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-decoration = client');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-theme = ghostty');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
     'window-titlebar-background = #0C0C0C'
   );
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
+    'window-titlebar-foreground = #D0C8E0'
+  );
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar = true');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar-style = tabs');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-show-tab-bar = auto');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-tabs-location = top');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-wide-tabs = false');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-toolbar-style = flat');
   expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
     'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
