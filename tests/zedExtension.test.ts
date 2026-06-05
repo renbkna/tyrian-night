@@ -436,8 +436,8 @@ test('Zed example settings close non-theme parity gaps without becoming extensio
     background_coloring: 'disabled',
   });
   expect(settings.terminal.font_family).toBe('Monaspace Neon');
-  expect(settings.terminal.font_size).toBe(14);
-  expect(settings.terminal.line_height).toEqual({ custom: 1.4 });
+  expect(settings.terminal.font_size).toBe(8);
+  expect(settings.terminal.line_height).toEqual({ custom: 1.2 });
   expect(settings.terminal.cursor_shape).toBe('bar');
   expect(settings.terminal.blinking).toBe('terminal_controlled');
   expect(settings.terminal.minimum_contrast).toBe(0);

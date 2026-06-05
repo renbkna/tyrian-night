@@ -57,9 +57,9 @@
   "ui_font_weight": 400,
   "terminal": {
     "font_family": "Monaspace Neon",
-    "font_size": 14,
+    "font_size": 8,
     "line_height": {
-      "custom": 1.4
+      "custom": 1.2
     },
     "cursor_shape": "bar",
     "blinking": "terminal_controlled",
