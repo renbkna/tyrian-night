@@ -221,6 +221,7 @@ export function buildGhosttyConfig(options = {}) {
     'cursor-style-blink = true',
     'window-decoration = client',
     'window-theme = ghostty',
+    'window-vsync = true',
     'window-titlebar-background = #0C0C0C',
     'window-titlebar-foreground = #D0C8E0',
     'gtk-titlebar = true',
@@ -232,6 +233,7 @@ export function buildGhosttyConfig(options = {}) {
     'window-padding-x = 10',
     'window-padding-y = 8',
     'minimum-contrast = 1',
+    'mouse-scroll-multiplier = discrete:1,precision:1',
   ];
 
   if (options.gtkCustomCss) {
