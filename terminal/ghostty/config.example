@@ -1,7 +1,10 @@
 theme = dark:tyrian-night,light:tyrian-dawn
 background-opacity = 0.82
 background-blur = true
-font-family = JetBrainsMono Nerd Font
+font-family = Monaspace Neon
+font-family-bold = Monaspace Neon
+font-family-italic = Monaspace Radon
+font-family-bold-italic = Monaspace Radon
 font-size = 13
 font-thicken = false
 cursor-style = bar

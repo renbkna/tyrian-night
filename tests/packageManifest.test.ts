@@ -57,9 +57,50 @@ test('VS Code package includes only VS Code runtime and marketplace assets', () 
   expect(ignoredFiles).toContain('assets/tyrian-fetch.webp');
   expect(ignoredFiles).toContain('assets/tyrian.png');
   expect(ignoredFiles).toContain('assets/wallpaper-tyrian.png');
+  expect(ignoredFiles).toContain('assets/preview.ts');
+  expect(ignoredFiles).toContain('apps/vscode/settings.example.json');
   expect(ignoredFiles).not.toContain('assets/icon.png');
   expect(ignoredFiles).not.toContain('assets/preview.png');
   expect(ignoredFiles).not.toContain('source/**');
+});
+
+test('VS Code companion settings example is parseable and aligned with Tyrian defaults', () => {
+  const settings = readJson<Record<string, unknown>>('apps/vscode/settings.example.json');
+
+  expect(settings['workbench.colorTheme']).toBe('Tyrian Night');
+  expect(settings['editor.fontFamily']).toBe(
+    "'Monaspace Neon var', 'JetBrains Mono', 'IBM Plex Mono', monospace"
+  );
+  expect(settings['editor.fontLigatures']).toContain('ss10');
+  expect(settings['editor.inlayHints.fontFamily']).toBe(
+    "'Monaspace Radon var', 'Monaspace Neon var', 'IBM Plex Mono', 'SF Mono', monospace"
+  );
+  expect(settings['editor.lineHeight']).toBe(1.5);
+  expect(settings['terminal.integrated.defaultProfile.linux']).toBe('fish');
+  expect(settings['terminal.integrated.cursorStyle']).toBe('line');
+  expect(settings['terminal.integrated.cursorWidth']).toBe(2);
+  expect(settings['terminal.integrated.fontFamily']).toBe(
+    "'Monaspace Neon var', 'IBM Plex Mono', monospace"
+  );
+  expect(settings['files.associations']).toEqual({
+    '*.css': 'tailwindcss',
+  });
+  expect(settings).not.toHaveProperty('java.configuration.runtimes');
+  expect(settings).not.toHaveProperty('java.jdt.ls.java.home');
+  expect(settings).not.toHaveProperty('chat.tools.urls.autoApprove');
+  expect(settings).not.toHaveProperty('vscord.status.details.text.editing');
+  expect(settings).not.toHaveProperty('vscord.status.details.text.viewing');
+});
+
+test('preview source advertises the default Night preset', () => {
+  const previewSource = fs.readFileSync('assets/preview.ts', 'utf8');
+
+  expect(previewSource).toContain("dark: 'Tyrian Night'");
+  expect(previewSource).toContain('# Tyrian Night');
+  expect(previewSource).toContain("defaultMode: ThemeMode = 'night'");
+  expect(previewSource).toContain("renderPreview('night')");
+  expect(previewSource).not.toContain("defaultMode: ThemeMode = 'nocturne'");
+  expect(previewSource).not.toContain("renderPreview('nocturne')");
 });
 
 test('repo does not keep stale packaged VSIX artifacts as proof surfaces', () => {

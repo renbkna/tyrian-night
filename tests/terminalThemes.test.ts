@@ -144,19 +144,30 @@ test('Fastfetch startup config uses the Tyrian palette with the Chafa logo asset
 });
 
 test('example configs point each terminal layer at the right owner', () => {
+  const nightTheme = readSourceTheme<VscodeTheme>(SOURCE_THEMES[0]);
+
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
     'theme = dark:tyrian-night,light:tyrian-dawn'
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.82');
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
+    'font-family = Monaspace Neon'
+  );
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
+    'font-family-italic = Monaspace Radon'
+  );
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
+    'font-family-bold-italic = Monaspace Radon'
+  );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('cursor-style = bar');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-decoration = client');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-theme = ghostty');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-vsync = true');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'window-titlebar-background = #0C0C0C'
+    `window-titlebar-background = ${nightTheme.colors['terminal.background']}`
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'window-titlebar-foreground = #D0C8E0'
+    `window-titlebar-foreground = ${nightTheme.colors['terminal.foreground']}`
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar = true');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar-style = tabs');
@@ -189,6 +200,18 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
     'starship init fish | source'
   );
+});
+
+test('terminal docs list the generated theme and palette surfaces from source themes', () => {
+  const ghosttyReadme = fs.readFileSync('terminal/ghostty/README.md', 'utf8');
+  const starshipReadme = fs.readFileSync('terminal/starship/README.md', 'utf8');
+
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+
+    expect(ghosttyReadme).toContain(`- \`${source.slug}\``);
+    expect(starshipReadme).toContain(theme.name.replace(/^Tyrian /u, ''));
+  }
 });
 
 function requiredAsset(assetPath: string): string {

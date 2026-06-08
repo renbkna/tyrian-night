@@ -22,6 +22,12 @@ export const SOURCE_THEMES = [
     appearance: 'dark',
   },
   {
+    sourcePath: 'source/themes/tyrian-nocturne.json',
+    slug: 'tyrian-nocturne',
+    paletteName: 'tyrian_nocturne',
+    appearance: 'dark',
+  },
+  {
     sourcePath: 'source/themes/tyrian-night-old.json',
     slug: 'tyrian-night-old',
     paletteName: 'tyrian_night_old',

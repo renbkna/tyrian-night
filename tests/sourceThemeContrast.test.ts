@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 import { expect, test } from 'bun:test';
 
 import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
@@ -5,11 +7,14 @@ import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type HighlightSettings = {
   foreground?: string;
+  fontStyle?: string;
+  italic?: boolean;
 };
 
 type VscodeTheme = {
   colors: Record<string, string>;
   name: string;
+  semanticTokenColors: Record<string, HighlightSettings>;
   tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
 };
 
@@ -34,6 +39,85 @@ const INTERACTIVE_TEXT_PAIRS = [
   ['button.foreground', 'button.hoverBackground'],
   ['badge.foreground', 'badge.background'],
 ];
+
+const REQUIRED_WORKBENCH_COLOR_KEYS = [
+  'foreground',
+  'disabledForeground',
+  'descriptionForeground',
+  'errorForeground',
+  'focusBorder',
+  'selection.background',
+  'icon.foreground',
+  'editor.selectionForeground',
+  'editor.findMatchForeground',
+  'editor.findMatchBorder',
+  'editor.findMatchHighlightForeground',
+  'editor.hoverHighlightBackground',
+  'editor.rangeHighlightBackground',
+  'editorWhitespace.foreground',
+  'editorWidget.foreground',
+  'sideBarTitle.foreground',
+  'sideBarSectionHeader.foreground',
+  'sideBarSectionHeader.border',
+  'activityBar.inactiveForeground',
+  'activityBarBadge.background',
+  'activityBarBadge.foreground',
+  'editorGroup.border',
+  'panel.foreground',
+  'panelTitle.activeForeground',
+  'panelTitle.inactiveForeground',
+  'panelTitle.activeBorder',
+  'statusBar.border',
+  'statusBar.debuggingForeground',
+  'statusBarItem.remoteBackground',
+  'statusBarItem.remoteForeground',
+  'titleBar.border',
+  'inputOption.activeBorder',
+  'button.secondaryBackground',
+  'button.secondaryForeground',
+  'button.secondaryHoverBackground',
+  'list.errorForeground',
+  'list.warningForeground',
+  'problemsErrorIcon.foreground',
+  'problemsWarningIcon.foreground',
+  'problemsInfoIcon.foreground',
+  'diffEditor.insertedTextBackground',
+  'diffEditor.removedTextBackground',
+  'diffEditor.insertedLineBackground',
+  'diffEditor.removedLineBackground',
+  'terminalCursor.foreground',
+];
+
+const REQUIRED_SEMANTIC_SELECTORS = [
+  'variable',
+  'keyword',
+  'operator',
+  'string',
+  'number',
+  'comment',
+  '*.readonly',
+  '*.deprecated',
+  '*.documentation',
+];
+
+test('source themes expose one shared VS Code color and semantic surface', () => {
+  const themes = SOURCE_THEMES.map((source) => readSourceTheme<VscodeTheme>(source));
+  const colorKeys = Object.keys(themes[0]!.colors).sort();
+  const semanticKeys = Object.keys(themes[0]!.semanticTokenColors).sort();
+
+  for (const theme of themes) {
+    expect(Object.keys(theme.colors).sort()).toEqual(colorKeys);
+    expect(Object.keys(theme.semanticTokenColors).sort()).toEqual(semanticKeys);
+
+    for (const colorKey of REQUIRED_WORKBENCH_COLOR_KEYS) {
+      expect(theme.colors[colorKey]).toBeDefined();
+    }
+
+    for (const selector of REQUIRED_SEMANTIC_SELECTORS) {
+      expect(theme.semanticTokenColors[selector]).toBeDefined();
+    }
+  }
+});
 
 test('source themes keep load-bearing editor text within the contrast contract', () => {
   for (const source of SOURCE_THEMES) {
@@ -74,6 +158,73 @@ test('shared color parser rejects malformed source hex colors', () => {
   }
 });
 
+test('source themes reserve italics for Radon-intended prose surfaces', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+
+    for (const [selector, settings] of Object.entries(theme.semanticTokenColors)) {
+      if (isItalic(settings)) {
+        expect(isAllowedItalicSemanticSelector(selector)).toBe(true);
+      }
+
+      if (selector.includes('deprecated')) {
+        expect(settings.italic).toBeUndefined();
+        expect(settings.fontStyle ?? '').not.toContain('italic');
+      }
+    }
+
+    for (const token of theme.tokenColors) {
+      if (isItalic(token.settings)) {
+        expect(isAllowedItalicScope(token.scope)).toBe(true);
+      }
+
+      if (scopeList(token.scope).some((scope) => scope.includes('deprecated'))) {
+        expect(token.settings.fontStyle ?? '').not.toContain('italic');
+      }
+    }
+  }
+});
+
+test('source themes color JSON property names as attributes instead of callables', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const jsonPropertyColor = tokenColor(theme, 'support.type.property-name.json');
+    const parameterColor = theme.semanticTokenColors.parameter.foreground;
+    const functionColor = theme.semanticTokenColors.function.foreground;
+
+    expect(jsonPropertyColor).toBe(parameterColor);
+    expect(jsonPropertyColor).not.toBe(functionColor);
+  }
+});
+
+test('README advertises the default Night palette from the Night source theme', () => {
+  const readme = fs.readFileSync('README.md', 'utf8');
+  const nightSource = SOURCE_THEMES.find((source) => source.slug === 'tyrian-night');
+
+  expect(nightSource).toBeDefined();
+
+  const theme = readSourceTheme<VscodeTheme>(nightSource!);
+  const advertisedPalette = [
+    theme.colors['editor.background'],
+    theme.colors['editor.lineHighlightBackground'],
+    theme.colors['editor.foreground'],
+    theme.semanticTokenColors.keyword.foreground,
+    theme.semanticTokenColors.type.foreground,
+    theme.semanticTokenColors.function.foreground,
+    theme.semanticTokenColors.string.foreground,
+    theme.semanticTokenColors.number.foreground,
+    theme.semanticTokenColors.parameter.foreground,
+  ];
+
+  expect(readme).toContain('## Palette');
+
+  for (const color of advertisedPalette) {
+    expect(readme).toContain(`\`${color}\``);
+  }
+
+  expect(readme).not.toContain('| Background (Tyrian v3 Canvas) | `#0A0910` |');
+});
+
 function tokenColor(theme: VscodeTheme, scope: string): string {
   for (const token of theme.tokenColors) {
     const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
@@ -84,6 +235,29 @@ function tokenColor(theme: VscodeTheme, scope: string): string {
   }
 
   throw new Error(`Missing token scope '${scope}' in ${theme.name}`);
+}
+
+function isItalic(settings: HighlightSettings): boolean {
+  return settings.italic === true || String(settings.fontStyle ?? '').includes('italic');
+}
+
+function isAllowedItalicSemanticSelector(selector: string): boolean {
+  return selector === 'comment' || selector.includes('documentation');
+}
+
+function isAllowedItalicScope(scope: string | string[]): boolean {
+  return scopeList(scope).some(
+    (entry) =>
+      entry.startsWith('comment') ||
+      entry === 'punctuation.definition.comment' ||
+      entry === 'string.quoted.docstring' ||
+      entry === 'markup.italic' ||
+      entry === 'markup.quote'
+  );
+}
+
+function scopeList(scope: string | string[]): string[] {
+  return Array.isArray(scope) ? scope : [scope];
 }
 
 function contrastRatio(foreground: string | undefined, background: string | undefined): number {

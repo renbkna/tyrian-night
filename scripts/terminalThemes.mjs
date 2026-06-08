@@ -60,7 +60,7 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
     ]),
     {
       path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig(),
+      content: buildGhosttyConfig({ theme: sourceThemes[0].theme }),
     },
     {
       path: 'terminal/ghostty/ghostty.css',
@@ -206,15 +206,19 @@ function buildFishTheme(theme) {
 }
 
 /**
- * @param {{ gtkCustomCss?: string }} [options]
+ * @param {{ gtkCustomCss?: string; theme?: VscodeTheme }} [options]
  * @returns {string}
  */
 export function buildGhosttyConfig(options = {}) {
+  const theme = options.theme ?? /** @type {VscodeTheme} */ (readSourceTheme(SOURCE_THEMES[0]));
   const lines = [
     'theme = dark:tyrian-night,light:tyrian-dawn',
     'background-opacity = 0.82',
     'background-blur = true',
-    'font-family = JetBrainsMono Nerd Font',
+    'font-family = Monaspace Neon',
+    'font-family-bold = Monaspace Neon',
+    'font-family-italic = Monaspace Radon',
+    'font-family-bold-italic = Monaspace Radon',
     'font-size = 13',
     'font-thicken = false',
     'cursor-style = bar',
@@ -222,8 +226,8 @@ export function buildGhosttyConfig(options = {}) {
     'window-decoration = client',
     'window-theme = ghostty',
     'window-vsync = true',
-    'window-titlebar-background = #0C0C0C',
-    'window-titlebar-foreground = #D0C8E0',
+    `window-titlebar-background = ${themeColor(theme, 'terminal.background', 'editor.background')}`,
+    `window-titlebar-foreground = ${themeColor(theme, 'terminal.foreground', 'editor.foreground')}`,
     'gtk-titlebar = true',
     'gtk-titlebar-style = tabs',
     'window-show-tab-bar = auto',

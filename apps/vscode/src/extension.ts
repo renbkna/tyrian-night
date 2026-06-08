@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 const TYRIAN_THEMES: Record<string, string> = {
   'Tyrian Abyss': 'tyrian-abyss.css',
   'Tyrian Night': 'tyrian-night.css',
+  'Tyrian Nocturne': 'tyrian-nocturne.css',
   'Tyrian Night Old': 'tyrian-night-old.css',
   'Tyrian Dawn': 'tyrian-dawn.css',
 };

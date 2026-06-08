@@ -1,32 +1,32 @@
-set -g fish_color_normal 211727
-set -g fish_color_command 933E4B
-set -g fish_color_keyword 7650A8
-set -g fish_color_quote 3D7654
-set -g fish_color_redirection 4767A8
-set -g fish_color_end 7650A8
-set -g fish_color_error AD4750 --bold
-set -g fish_color_param 9A4F7F
-set -g fish_color_valid_path 3D7654 --underline
-set -g fish_color_option 8F5F1C
-set -g fish_color_comment 766A82
-set -g fish_color_selection 211727 --background=E0D2E8
-set -g fish_color_operator 7650A8
-set -g fish_color_escape 8F5F1C
-set -g fish_color_autosuggestion 9B8EA4
-set -g fish_color_cwd 933E4B
-set -g fish_color_cwd_root AD4750
-set -g fish_color_user 7650A8
-set -g fish_color_host 4767A8
-set -g fish_color_host_remote 8F5F1C
-set -g fish_color_status AD4750
-set -g fish_color_cancel AD4750 --reverse
-set -g fish_color_search_match 211727 --background=E0D2E8
-set -g fish_color_history_current 933E4B --bold
-set -g fish_pager_color_progress 9B8EA4
-set -g fish_pager_color_prefix 933E4B --bold
-set -g fish_pager_color_completion 211727
-set -g fish_pager_color_description 9B8EA4
-set -g fish_pager_color_selected_background --background=E0D2E8
-set -g fish_pager_color_selected_prefix 933E4B --bold --background=E0D2E8
-set -g fish_pager_color_selected_completion 211727 --background=E0D2E8
-set -g fish_pager_color_selected_description 9B8EA4 --background=E0D2E8
+set -g fish_color_normal 2A2433
+set -g fish_color_command A13E70
+set -g fish_color_keyword 6F35B8
+set -g fish_color_quote 2B7A4F
+set -g fish_color_redirection 235EAA
+set -g fish_color_end 6F35B8
+set -g fish_color_error B63A3A --bold
+set -g fish_color_param 86519D
+set -g fish_color_valid_path 2B7A4F --underline
+set -g fish_color_option 8A5D00
+set -g fish_color_comment 646B82
+set -g fish_color_selection 2A2433 --background=ECE3F8
+set -g fish_color_operator 6F35B8
+set -g fish_color_escape 8A5D00
+set -g fish_color_autosuggestion 7A7486
+set -g fish_color_cwd 1B7885
+set -g fish_color_cwd_root B63A3A
+set -g fish_color_user 6F35B8
+set -g fish_color_host 235EAA
+set -g fish_color_host_remote 8A5D00
+set -g fish_color_status B63A3A
+set -g fish_color_cancel B63A3A --reverse
+set -g fish_color_search_match 2A2433 --background=ECE3F8
+set -g fish_color_history_current 1B7885 --bold
+set -g fish_pager_color_progress 7A7486
+set -g fish_pager_color_prefix 1B7885 --bold
+set -g fish_pager_color_completion 2A2433
+set -g fish_pager_color_description 7A7486
+set -g fish_pager_color_selected_background --background=ECE3F8
+set -g fish_pager_color_selected_prefix 1B7885 --bold --background=ECE3F8
+set -g fish_pager_color_selected_completion 2A2433 --background=ECE3F8
+set -g fish_pager_color_selected_description 7A7486 --background=ECE3F8

@@ -5,6 +5,8 @@ Ghostty controls the terminal window: background, foreground, cursor, selection,
 Generated themes live in `terminal/ghostty/themes/`:
 
 - `tyrian-night`
+- `tyrian-nocturne`
+- `tyrian-night-old`
 - `tyrian-abyss`
 - `tyrian-dawn`
 

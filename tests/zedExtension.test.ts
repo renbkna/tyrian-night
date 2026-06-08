@@ -288,6 +288,7 @@ test('Zed theme asset matches the generated Zed schema port of the VS Code theme
   expect(zedTheme.author).toBe('renbkna');
   expect(zedTheme.themes.map((theme) => [theme.name, theme.appearance])).toEqual([
     ['Tyrian Night', 'dark'],
+    ['Tyrian Nocturne', 'dark'],
     ['Tyrian Night Old', 'dark'],
     ['Tyrian Abyss', 'dark'],
     ['Tyrian Dawn', 'light'],
@@ -352,6 +353,10 @@ test('Zed theme keeps the core palette and syntax colors tied to the VS Code sou
       tokenSettings(vscodeTheme, 'markup.quote').foreground
     );
     expect(theme.style.syntax['markup.quote']?.font_style).toBe('italic');
+    expect(theme.style.syntax.predictive?.color).toBe(
+      tokenSettings(vscodeTheme, 'comment.block.documentation').foreground
+    );
+    expect(theme.style.syntax.predictive?.font_style).toBe('italic');
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(
       tokenSettings(vscodeTheme, 'invalid.deprecated').foreground
     );
@@ -365,42 +370,19 @@ test('Zed theme keeps the core palette and syntax colors tied to the VS Code sou
   }
 });
 
-test('Zed example settings close non-theme parity gaps without becoming extension code', () => {
-  const settings = readJson<{
-    buffer_font_features: Record<string, boolean>;
-    buffer_font_family: string;
-    buffer_line_height: { custom: number };
-    buffer_font_size: number;
-    buffer_font_weight: number;
-    colorize_brackets: boolean;
-    indent_guides: {
-      active_line_width: number;
-      background_coloring: string;
-      coloring: string;
-      enabled: boolean;
-      line_width: number;
-    };
-    semantic_tokens: string;
-    soft_wrap: string;
-    tab_size: number;
-    terminal: {
-      blinking: string;
-      cursor_shape: string;
-      font_family: string;
-      font_size: number;
-      line_height: { custom: number };
-      minimum_contrast: number;
-    };
-    theme: { dark: string; light: string; mode: string };
-    ui_font_family: string;
-    ui_font_size: number;
-    ui_font_weight: number;
-  }>('apps/zed/settings.example.json');
+test('Zed example settings match the repo companion settings contract', () => {
+  const settings = readJson<Record<string, any>>('apps/zed/settings.example.json');
+  const readme = fs.readFileSync('apps/zed/README.md', 'utf8');
 
   expect(settings.theme).toEqual({
     mode: 'dark',
     dark: 'Tyrian Night',
     light: 'Tyrian Dawn',
+  });
+  expect(settings.icon_theme).toEqual({
+    mode: 'dark',
+    light: 'Colored Zed Icons Theme Dark',
+    dark: 'Colored Zed Icons Theme Dark',
   });
   expect(settings.buffer_font_family).toBe('Monaspace Neon');
   expect(settings.buffer_font_size).toBe(15);
@@ -441,20 +423,56 @@ test('Zed example settings close non-theme parity gaps without becoming extensio
   expect(settings.terminal.cursor_shape).toBe('bar');
   expect(settings.terminal.blinking).toBe('terminal_controlled');
   expect(settings.terminal.minimum_contrast).toBe(0);
+  expect(settings.cli_default_open_behavior).toBe('existing_window');
+  expect(settings.diff_view_style).toBe('unified');
+  expect(settings.helix_mode).toBe(false);
+  expect(settings.inlay_hints).toEqual({
+    enabled: true,
+    show_type_hints: true,
+    show_parameter_hints: true,
+    show_other_hints: true,
+    show_background: false,
+  });
+  expect(settings.use_on_type_format).toBe(true);
+  expect(settings.show_edit_predictions).toBe(false);
+  expect(settings.edit_predictions.provider).toBe('copilot');
+  expect(settings.autosave.after_delay.milliseconds).toBe(2000);
+  expect(settings.hover_popover_delay).toBe(300);
+  expect(settings.vertical_scroll_margin).toBe(6);
+  expect(settings.mouse_wheel_zoom).toBe(true);
+  expect(settings.max_tabs).toBe(10);
+  expect(settings.project_panel).toMatchObject({
+    dock: 'left',
+    auto_fold_dirs: false,
+    show_diagnostics: 'all',
+    indent_size: 18,
+  });
+  expect(settings.outline_panel.dock).toBe('left');
+  expect(settings.collaboration_panel.dock).toBe('left');
+  expect(settings.git_panel.dock).toBe('left');
+  expect(settings.languages.Python.language_servers).toEqual(['ty', 'ruff']);
+  expect(settings.languages.TypeScript.language_servers).toEqual(['tsgo', 'biome']);
+  expect(settings.languages.TSX.formatter.language_server.name).toBe('biome');
+  expect(settings.languages.JavaScript.code_actions_on_format).toMatchObject({
+    'source.fixAll.biome': true,
+    'source.organizeImports.biome': true,
+  });
+  expect(settings.file_types.tailwindcss).toEqual(['*.css']);
+  expect(settings.node.ignore_system_version).toBe(true);
+  expect(settings).not.toHaveProperty('agent');
 
-  for (const personalSetting of [
-    'agent',
-    'autosave',
-    'collaboration_panel',
-    'edit_predictions',
-    'file_types',
-    'git_panel',
-    'languages',
-    'node',
-    'outline_panel',
-    'project_panel',
+  for (const ownedSettingArea of [
+    'font family',
+    'inlay hints',
+    'panels',
+    'edit-prediction posture',
+    'language servers',
+    'formatters',
+    'file type mapping',
+    'terminal contrast',
+    'semantic-token mode',
   ]) {
-    expect(settings).not.toHaveProperty(personalSetting);
+    expect(readme).toContain(ownedSettingArea);
   }
 });
 

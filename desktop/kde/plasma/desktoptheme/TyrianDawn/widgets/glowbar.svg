@@ -2,16 +2,16 @@
 <svg width="36" height="36" version="1.1" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
  <defs>
   <linearGradient id="glow-fade-vertical" x1="0" x2="0" y1="0" y2="1">
-   <stop stop-color="#7650A8" stop-opacity=".48" offset="0"/>
-   <stop stop-color="#7650A8" stop-opacity="0" offset="1"/>
+   <stop stop-color="#6F35B8" stop-opacity=".48" offset="0"/>
+   <stop stop-color="#6F35B8" stop-opacity="0" offset="1"/>
   </linearGradient>
   <linearGradient id="glow-fade-horizontal" x1="0" x2="1" y1="0" y2="0">
-   <stop stop-color="#7650A8" stop-opacity=".48" offset="0"/>
-   <stop stop-color="#7650A8" stop-opacity="0" offset="1"/>
+   <stop stop-color="#6F35B8" stop-opacity=".48" offset="0"/>
+   <stop stop-color="#6F35B8" stop-opacity="0" offset="1"/>
   </linearGradient>
   <radialGradient id="glow-corner">
-   <stop stop-color="#7650A8" stop-opacity=".42" offset="0"/>
-   <stop stop-color="#7650A8" stop-opacity="0" offset="1"/>
+   <stop stop-color="#6F35B8" stop-opacity=".42" offset="0"/>
+   <stop stop-color="#6F35B8" stop-opacity="0" offset="1"/>
   </radialGradient>
  </defs>
  <g>

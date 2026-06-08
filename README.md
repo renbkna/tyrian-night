@@ -6,8 +6,8 @@ A deep, ultra-saturated visual system built on color science and exported across
 
 ## Features
 
-- **Single visual source** — `source/themes/` defines Tyrian Abyss, Night, Night Old, and Dawn for every consumer
-- **WCAG AA tuned across the family** — Abyss, Night, Night Old, and Dawn keep AAA main text and AA syntax contrast
+- **Single visual source** — `source/themes/` defines Tyrian Abyss, Night, Nocturne, Night Old, and Dawn for every consumer
+- **WCAG AA tuned across the family** — Abyss, Night, Nocturne, Night Old, and Dawn keep AAA main text and AA syntax contrast
 - **Perceptually distinct core palette** — advertised syntax roles are separated by CIEDE2000 ΔE > 12
 - **True dark backgrounds** — Abyss starts at `#030207` and Night at `#0C0C0C`, optimized for OLED and dim environments
 - **Full semantic highlighting** — declared natively, no configuration needed
@@ -35,11 +35,14 @@ This repo defines the Tyrian Night visual identity and exports it everywhere I u
 
 > If you use Island UI, read the [uninstall warning](#island-ui) before enabling or removing it.
 
+The source repo includes a [VS Code companion settings example](https://github.com/renbkna/tyrian-night/blob/main/apps/vscode/settings.example.json) for typography, editor chrome, terminal font, file nesting, language formatters, and Tyrian defaults.
+
 ## Palette
 
 | Role | Hex | Ratio | Level |
 |:-----|:-----|------:|:------|
 | Background (Tyrian Canvas) | `#0C0C0C` | — | — |
+| Active line (Reading Surface) | `#181820` | — | — |
 | Variables (Soft Lilac) | `#D0C8E0` | 12.13:1 | AAA |
 | Keywords (Amethyst Purple) | `#8D69C1` | 4.59:1 | AA |
 | Types (Deep Cobalt) | `#5A78C0` | 4.55:1 | AA |
@@ -49,6 +52,7 @@ This repo defines the Tyrian Night visual identity and exports it everywhere I u
 | Parameters (Orchid Pink) | `#B068A0` | 4.97:1 | AA |
 
 UI chrome elements (line numbers, breadcrumbs) use lower contrast (~2.8:1) to reduce visual noise.
+`Tyrian Nocturne` is the free redesign built around the active line as the real reading background.
 `Tyrian Night Old` is included as a comparison preset with the previous keyword `#8B6ABD` and method `#3A9690` syntax palette.
 
 <details>
@@ -70,6 +74,8 @@ UI chrome elements (line numbers, breadcrumbs) use lower contrast (~2.8:1) to re
   "terminal.integrated.lineHeight": 1.4
 }
 ```
+
+Italic syntax is reserved for prose surfaces: comments, doc comments, notes, TODO-style annotations inside comments, and Markdown emphasis or quotes. Deprecated code is strikethrough only. When your editor or terminal can route italic text to a separate face, use `Monaspace Radon` as the italic/comment voice.
 
 </details>
 

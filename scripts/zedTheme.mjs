@@ -301,7 +301,7 @@ function buildSyntax(vscodeTheme) {
     operator: highlight(keyword),
     parameter: highlight(semantic.parameter),
     preproc: highlight(semantic.macro),
-    predictive: highlight(functionStyle),
+    predictive: highlight(docComment),
     primary: highlight(variable),
     property: highlight(semantic.property),
     'property.css': highlight(cssProperty),

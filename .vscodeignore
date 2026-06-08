@@ -12,6 +12,7 @@ apps/vscode/src/**
 tests/**
 scripts/**
 apps/vscode/island/base.css
+apps/vscode/settings.example.json
 apps/zed/**
 terminal/**
 desktop/**
@@ -19,6 +20,7 @@ rice/**
 assets/tyrian-fetch.webp
 assets/tyrian.png
 assets/wallpaper-tyrian.png
+assets/preview.ts
 tsconfig.json
 tsup.config.ts
 biome.json

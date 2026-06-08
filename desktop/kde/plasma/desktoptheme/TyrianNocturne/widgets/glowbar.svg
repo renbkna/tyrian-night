@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="36" height="36" version="1.1" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+ <defs>
+  <linearGradient id="glow-fade-vertical" x1="0" x2="0" y1="0" y2="1">
+   <stop stop-color="#A66CFF" stop-opacity=".48" offset="0"/>
+   <stop stop-color="#A66CFF" stop-opacity="0" offset="1"/>
+  </linearGradient>
+  <linearGradient id="glow-fade-horizontal" x1="0" x2="1" y1="0" y2="0">
+   <stop stop-color="#A66CFF" stop-opacity=".48" offset="0"/>
+   <stop stop-color="#A66CFF" stop-opacity="0" offset="1"/>
+  </linearGradient>
+  <radialGradient id="glow-corner">
+   <stop stop-color="#A66CFF" stop-opacity=".42" offset="0"/>
+   <stop stop-color="#A66CFF" stop-opacity="0" offset="1"/>
+  </radialGradient>
+ </defs>
+ <g>
+  <rect id="topleft" x="0" y="0" width="12" height="12" fill="url(#glow-corner)"/>
+  <rect id="top" x="12" y="0" width="12" height="12" fill="url(#glow-fade-vertical)"/>
+  <rect id="topright" x="24" y="0" width="12" height="12" fill="url(#glow-corner)"/>
+  <rect id="right" x="24" y="12" width="12" height="12" transform="rotate(90 30 18)" fill="url(#glow-fade-horizontal)"/>
+  <rect id="bottomright" x="24" y="24" width="12" height="12" fill="url(#glow-corner)"/>
+  <rect id="bottom" x="12" y="24" width="12" height="12" transform="rotate(180 18 30)" fill="url(#glow-fade-vertical)"/>
+  <rect id="bottomleft" x="0" y="24" width="12" height="12" fill="url(#glow-corner)"/>
+  <rect id="left" x="0" y="12" width="12" height="12" fill="url(#glow-fade-horizontal)"/>
+ </g>
+ <g fill="#ff00ff">
+  <rect id="hint-glow-radius" width="5" height="5"/>
+  <rect id="hint-stretch-borders" x="7" width="5" height="5"/>
+ </g>
+</svg>

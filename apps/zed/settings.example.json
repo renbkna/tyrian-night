@@ -5,7 +5,7 @@
     "dark": "Tyrian Night"
   },
   "icon_theme": {
-    "mode": "light",
+    "mode": "dark",
     "light": "Colored Zed Icons Theme Dark",
     "dark": "Colored Zed Icons Theme Dark"
   },
@@ -30,6 +30,13 @@
     "active_line_width": 1,
     "coloring": "indent_aware",
     "background_coloring": "disabled"
+  },
+  "inlay_hints": {
+    "enabled": true,
+    "show_type_hints": true,
+    "show_parameter_hints": true,
+    "show_other_hints": true,
+    "show_background": false
   },
   "buffer_font_family": "Monaspace Neon",
   "buffer_font_size": 15,
@@ -65,8 +72,93 @@
     "blinking": "terminal_controlled",
     "minimum_contrast": 0
   },
+  "cli_default_open_behavior": "existing_window",
+  "diff_view_style": "unified",
+  "helix_mode": false,
   "soft_wrap": "bounded",
-  "smooth_scroll": true,
   "preferred_line_length": 120,
-  "tab_size": 4
+  "tab_size": 4,
+  "use_on_type_format": true,
+  "show_edit_predictions": false,
+  "edit_predictions": {
+    "provider": "copilot"
+  },
+  "autosave": {
+    "after_delay": {
+      "milliseconds": 2000
+    }
+  },
+  "hover_popover_delay": 300,
+  "vertical_scroll_margin": 6,
+  "mouse_wheel_zoom": true,
+  "max_tabs": 10,
+  "project_panel": {
+    "dock": "left",
+    "auto_fold_dirs": false,
+    "show_diagnostics": "all",
+    "indent_size": 18,
+    "indent_guides": {
+      "show": "always"
+    },
+    "scrollbar": {
+      "show": "auto",
+      "horizontal_scroll": true
+    }
+  },
+  "outline_panel": {
+    "dock": "left"
+  },
+  "collaboration_panel": {
+    "dock": "left"
+  },
+  "git_panel": {
+    "dock": "left"
+  },
+  "languages": {
+    "Python": {
+      "language_servers": ["ty", "ruff"]
+    },
+    "TypeScript": {
+      "language_servers": ["tsgo", "biome"],
+      "formatter": {
+        "language_server": {
+          "name": "biome"
+        }
+      },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "TSX": {
+      "language_servers": ["tsgo", "biome"],
+      "formatter": {
+        "language_server": {
+          "name": "biome"
+        }
+      },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "JavaScript": {
+      "language_servers": ["tsgo", "biome"],
+      "formatter": {
+        "language_server": {
+          "name": "biome"
+        }
+      },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    }
+  },
+  "file_types": {
+    "tailwindcss": ["*.css"]
+  },
+  "node": {
+    "ignore_system_version": true
+  }
 }
