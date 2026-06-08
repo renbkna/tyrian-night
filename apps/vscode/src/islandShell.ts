@@ -1,24 +1,26 @@
 import crypto from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-const WORKBENCH_DIR_RELATIVE_PATH = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
-const WORKBENCH_HTML_RELATIVE_PATH = path.join(WORKBENCH_DIR_RELATIVE_PATH, 'workbench.html');
-const PRODUCT_JSON_RELATIVE_PATH = 'product.json';
-const WORKBENCH_CHECKSUM_KEY = 'vs/code/electron-browser/workbench/workbench.html';
-const WORKBENCH_CSS_LINK =
-  '<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">';
+import {
+  BACKUP_HTML_FILE_NAME,
+  BACKUP_PRODUCT_FILE_NAME,
+  ISLAND_CSS_FILE_NAME,
+  ISLAND_MANIFEST_FILE_NAME,
+  ISLAND_PATCH_CONTRACT_VERSION,
+  ISLAND_PATCH_STRATEGY,
+  TYRIAN_MARKER_END,
+  TYRIAN_MARKER_START,
+  WORKBENCH_CHECKSUM_KEY,
+  WORKBENCH_CSS_LINK,
+  buildIslandPatchPaths,
+  buildManagedRootsRegistryPath,
+  isIslandManifestV2,
+  type IslandManifestV2,
+  type IslandPatchPaths,
+} from './islandPatchContract.js';
 
-const ISLAND_CSS_FILE_NAME = 'tyrian-night.island.css';
-const ISLAND_MANIFEST_FILE_NAME = 'tyrian-night.island.json';
-const BACKUP_HTML_FILE_NAME = 'tyrian-night.workbench.backup.html';
-const BACKUP_PRODUCT_FILE_NAME = 'tyrian-night.product.backup.json';
-const MANAGED_ROOTS_DIR_NAME = '.tyrian-night';
-const MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
-
-const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
-const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
 const TYRIAN_BLOCK_PATTERN = new RegExp(
   String.raw`${escapeRegExp(TYRIAN_MARKER_START)}[\s\S]*?${escapeRegExp(TYRIAN_MARKER_END)}\s*`,
   'g'
@@ -28,21 +30,16 @@ type ProductJson = {
   checksums?: Record<string, string>;
 };
 
-type PatchPaths = {
-  workbenchDirPath: string;
-  workbenchHtmlPath: string;
-  productJsonPath: string;
-  islandCssPath: string;
-  manifestPath: string;
-  backupHtmlPath: string;
-  backupProductJsonPath: string;
-};
-
-type IslandManifest = {
-  version: 1;
-  themeVersion: string;
-  installedAt: string;
-  checksum: string;
+type ApplyPayload = {
+  paths: IslandPatchPaths;
+  baseHtml: string;
+  baseProductJson: string;
+  cssSource: string;
+  patchedHtml: string;
+  patchedProductJson: string;
+  manifest: string;
+  shouldRegisterAppRoot: boolean;
+  registeredAppRoots: string[];
 };
 
 export type IslandShellStatus = {
@@ -60,6 +57,19 @@ export type IslandShellStatus = {
     | 'checksum-mismatch';
   verificationPassed: boolean;
   canSelfHeal: boolean;
+  restoreProof: 'none' | 'manifest-v2-backup-pair' | 'strip-tyrian-block';
+  workbenchChecksum: string | undefined;
+  productWorkbenchChecksum: string | undefined;
+  receipt:
+    | {
+        installedAt: string;
+        themeVersion: string;
+        patchStrategy: typeof ISLAND_PATCH_STRATEGY;
+        upstreamWorkbenchChecksum: string;
+        patchedWorkbenchChecksum: string;
+        cssChecksum: string;
+      }
+    | undefined;
   issues: string[];
 };
 
@@ -73,6 +83,44 @@ export type IslandShellCleanupSummary = {
   restoredAppRoots: string[];
   failedAppRoots: Array<{ appRoot: string; reason: string }>;
 };
+
+export type IslandShellWriteAccess = {
+  writable: boolean;
+  checkedPaths: string[];
+  blockedPaths: Array<{ path: string; reason: string }>;
+  issues: string[];
+};
+
+export type IslandShellApplyReadiness =
+  | {
+      kind: 'ready';
+      appRoot: string;
+      changed: boolean;
+      status: IslandShellStatus;
+      writeAccess: IslandShellWriteAccess;
+    }
+  | {
+      kind: 'permission-required';
+      appRoot: string;
+      changed: boolean;
+      status: IslandShellStatus;
+      writeAccess: IslandShellWriteAccess;
+      reason: string;
+    }
+  | {
+      kind: 'unsupported';
+      appRoot: string;
+      status: IslandShellStatus | undefined;
+      writeAccess: IslandShellWriteAccess | undefined;
+      reason: string;
+    }
+  | {
+      kind: 'blocked';
+      appRoot: string;
+      status: IslandShellStatus | undefined;
+      writeAccess: IslandShellWriteAccess | undefined;
+      reason: string;
+    };
 
 type ManagedRootsRegistry = {
   version: 1;
@@ -89,12 +137,13 @@ type RootCandidate = {
 };
 
 type IslandRootState = {
-  paths: PatchPaths;
+  paths: IslandPatchPaths;
   currentHtml: string;
   currentProductJson: string;
   backupHtml: string | undefined;
   backupProductJson: string | undefined;
   hasTyrianSidecars: boolean;
+  manifestValid: boolean;
   checksumMatches: boolean;
   status: IslandShellStatus;
 };
@@ -127,39 +176,119 @@ export async function applyIslandShell(options: {
   themeVersion: string;
   registryHome?: string;
 }): Promise<IslandShellResult> {
-  const paths = getPatchPaths(options.appRoot);
-  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-  const cssSource = await fs.readFile(options.cssSourcePath, 'utf8');
-  const existingManifest = parseManifest(await readTextFileIfExists(paths.manifestPath));
-
-  const baseHtml = stripTyrianBlock(currentHtml);
-  const baseProductJson = setWorkbenchChecksum(currentProductJson, baseHtml);
-  const cssHash = sha256Base64(cssSource).substring(0, 12);
-  const patchedHtml = injectIslandStylesheet(baseHtml, cssHash);
-  const patchedProductJson = setWorkbenchChecksum(baseProductJson, patchedHtml);
-  const manifest = serializeManifest({
-    version: 1,
-    themeVersion: options.themeVersion,
-    installedAt: existingManifest?.installedAt ?? new Date().toISOString(),
-    checksum: sha256Base64(patchedHtml),
-  });
+  const payload = await buildApplyPayload(options);
+  const { paths } = payload;
 
   let changed = false;
 
   await fs.mkdir(paths.workbenchDirPath, { recursive: true });
-  changed = (await writeIfChanged(paths.backupHtmlPath, baseHtml)) || changed;
-  changed = (await writeIfChanged(paths.backupProductJsonPath, baseProductJson)) || changed;
-  changed = (await writeIfChanged(paths.islandCssPath, cssSource)) || changed;
-  changed = (await writeIfChanged(paths.workbenchHtmlPath, patchedHtml)) || changed;
-  changed = (await writeIfChanged(paths.productJsonPath, patchedProductJson)) || changed;
-  changed = (await writeIfChanged(paths.manifestPath, manifest)) || changed;
-  changed = (await addManagedAppRoot(options.appRoot, options)) || changed;
+  changed = (await writeIfChanged(paths.backupHtmlPath, payload.baseHtml)) || changed;
+  changed = (await writeIfChanged(paths.backupProductJsonPath, payload.baseProductJson)) || changed;
+  changed = (await writeIfChanged(paths.islandCssPath, payload.cssSource)) || changed;
+  changed = (await writeIfChanged(paths.workbenchHtmlPath, payload.patchedHtml)) || changed;
+  changed = (await writeIfChanged(paths.productJsonPath, payload.patchedProductJson)) || changed;
+  changed = (await writeIfChanged(paths.manifestPath, payload.manifest)) || changed;
+
+  if (payload.shouldRegisterAppRoot) {
+    await writeManagedAppRootsRegistry(payload.registeredAppRoots, options);
+    changed = true;
+  }
+
   await verifyAppliedShell(paths);
 
   return {
     changed,
     active: true,
+  };
+}
+
+export async function readIslandShellApplyReadiness(options: {
+  appRoot: string;
+  cssSourcePath: string;
+  themeVersion: string;
+  registryHome?: string;
+}): Promise<IslandShellApplyReadiness> {
+  let status: IslandShellStatus | undefined;
+  let writeAccess: IslandShellWriteAccess | undefined;
+
+  try {
+    status = await readIslandShellStatus(options);
+    writeAccess = await readIslandShellWriteAccess(options);
+    const payload = await buildApplyPayload(options);
+    const changed = await wouldApplyPayloadChange(payload);
+
+    if (!writeAccess.writable && changed) {
+      return {
+        kind: 'permission-required',
+        appRoot: options.appRoot,
+        changed,
+        status,
+        writeAccess,
+        reason: 'Tyrian needs write access to the VS Code app files to manage Island UI.',
+      };
+    }
+
+    return {
+      kind: 'ready',
+      appRoot: options.appRoot,
+      changed,
+      status,
+      writeAccess,
+    };
+  } catch (error) {
+    if (isPermissionError(error)) {
+      status ??= await readIslandShellStatus(options);
+      writeAccess ??= await readIslandShellWriteAccess(options);
+
+      return {
+        kind: 'permission-required',
+        appRoot: options.appRoot,
+        changed: true,
+        status,
+        writeAccess,
+        reason:
+          'Tyrian needs write access to the VS Code app files to inspect or update Island UI.',
+      };
+    }
+
+    const reason = error instanceof Error ? error.message : String(error);
+    const kind = isUnsupportedLayoutMessage(reason) ? 'unsupported' : 'blocked';
+
+    return {
+      kind,
+      appRoot: options.appRoot,
+      status,
+      writeAccess,
+      reason,
+    };
+  }
+}
+
+export async function readIslandShellWriteAccess(options: {
+  appRoot: string;
+}): Promise<IslandShellWriteAccess> {
+  const paths = getPatchPaths(options.appRoot);
+  const checkedPaths = [paths.workbenchDirPath, paths.workbenchHtmlPath, paths.productJsonPath];
+  const blockedPaths: IslandShellWriteAccess['blockedPaths'] = [];
+
+  for (const filePath of checkedPaths) {
+    try {
+      await fs.access(filePath, fsConstants.W_OK);
+    } catch (error) {
+      blockedPaths.push({
+        path: filePath,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const issues = blockedPaths.map(({ path: filePath }) => `Tyrian cannot write '${filePath}'.`);
+
+  return {
+    writable: blockedPaths.length === 0,
+    checkedPaths,
+    blockedPaths,
+    issues,
   };
 }
 
@@ -243,6 +372,10 @@ export async function readIslandShellStatus(options: {
         classification: 'permission-denied',
         verificationPassed: false,
         canSelfHeal: false,
+        restoreProof: 'none',
+        workbenchChecksum: undefined,
+        productWorkbenchChecksum: undefined,
+        receipt: undefined,
         issues: ['Tyrian could not read the VS Code installation files due to permissions.'],
       };
     }
@@ -256,6 +389,10 @@ export async function readIslandShellStatus(options: {
         classification: 'missing',
         verificationPassed: false,
         canSelfHeal: registered,
+        restoreProof: 'none',
+        workbenchChecksum: undefined,
+        productWorkbenchChecksum: undefined,
+        receipt: undefined,
         issues: ['Tyrian could not find the registered VS Code installation files.'],
       };
     }
@@ -297,7 +434,7 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
   const manifestExists = manifestContent !== undefined;
   const manifestValid = manifestExists && manifest !== undefined;
   const manifestChecksumMismatch =
-    manifest !== undefined && manifest.checksum !== sha256Base64(currentHtml);
+    manifest !== undefined && manifest.patchedWorkbenchChecksum !== sha256Base64(currentHtml);
   const backupHtmlExists = backupHtml !== undefined;
   const backupProductExists = backupProductJson !== undefined;
   const hasTyrianSidecars = cssExists || manifestExists || backupHtmlExists || backupProductExists;
@@ -309,6 +446,10 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
     backupHtml !== undefined &&
     backupProductJson !== undefined &&
     !doesWorkbenchChecksumValueMatch(backupProductJson, backupHtml);
+  const backupPairValid =
+    backupHtml !== undefined &&
+    backupProductJson !== undefined &&
+    doesWorkbenchChecksumValueMatch(backupProductJson, backupHtml);
   const brokenBackup =
     backupMismatch ||
     backupPairInvalid ||
@@ -370,6 +511,25 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
   }
 
   const verificationPassed = classification === 'clean' || classification === 'patched';
+  const workbenchChecksum = sha256Base64(currentHtml);
+  const productWorkbenchChecksum = tryReadWorkbenchChecksum(currentProductJson);
+  const restoreProof =
+    active && manifestValid && backupPairValid
+      ? 'manifest-v2-backup-pair'
+      : hasTyrianEvidence
+        ? 'strip-tyrian-block'
+        : 'none';
+  const receipt =
+    manifest === undefined
+      ? undefined
+      : {
+          installedAt: manifest.installedAt,
+          themeVersion: manifest.themeVersion,
+          patchStrategy: manifest.patchStrategy,
+          upstreamWorkbenchChecksum: manifest.upstreamWorkbenchChecksum,
+          patchedWorkbenchChecksum: manifest.patchedWorkbenchChecksum,
+          cssChecksum: manifest.cssChecksum,
+        };
 
   return {
     paths,
@@ -378,6 +538,7 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
     backupHtml,
     backupProductJson,
     hasTyrianSidecars,
+    manifestValid,
     checksumMatches,
     status: {
       appRoot,
@@ -390,9 +551,78 @@ async function inspectIslandRoot(appRoot: string, registered: boolean): Promise<
         classification === 'managed-only' ||
         (hasTyrianEvidence &&
           (classification === 'broken-backup' || classification === 'checksum-mismatch')),
+      restoreProof,
+      workbenchChecksum,
+      productWorkbenchChecksum,
+      receipt,
       issues,
     },
   };
+}
+
+async function buildApplyPayload(options: {
+  appRoot: string;
+  cssSourcePath: string;
+  themeVersion: string;
+  registryHome?: string;
+}): Promise<ApplyPayload> {
+  const paths = getPatchPaths(options.appRoot);
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+  const cssSource = await fs.readFile(options.cssSourcePath, 'utf8');
+  const existingManifest = parseManifest(await readTextFileIfExists(paths.manifestPath));
+  const appRoots = await readManagedAppRootsRegistry(options);
+  const registeredAppRoots = appRoots.includes(options.appRoot)
+    ? appRoots
+    : [...appRoots, options.appRoot].sort((left, right) => left.localeCompare(right));
+
+  const baseHtml = stripTyrianBlock(currentHtml);
+  const baseProductJson = setWorkbenchChecksum(currentProductJson, baseHtml);
+  const cssHash = sha256Base64(cssSource).substring(0, 12);
+  const patchedHtml = injectIslandStylesheet(baseHtml, cssHash);
+  const patchedProductJson = setWorkbenchChecksum(baseProductJson, patchedHtml);
+  const manifest = serializeManifest({
+    version: ISLAND_PATCH_CONTRACT_VERSION,
+    themeVersion: options.themeVersion,
+    installedAt: existingManifest?.installedAt ?? new Date().toISOString(),
+    appRoot: options.appRoot,
+    patchStrategy: ISLAND_PATCH_STRATEGY,
+    upstreamWorkbenchChecksum: sha256Base64(baseHtml),
+    upstreamProductChecksum: sha256Base64(baseProductJson),
+    cssChecksum: sha256Base64(cssSource),
+    patchedWorkbenchChecksum: sha256Base64(patchedHtml),
+    patchedProductChecksum: sha256Base64(patchedProductJson),
+    ownedFiles: {
+      stylesheet: ISLAND_CSS_FILE_NAME,
+      manifest: ISLAND_MANIFEST_FILE_NAME,
+      workbenchBackup: BACKUP_HTML_FILE_NAME,
+      productBackup: BACKUP_PRODUCT_FILE_NAME,
+    },
+  });
+
+  return {
+    paths,
+    baseHtml,
+    baseProductJson,
+    cssSource,
+    patchedHtml,
+    patchedProductJson,
+    manifest,
+    shouldRegisterAppRoot: !appRoots.includes(options.appRoot),
+    registeredAppRoots,
+  };
+}
+
+async function wouldApplyPayloadChange(payload: ApplyPayload): Promise<boolean> {
+  return (
+    payload.shouldRegisterAppRoot ||
+    (await readTextFileIfExists(payload.paths.backupHtmlPath)) !== payload.baseHtml ||
+    (await readTextFileIfExists(payload.paths.backupProductJsonPath)) !== payload.baseProductJson ||
+    (await readTextFileIfExists(payload.paths.islandCssPath)) !== payload.cssSource ||
+    (await readTextFileIfExists(payload.paths.workbenchHtmlPath)) !== payload.patchedHtml ||
+    (await readTextFileIfExists(payload.paths.productJsonPath)) !== payload.patchedProductJson ||
+    (await readTextFileIfExists(payload.paths.manifestPath)) !== payload.manifest
+  );
 }
 
 async function listIslandShellRoots(
@@ -452,7 +682,7 @@ function buildRestorePlan(state: IslandRootState): RestorePlan {
     };
   }
 
-  if (state.status.active && hasValidBackupPair(state)) {
+  if (state.status.active && state.manifestValid && hasValidBackupPair(state)) {
     return {
       kind: 'restore-from-backup',
       html: state.backupHtml,
@@ -510,7 +740,7 @@ async function commitRestorePlan(
   return changed;
 }
 
-async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
+async function verifyAppliedShell(paths: IslandPatchPaths): Promise<void> {
   const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
 
@@ -530,7 +760,7 @@ async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
 
   const manifest = parseManifest(await fs.readFile(paths.manifestPath, 'utf8'));
 
-  if (!manifest || manifest.checksum !== sha256Base64(currentHtml)) {
+  if (!manifest || manifest.patchedWorkbenchChecksum !== sha256Base64(currentHtml)) {
     throw new Error(
       'Tyrian Night verification failed: island manifest checksum does not match the patched workbench after apply.'
     );
@@ -543,7 +773,7 @@ async function verifyAppliedShell(paths: PatchPaths): Promise<void> {
   }
 }
 
-async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
+async function verifyRestoredShell(paths: IslandPatchPaths): Promise<void> {
   const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
 
@@ -562,7 +792,7 @@ async function verifyRestoredShell(paths: PatchPaths): Promise<void> {
   }
 }
 
-async function verifyManagedStateRemoved(paths: PatchPaths): Promise<void> {
+async function verifyManagedStateRemoved(paths: IslandPatchPaths): Promise<void> {
   for (const filePath of [
     paths.islandCssPath,
     paths.manifestPath,
@@ -577,7 +807,7 @@ async function verifyManagedStateRemoved(paths: PatchPaths): Promise<void> {
   }
 }
 
-async function deleteSidecars(paths: PatchPaths): Promise<boolean> {
+async function deleteSidecars(paths: IslandPatchPaths): Promise<boolean> {
   let changed = false;
 
   changed = (await deleteIfExists(paths.islandCssPath)) || changed;
@@ -599,26 +829,12 @@ function hasValidBackupPair(state: IslandRootState): state is IslandRootState & 
   );
 }
 
-function getPatchPaths(appRoot: string): PatchPaths {
-  const workbenchDirPath = path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH);
-
-  return {
-    workbenchDirPath,
-    workbenchHtmlPath: path.join(appRoot, WORKBENCH_HTML_RELATIVE_PATH),
-    productJsonPath: path.join(appRoot, PRODUCT_JSON_RELATIVE_PATH),
-    islandCssPath: path.join(workbenchDirPath, ISLAND_CSS_FILE_NAME),
-    manifestPath: path.join(workbenchDirPath, ISLAND_MANIFEST_FILE_NAME),
-    backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
-    backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
-  };
+function getPatchPaths(appRoot: string): IslandPatchPaths {
+  return buildIslandPatchPaths(appRoot);
 }
 
 function getManagedRootsRegistryPath(environment?: IslandShellEnvironment): string {
-  return path.join(
-    environment?.registryHome ?? os.homedir(),
-    MANAGED_ROOTS_DIR_NAME,
-    MANAGED_ROOTS_FILE_NAME
-  );
+  return buildManagedRootsRegistryPath(environment?.registryHome);
 }
 
 function stripTyrianBlock(html: string): string {
@@ -663,6 +879,14 @@ function readWorkbenchChecksum(productJsonContent: string): string {
   return parsed.checksums[WORKBENCH_CHECKSUM_KEY];
 }
 
+function tryReadWorkbenchChecksum(productJsonContent: string): string | undefined {
+  try {
+    return readWorkbenchChecksum(productJsonContent);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseProductJson(productJsonContent: string): ProductJson & {
   checksums: Record<string, string>;
 } {
@@ -681,33 +905,27 @@ function parseProductJson(productJsonContent: string): ProductJson & {
   return parsed as ProductJson & { checksums: Record<string, string> };
 }
 
-function serializeManifest(manifest: IslandManifest): string {
+function serializeManifest(manifest: IslandManifestV2): string {
   return JSON.stringify(manifest, null, 2).concat('\n');
 }
 
-function parseManifest(content: string | undefined): IslandManifest | undefined {
+function parseManifest(content: string | undefined): IslandManifestV2 | undefined {
   if (!content) {
     return undefined;
   }
 
   try {
-    const parsed = JSON.parse(content) as Partial<IslandManifest>;
+    const parsed = JSON.parse(content) as Partial<IslandManifestV2>;
 
-    if (
-      parsed.version !== 1 ||
-      typeof parsed.themeVersion !== 'string' ||
-      typeof parsed.installedAt !== 'string' ||
-      typeof parsed.checksum !== 'string'
-    ) {
+    if (parsed.version !== ISLAND_PATCH_CONTRACT_VERSION) {
       return undefined;
     }
 
-    return {
-      version: 1,
-      themeVersion: parsed.themeVersion,
-      installedAt: parsed.installedAt,
-      checksum: parsed.checksum,
-    };
+    if (!isIslandManifestV2(parsed)) {
+      return undefined;
+    }
+
+    return parsed;
   } catch {
     return undefined;
   }
@@ -715,22 +933,6 @@ function parseManifest(content: string | undefined): IslandManifest | undefined 
 
 function sha256Base64(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
-}
-
-async function addManagedAppRoot(
-  appRoot: string,
-  environment?: IslandShellEnvironment
-): Promise<boolean> {
-  const appRoots = await readManagedAppRootsRegistry(environment);
-
-  if (appRoots.includes(appRoot)) {
-    return false;
-  }
-
-  appRoots.push(appRoot);
-  appRoots.sort((left, right) => left.localeCompare(right));
-  await writeManagedAppRootsRegistry(appRoots, environment);
-  return true;
 }
 
 async function removeManagedAppRoot(
@@ -907,6 +1109,10 @@ function isPermissionError(error: unknown): boolean {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
+}
+
+function isUnsupportedLayoutMessage(message: string): boolean {
+  return message.startsWith('Unsupported ');
 }
 
 function escapeRegExp(value: string): string {

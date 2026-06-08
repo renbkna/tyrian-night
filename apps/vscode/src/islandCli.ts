@@ -5,6 +5,11 @@ import {
   restoreAllIslandShells,
   restoreIslandShell,
 } from './islandShell.js';
+import {
+  applyIslandUiSupervised,
+  readIslandUiSupervisorStatuses,
+  restoreIslandUiSupervised,
+} from './islandSupervisor.js';
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
@@ -23,11 +28,30 @@ async function main(): Promise<void> {
         })
       );
       return;
+    case 'apply-supervised':
+      requireArg(args, 'app-root');
+      requireArg(args, 'css-source');
+      requireArg(args, 'theme-version');
+      writeJson(
+        await applyIslandUiSupervised({
+          appRoot: args['app-root'],
+          cssSourcePath: args['css-source'],
+          themeVersion: args['theme-version'],
+        })
+      );
+      return;
     case 'restore':
       requireArg(args, 'app-root');
       writeJson(
         await restoreIslandShell({
           appRoot: args['app-root'],
+        })
+      );
+      return;
+    case 'restore-supervised':
+      writeJson(
+        await restoreIslandUiSupervised({
+          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
         })
       );
       return;
@@ -53,9 +77,16 @@ async function main(): Promise<void> {
         })
       );
       return;
+    case 'status-all-supervised':
+      writeJson(
+        await readIslandUiSupervisorStatuses({
+          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
+        })
+      );
+      return;
     default:
       throw new Error(
-        "Unknown Tyrian Night CLI command. Use 'apply', 'restore', 'restore-all', 'status', or 'status-all'."
+        "Unknown Tyrian Night CLI command. Use 'apply', 'apply-supervised', 'restore', 'restore-supervised', 'restore-all', 'status', 'status-all', or 'status-all-supervised'."
       );
   }
 }

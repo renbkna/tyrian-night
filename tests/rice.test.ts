@@ -7,6 +7,7 @@ import { expect, test } from 'bun:test';
 import {
   RICE_LAYOUT_FILES,
   RICE_LAYOUT_REQUIRED_COMMANDS,
+  RICE_REQUIRED_COMMANDS,
   RICE_MANIFEST_PATH,
   RICE_REQUIREMENTS_PATH,
   RICE_WALLPAPER_PATH,
@@ -19,6 +20,7 @@ import {
   installPlasmaLayout,
   installRice,
 } from '../scripts/rice.mjs';
+import { TYRIAN_REQUIRED_COMMANDS } from '../scripts/commandChecks.mjs';
 
 const FIXTURE_HOME = '/home/example';
 
@@ -361,6 +363,10 @@ test('full rice install honors injected home and command runner for style and la
 
 test('Plasma layout restore has its own runtime command contract', () => {
   expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6']);
+});
+
+test('Rice runtime and live installer share the same command-policy root set', () => {
+  expect(RICE_REQUIRED_COMMANDS).toEqual(TYRIAN_REQUIRED_COMMANDS);
 });
 
 test('Plasma layout restore validates all source snapshots before overwriting live files', () => {

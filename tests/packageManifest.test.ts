@@ -2,6 +2,9 @@ import fs from 'node:fs';
 
 import { expect, test } from 'bun:test';
 
+import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog';
+import { SOURCE_THEMES } from '../scripts/themeSources.mjs';
+
 type ExtensionPackage = {
   activationEvents?: string[];
   contributes: {
@@ -32,6 +35,25 @@ test('manifest declares the VS Code host and contribution contracts this extensi
     expect(extensionSource).toContain(`registerCommand('${command}'`);
   }
 
+  expect(manifest.contributes.themes).toEqual(
+    SOURCE_THEMES.map((source) => ({
+      label: source.label,
+      uiTheme: source.vscodeUiTheme,
+      path: source.vscodeContributionPath,
+    }))
+  );
+  expect(
+    TYRIAN_THEME_CATALOG.map((theme) => ({
+      label: theme.label,
+      islandCssFile: theme.islandCssFile,
+    }))
+  ).toEqual(
+    SOURCE_THEMES.map((source) => ({
+      label: source.label,
+      islandCssFile: source.islandCssFile,
+    }))
+  );
+
   for (const themeContribution of manifest.contributes.themes) {
     const theme = readJson<{ name: string; type: string }>(
       stripRelativePrefix(themeContribution.path)
@@ -39,8 +61,12 @@ test('manifest declares the VS Code host and contribution contracts this extensi
 
     expect(theme.name).toBe(themeContribution.label);
     expect(theme.type).toBe(themeContribution.uiTheme === 'vs' ? 'light' : 'dark');
-    expect(extensionSource).toContain(`'${themeContribution.label}':`);
-    expect(extensionSource).toContain(`'${pathBasename(themeContribution.path, '.json')}.css'`);
+    expect(TYRIAN_THEME_CATALOG).toContainEqual(
+      expect.objectContaining({
+        label: themeContribution.label,
+        islandCssFile: `${pathBasename(themeContribution.path, '.json')}.css`,
+      })
+    );
   }
 });
 
@@ -48,6 +74,7 @@ test('VS Code package includes only VS Code runtime and marketplace assets', () 
   const ignoredFiles = fs.readFileSync('.vscodeignore', 'utf8').split(/\r?\n/);
 
   expect(ignoredFiles).toContain('scripts/**');
+  expect(ignoredFiles).toContain('out/islandBroker.js');
   expect(ignoredFiles).toContain('apps/vscode/src/**');
   expect(ignoredFiles).toContain('apps/vscode/island/base.css');
   expect(ignoredFiles).toContain('apps/zed/**');
@@ -117,8 +144,13 @@ test('package scripts own the full verification path without npm shims', () => {
   }>('tsconfig.json');
 
   expect(manifest.scripts['vscode:prepublish']).toBeUndefined();
+  expect(manifest.scripts.verify).toContain('bun run check:contracts');
   expect(manifest.scripts.verify).toContain('bun run check:island-css');
   expect(manifest.scripts.verify).toContain('bun run check:rice');
+  expect(manifest.scripts['install:island-broker']).toBe('node scripts/installIslandBroker.mjs');
+  expect(manifest.scripts['install:island-broker:apply']).toBe(
+    'node scripts/installIslandBroker.mjs --apply'
+  );
   expect(manifest.scripts['package:check']).toBe('bun run verify && bun run build');
   expect(manifest.scripts.package).toBe(
     'bun run package:check && mkdir -p dist && vsce package --no-dependencies --out dist/tyrian-night.vsix'
@@ -136,6 +168,7 @@ test('package scripts own the full verification path without npm shims', () => {
   expect(tsconfig.include).toContain('scripts');
   expect(tsupConfig).toContain("VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22'");
   expect(tsupConfig).toContain('apps/vscode/src/extension.ts');
+  expect(tsupConfig).toContain('apps/vscode/src/islandBroker.ts');
   expect(tsupConfig).not.toContain("target: 'esnext'");
   expect(ciWorkflow).toContain('bun-version: 1.3.11');
   expect(ciWorkflow).toContain('run: bun install --frozen-lockfile');

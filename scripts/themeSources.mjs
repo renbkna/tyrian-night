@@ -2,50 +2,27 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @typedef {'dark' | 'light'} ThemeAppearance
  * @typedef {{
  *   appearance: ThemeAppearance;
+ *   islandCssFile: string;
+ *   islandCssPath: string;
+ *   label: string;
  *   paletteName: string;
  *   slug: string;
  *   sourcePath: string;
+ *   vscodeContributionPath: string;
+ *   vscodeUiTheme: 'vs' | 'vs-dark';
  * }} ThemeSource
  */
 
 /** @type {ThemeSource[]} */
-export const SOURCE_THEMES = [
-  {
-    sourcePath: 'source/themes/tyrian-night.json',
-    slug: 'tyrian-night',
-    paletteName: 'tyrian_night',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'source/themes/tyrian-nocturne.json',
-    slug: 'tyrian-nocturne',
-    paletteName: 'tyrian_nocturne',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'source/themes/tyrian-night-old.json',
-    slug: 'tyrian-night-old',
-    paletteName: 'tyrian_night_old',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'source/themes/tyrian-abyss.json',
-    slug: 'tyrian-abyss',
-    paletteName: 'tyrian_abyss',
-    appearance: 'dark',
-  },
-  {
-    sourcePath: 'source/themes/tyrian-dawn.json',
-    slug: 'tyrian-dawn',
-    paletteName: 'tyrian_dawn',
-    appearance: 'light',
-  },
-];
+export const SOURCE_THEMES = readJson(path.join(repoRoot, 'source/themeCatalog.json'));
 
 /**
  * @template T

@@ -13,21 +13,12 @@ import {
   WALLPAPER_ASSET_PATH,
   buildTyrianBackupRoot,
 } from './portableAssets.mjs';
+import { TYRIAN_REQUIRED_COMMANDS, checkRequiredCommands, hasCommand } from './commandChecks.mjs';
 import { buildFishConfig, buildGhosttyConfig } from './terminalThemes.mjs';
 import { SOURCE_THEMES } from './themeSources.mjs';
 
 const repoRoot = process.cwd();
 const home = os.homedir();
-const requiredCommands = [
-  'chafa',
-  'fastfetch',
-  'fish',
-  'ghostty',
-  'kwriteconfig6',
-  'plasma-apply-colorscheme',
-  'plasma-apply-desktoptheme',
-  'starship',
-];
 const ghosttyThemeSlugs = SOURCE_THEMES.map((source) => source.slug);
 
 /**
@@ -107,7 +98,7 @@ export function buildLiveInstallPlan(options = {}) {
 export function installLiveTyrian(options = {}) {
   const plan = buildLiveInstallPlan(options);
 
-  checkRequiredCommands(requiredCommands, plan.apply, plan.hasCommand);
+  checkRequiredCommands(TYRIAN_REQUIRED_COMMANDS, plan.apply, plan.hasCommand, 'Tyrian runtime');
   validateInstallSources(plan);
 
   if (plan.apply) {
@@ -601,62 +592,6 @@ function backupExistingPaths(plan) {
     }
 
     console.log(`backup: ${sourcePath} -> ${backupPath}`);
-  }
-}
-
-/**
- * @param {string[]} commands
- * @param {boolean} apply
- * @param {(command: string) => boolean} commandExists
- * @returns {void}
- */
-function checkRequiredCommands(commands, apply, commandExists) {
-  const missingCommands = commands.filter((command) => !commandExists(command));
-
-  if (missingCommands.length === 0) {
-    return;
-  }
-
-  const message = `Missing Tyrian runtime commands: ${missingCommands.join(', ')}\nInstall them first. On CachyOS/Arch: sudo pacman -S --needed ${missingCommands.join(' ')}`;
-
-  if (apply) {
-    throw new Error(message);
-  }
-
-  console.warn(message);
-}
-
-/**
- * @param {string} command
- * @returns {boolean}
- */
-function hasCommand(command) {
-  for (const searchDir of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (!searchDir) {
-      continue;
-    }
-
-    const candidate = path.join(searchDir, command);
-
-    if (isExecutable(candidate)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * @param {string} filePath
- * @returns {boolean}
- */
-function isExecutable(filePath) {
-  try {
-    const stat = fs.statSync(filePath);
-
-    return stat.isFile() && (stat.mode & 0o111) !== 0;
-  } catch {
-    return false;
   }
 }
 

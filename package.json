@@ -26,11 +26,6 @@
   "contributes": {
     "themes": [
       {
-        "label": "Tyrian Abyss",
-        "uiTheme": "vs-dark",
-        "path": "./source/themes/tyrian-abyss.json"
-      },
-      {
         "label": "Tyrian Night",
         "uiTheme": "vs-dark",
         "path": "./source/themes/tyrian-night.json"
@@ -44,6 +39,11 @@
         "label": "Tyrian Night Old",
         "uiTheme": "vs-dark",
         "path": "./source/themes/tyrian-night-old.json"
+      },
+      {
+        "label": "Tyrian Abyss",
+        "uiTheme": "vs-dark",
+        "path": "./source/themes/tyrian-abyss.json"
       },
       {
         "label": "Tyrian Dawn",
@@ -75,14 +75,18 @@
     ]
   },
   "scripts": {
-    "verify": "bun run check && bun run lint && bun run test && bun run format:check && bun run check:island-css && bun run check:terminal-themes && bun run check:desktop-themes && bun run check:rice",
+    "verify": "bun run check:contracts && bun run check && bun run lint && bun run test && bun run format:check && bun run check:island-css && bun run check:terminal-themes && bun run check:desktop-themes && bun run check:rice",
     "package:check": "bun run verify && bun run build",
+    "build:contracts": "node scripts/generatedContracts.mjs",
+    "check:contracts": "node scripts/generatedContracts.mjs --check",
     "build:island-css": "node scripts/islandCss.mjs",
     "check:island-css": "node scripts/islandCss.mjs --check",
     "build:terminal-themes": "node scripts/terminalThemes.mjs",
     "check:terminal-themes": "node scripts/terminalThemes.mjs --check",
     "build:desktop-themes": "node scripts/desktopThemes.mjs",
     "check:desktop-themes": "node scripts/desktopThemes.mjs --check",
+    "install:island-broker": "node scripts/installIslandBroker.mjs",
+    "install:island-broker:apply": "node scripts/installIslandBroker.mjs --apply",
     "rice": "node scripts/rice.mjs",
     "check:rice": "node scripts/rice.mjs --check",
     "build": "tsup",

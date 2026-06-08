@@ -1,0 +1,57 @@
+[
+  {
+    "label": "Tyrian Night",
+    "slug": "tyrian-night",
+    "sourcePath": "source/themes/tyrian-night.json",
+    "vscodeContributionPath": "./source/themes/tyrian-night.json",
+    "vscodeUiTheme": "vs-dark",
+    "islandCssFile": "tyrian-night.css",
+    "islandCssPath": "apps/vscode/island/tyrian-night.css",
+    "paletteName": "tyrian_night",
+    "appearance": "dark"
+  },
+  {
+    "label": "Tyrian Nocturne",
+    "slug": "tyrian-nocturne",
+    "sourcePath": "source/themes/tyrian-nocturne.json",
+    "vscodeContributionPath": "./source/themes/tyrian-nocturne.json",
+    "vscodeUiTheme": "vs-dark",
+    "islandCssFile": "tyrian-nocturne.css",
+    "islandCssPath": "apps/vscode/island/tyrian-nocturne.css",
+    "paletteName": "tyrian_nocturne",
+    "appearance": "dark"
+  },
+  {
+    "label": "Tyrian Night Old",
+    "slug": "tyrian-night-old",
+    "sourcePath": "source/themes/tyrian-night-old.json",
+    "vscodeContributionPath": "./source/themes/tyrian-night-old.json",
+    "vscodeUiTheme": "vs-dark",
+    "islandCssFile": "tyrian-night-old.css",
+    "islandCssPath": "apps/vscode/island/tyrian-night-old.css",
+    "paletteName": "tyrian_night_old",
+    "appearance": "dark"
+  },
+  {
+    "label": "Tyrian Abyss",
+    "slug": "tyrian-abyss",
+    "sourcePath": "source/themes/tyrian-abyss.json",
+    "vscodeContributionPath": "./source/themes/tyrian-abyss.json",
+    "vscodeUiTheme": "vs-dark",
+    "islandCssFile": "tyrian-abyss.css",
+    "islandCssPath": "apps/vscode/island/tyrian-abyss.css",
+    "paletteName": "tyrian_abyss",
+    "appearance": "dark"
+  },
+  {
+    "label": "Tyrian Dawn",
+    "slug": "tyrian-dawn",
+    "sourcePath": "source/themes/tyrian-dawn.json",
+    "vscodeContributionPath": "./source/themes/tyrian-dawn.json",
+    "vscodeUiTheme": "vs",
+    "islandCssFile": "tyrian-dawn.css",
+    "islandCssPath": "apps/vscode/island/tyrian-dawn.css",
+    "paletteName": "tyrian_dawn",
+    "appearance": "light"
+  }
+]

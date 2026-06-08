@@ -8,6 +8,7 @@
 *.vsix
 node_modules/**
 out/**/*.map
+out/islandBroker.js
 apps/vscode/src/**
 tests/**
 scripts/**

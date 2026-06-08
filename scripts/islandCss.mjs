@@ -8,184 +8,172 @@ import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
 
 const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
 
-/** @type {Array<{ label: string; outputPath: string; tokens: Record<string, string> }>} */
-export const ISLAND_CSS_THEMES = [
-  {
-    label: 'Tyrian Abyss',
-    outputPath: 'apps/vscode/island/tyrian-abyss.css',
-    tokens: {
-      '--islands-bg-canvas': '#030207',
-      '--islands-bg-surface': '#07040d',
-      '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(134, 82, 255, 0))',
-      '--islands-breathe-peak': 'drop-shadow(0 0 10px rgba(134, 82, 255, 0.42))',
-      '--islands-aurora-primary': 'rgba(134, 82, 255, 0.42)',
-      '--islands-aurora-secondary': 'rgba(180, 140, 255, 0.22)',
-      '--islands-aurora-tail': 'rgba(134, 82, 255, 0.14)',
-      '--islands-surface-border-top': '1px solid rgba(180, 140, 255, 0.12)',
-      '--islands-surface-border-left': '1px solid rgba(180, 140, 255, 0.08)',
-      '--islands-surface-border-bottom': '1px solid rgba(134, 82, 255, 0.03)',
-      '--islands-surface-border-right': '1px solid rgba(134, 82, 255, 0.03)',
-      '--islands-surface-shadow': '0 2px 10px 0 rgba(0, 0, 0, 0.48)',
-      '--islands-elevated-border-top': '1px solid rgba(180, 140, 255, 0.16)',
-      '--islands-elevated-border-left': '1px solid rgba(180, 140, 255, 0.1)',
-      '--islands-elevated-border-bottom': '1px solid rgba(134, 82, 255, 0.04)',
-      '--islands-elevated-border-right': '1px solid rgba(134, 82, 255, 0.04)',
-      '--islands-list-focus-bg': 'linear-gradient(135deg, #24134ab8, #150d2980)',
-      '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #24134ad1, #150d2994)',
-      '--islands-list-focus-active-bg': 'linear-gradient(135deg, #351779db, #24134a9e)',
-      '--islands-list-hover-bg': 'linear-gradient(135deg, #24134a61, #150d2942)',
-      '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.06)',
-      '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
-      '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.1)',
-      '--islands-tab-divider': '#24134a',
-      '--islands-tab-hover-text-shadow': '0 0 6px rgba(180, 140, 255, 0.22)',
-      '--islands-hover-border': '1px solid rgba(180, 140, 255, 0.1)',
-      '--islands-hover-shadow': '0 4px 18px 0 rgba(0, 0, 0, 0.52)',
-      '--islands-activity-border-right': '1px solid rgba(180, 140, 255, 0.06)',
-      '--islands-activity-shadow': 'inset 0 1px 3px #b48cff14, 0 1px 5px #0000006b',
-      '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(134, 82, 255, 0.36))',
-      '--islands-activity-checked-bg': 'linear-gradient(180deg, #24134af5, #120a1fc7)',
-      '--islands-activity-checked-shadow': 'inset 0 1px 0 #b48cff24, 0 1px 4px #0000006b',
-      '--islands-statusbar-hover': '#b2a8c8',
-      '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
-      '--islands-letterpress-opacity': '0.45',
-      '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b48cff29)',
-      '--islands-command-shadow':
-        'inset 0 1px 0 #b48cff1f, inset 1px 0 0 #b48cff0f, 0 1px 4px #00000057',
-      '--islands-notification-shadow': '0 4px 14px 0 rgba(0, 0, 0, 0.48)',
-      '--islands-widget-large-shadow': '0 8px 28px 0 rgba(0, 0, 0, 0.58)',
-      '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #24134ac7, #150d298f)',
-      '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
-      '--islands-sticky-shadow': '0 4px 9px -2px rgba(0, 0, 0, 0.48)',
-      '--islands-terminal-border-left': '1px solid rgba(180, 140, 255, 0.08)',
-    },
+/** @type {Record<string, Record<string, string>>} */
+const ISLAND_CSS_THEME_TOKENS = {
+  'tyrian-abyss': {
+    '--islands-bg-canvas': '#030207',
+    '--islands-bg-surface': '#07040d',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(134, 82, 255, 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 10px rgba(134, 82, 255, 0.42))',
+    '--islands-aurora-primary': 'rgba(134, 82, 255, 0.42)',
+    '--islands-aurora-secondary': 'rgba(180, 140, 255, 0.22)',
+    '--islands-aurora-tail': 'rgba(134, 82, 255, 0.14)',
+    '--islands-surface-border-top': '1px solid rgba(180, 140, 255, 0.12)',
+    '--islands-surface-border-left': '1px solid rgba(180, 140, 255, 0.08)',
+    '--islands-surface-border-bottom': '1px solid rgba(134, 82, 255, 0.03)',
+    '--islands-surface-border-right': '1px solid rgba(134, 82, 255, 0.03)',
+    '--islands-surface-shadow': '0 2px 10px 0 rgba(0, 0, 0, 0.48)',
+    '--islands-elevated-border-top': '1px solid rgba(180, 140, 255, 0.16)',
+    '--islands-elevated-border-left': '1px solid rgba(180, 140, 255, 0.1)',
+    '--islands-elevated-border-bottom': '1px solid rgba(134, 82, 255, 0.04)',
+    '--islands-elevated-border-right': '1px solid rgba(134, 82, 255, 0.04)',
+    '--islands-list-focus-bg': 'linear-gradient(135deg, #24134ab8, #150d2980)',
+    '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #24134ad1, #150d2994)',
+    '--islands-list-focus-active-bg': 'linear-gradient(135deg, #351779db, #24134a9e)',
+    '--islands-list-hover-bg': 'linear-gradient(135deg, #24134a61, #150d2942)',
+    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.06)',
+    '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
+    '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.1)',
+    '--islands-tab-divider': '#24134a',
+    '--islands-tab-hover-text-shadow': '0 0 6px rgba(180, 140, 255, 0.22)',
+    '--islands-hover-border': '1px solid rgba(180, 140, 255, 0.1)',
+    '--islands-hover-shadow': '0 4px 18px 0 rgba(0, 0, 0, 0.52)',
+    '--islands-activity-border-right': '1px solid rgba(180, 140, 255, 0.06)',
+    '--islands-activity-shadow': 'inset 0 1px 3px #b48cff14, 0 1px 5px #0000006b',
+    '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(134, 82, 255, 0.36))',
+    '--islands-activity-checked-bg': 'linear-gradient(180deg, #24134af5, #120a1fc7)',
+    '--islands-activity-checked-shadow': 'inset 0 1px 0 #b48cff24, 0 1px 4px #0000006b',
+    '--islands-statusbar-hover': '#b2a8c8',
+    '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
+    '--islands-letterpress-opacity': '0.45',
+    '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b48cff29)',
+    '--islands-command-shadow':
+      'inset 0 1px 0 #b48cff1f, inset 1px 0 0 #b48cff0f, 0 1px 4px #00000057',
+    '--islands-notification-shadow': '0 4px 14px 0 rgba(0, 0, 0, 0.48)',
+    '--islands-widget-large-shadow': '0 8px 28px 0 rgba(0, 0, 0, 0.58)',
+    '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #24134ac7, #150d298f)',
+    '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
+    '--islands-sticky-shadow': '0 4px 9px -2px rgba(0, 0, 0, 0.48)',
+    '--islands-terminal-border-left': '1px solid rgba(180, 140, 255, 0.08)',
   },
-  {
-    label: 'Tyrian Night',
-    outputPath: 'apps/vscode/island/tyrian-night.css',
-    tokens: neutralDarkIslandTokens({
-      primaryRgb: '141, 105, 193',
-      secondaryRgb: '168, 136, 200',
-    }),
+  'tyrian-night': neutralDarkIslandTokens({
+    primaryRgb: '141, 105, 193',
+    secondaryRgb: '168, 136, 200',
+  }),
+  'tyrian-night-old': neutralDarkIslandTokens({
+    primaryRgb: '139, 106, 189',
+    secondaryRgb: '160, 136, 192',
+  }),
+  'tyrian-nocturne': {
+    '--islands-bg-canvas': '#0a0910',
+    '--islands-bg-surface': '#0f0d16',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(166, 108, 255, 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(166, 108, 255, 0.36))',
+    '--islands-aurora-primary': 'rgba(166, 108, 255, 0.38)',
+    '--islands-aurora-secondary': 'rgba(185, 138, 255, 0.22)',
+    '--islands-aurora-tail': 'rgba(166, 108, 255, 0.13)',
+    '--islands-surface-border-top': '1px solid rgba(185, 138, 255, 0.12)',
+    '--islands-surface-border-left': '1px solid rgba(185, 138, 255, 0.08)',
+    '--islands-surface-border-bottom': '1px solid rgba(166, 108, 255, 0.03)',
+    '--islands-surface-border-right': '1px solid rgba(166, 108, 255, 0.03)',
+    '--islands-surface-shadow': '0 2px 9px 0 rgba(0, 0, 0, 0.42)',
+    '--islands-elevated-border-top': '1px solid rgba(185, 138, 255, 0.14)',
+    '--islands-elevated-border-left': '1px solid rgba(185, 138, 255, 0.09)',
+    '--islands-elevated-border-bottom': '1px solid rgba(166, 108, 255, 0.04)',
+    '--islands-elevated-border-right': '1px solid rgba(166, 108, 255, 0.04)',
+    '--islands-list-focus-bg': 'linear-gradient(135deg, #2a203bcf, #15132091)',
+    '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #2a203be0, #151320a8)',
+    '--islands-list-focus-active-bg': 'linear-gradient(135deg, #382a52e6, #2a203bb8)',
+    '--islands-list-hover-bg': 'linear-gradient(135deg, #2a203b73, #15132055)',
+    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.06)',
+    '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
+    '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.1)',
+    '--islands-tab-divider': '#29233a',
+    '--islands-tab-hover-text-shadow': '0 0 6px rgba(185, 138, 255, 0.2)',
+    '--islands-hover-border': '1px solid rgba(185, 138, 255, 0.09)',
+    '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.46)',
+    '--islands-activity-border-right': '1px solid rgba(185, 138, 255, 0.06)',
+    '--islands-activity-shadow': 'inset 0 1px 3px #b98aff14, 0 1px 4px #00000059',
+    '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(166, 108, 255, 0.32))',
+    '--islands-activity-checked-bg': 'linear-gradient(180deg, #2a203bf2, #151320c4)',
+    '--islands-activity-checked-shadow': 'inset 0 1px 0 #b98aff24, 0 1px 4px #00000059',
+    '--islands-statusbar-hover': '#d8d2e8',
+    '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
+    '--islands-letterpress-opacity': '0.42',
+    '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b98aff24)',
+    '--islands-command-shadow':
+      'inset 0 1px 0 #b98aff1f, inset 1px 0 0 #b98aff0f, 0 1px 4px #00000052',
+    '--islands-notification-shadow': '0 4px 13px 0 rgba(0, 0, 0, 0.46)',
+    '--islands-widget-large-shadow': '0 8px 26px 0 rgba(0, 0, 0, 0.54)',
+    '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #2a203bd6, #15132099)',
+    '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
+    '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.44)',
+    '--islands-terminal-border-left': '1px solid rgba(185, 138, 255, 0.08)',
   },
-  {
-    label: 'Tyrian Night Old',
-    outputPath: 'apps/vscode/island/tyrian-night-old.css',
-    tokens: neutralDarkIslandTokens({
-      primaryRgb: '139, 106, 189',
-      secondaryRgb: '160, 136, 192',
-    }),
+  'tyrian-dawn': {
+    '--islands-bg-canvas': '#fcfaff',
+    '--islands-bg-surface': '#f7f3fc',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(111, 53, 184, 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(111, 53, 184, 0.26))',
+    '--islands-aurora-primary': 'rgba(111, 53, 184, 0.26)',
+    '--islands-aurora-secondary': 'rgba(134, 81, 157, 0.15)',
+    '--islands-aurora-tail': 'rgba(111, 53, 184, 0.08)',
+    '--islands-surface-border-top': '1px solid rgba(255, 255, 255, 0.5)',
+    '--islands-surface-border-left': '1px solid rgba(255, 255, 255, 0.3)',
+    '--islands-surface-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
+    '--islands-surface-border-right': '1px solid rgba(0, 0, 0, 0.04)',
+    '--islands-surface-shadow': '0 2px 8px 0 rgba(0, 0, 0, 0.08)',
+    '--islands-elevated-border-top': '1px solid rgba(255, 255, 255, 0.6)',
+    '--islands-elevated-border-left': '1px solid rgba(255, 255, 255, 0.4)',
+    '--islands-elevated-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
+    '--islands-elevated-border-right': '1px solid rgba(0, 0, 0, 0.04)',
+    '--islands-list-focus-bg':
+      'linear-gradient(135deg, rgba(236, 227, 248, 0.58), rgba(243, 238, 252, 0.45))',
+    '--islands-list-focus-selected-bg':
+      'linear-gradient(135deg, rgba(236, 227, 248, 0.7), rgba(243, 238, 252, 0.56))',
+    '--islands-list-focus-active-bg':
+      'linear-gradient(135deg, rgba(227, 214, 242, 0.68), rgba(236, 227, 248, 0.56))',
+    '--islands-list-hover-bg':
+      'linear-gradient(135deg, rgba(236, 227, 248, 0.34), rgba(243, 238, 252, 0.24))',
+    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.05)',
+    '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.07)',
+    '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.08)',
+    '--islands-tab-divider': '#d9d0e8',
+    '--islands-tab-hover-text-shadow': '0 0 5px rgba(111, 53, 184, 0.14)',
+    '--islands-hover-border': '1px solid rgba(0, 0, 0, 0.08)',
+    '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.1)',
+    '--islands-activity-border-right': '1px solid rgba(0, 0, 0, 0.04)',
+    '--islands-activity-shadow':
+      'inset 0 1px 3px 0 rgba(255, 255, 255, 0.4), 0 1px 4px 0 rgba(0, 0, 0, 0.08)',
+    '--islands-activity-hover-filter': 'drop-shadow(0 0 5px rgba(111, 53, 184, 0.22))',
+    '--islands-activity-checked-bg':
+      'linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 238, 252, 0.74))',
+    '--islands-activity-checked-shadow':
+      'inset 0 1px 0 0 rgba(255, 255, 255, 0.6), inset 1px 0 0 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), inset -1px 0 0 0 rgba(0, 0, 0, 0.03), inset 0 1px 2px 0 rgba(255, 255, 255, 0.3), 0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+    '--islands-statusbar-hover': '#5a5368',
+    '--islands-file-icon-filter': 'drop-shadow(0 0 2px currentColor)',
+    '--islands-letterpress-opacity': '0.3',
+    '--islands-letterpress-filter':
+      'brightness(1) drop-shadow(2px 2px 1px rgba(0, 0, 0, 0.08)) drop-shadow(-2px -2px 1px rgba(255, 255, 255, 0.6))',
+    '--islands-command-shadow':
+      'inset 0 1px 0 0 rgba(255, 255, 255, 0.5), inset 1px 0 0 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), inset -1px 0 0 0 rgba(0, 0, 0, 0.03), inset 0 1px 3px 0 rgba(255, 255, 255, 0.25), 0 1px 4px 0 rgba(0, 0, 0, 0.06)',
+    '--islands-notification-shadow': '0 4px 12px 0 rgba(0, 0, 0, 0.1)',
+    '--islands-widget-large-shadow': '0 8px 24px 0 rgba(0, 0, 0, 0.12)',
+    '--islands-quick-row-focus-bg':
+      'linear-gradient(135deg, rgba(236, 227, 248, 0.68), rgba(243, 238, 252, 0.54))',
+    '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.06)',
+    '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.08)',
+    '--islands-terminal-border-left': '1px solid rgba(0, 0, 0, 0.06)',
   },
-  {
-    label: 'Tyrian Nocturne',
-    outputPath: 'apps/vscode/island/tyrian-nocturne.css',
-    tokens: {
-      '--islands-bg-canvas': '#0a0910',
-      '--islands-bg-surface': '#0f0d16',
-      '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(166, 108, 255, 0))',
-      '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(166, 108, 255, 0.36))',
-      '--islands-aurora-primary': 'rgba(166, 108, 255, 0.38)',
-      '--islands-aurora-secondary': 'rgba(185, 138, 255, 0.22)',
-      '--islands-aurora-tail': 'rgba(166, 108, 255, 0.13)',
-      '--islands-surface-border-top': '1px solid rgba(185, 138, 255, 0.12)',
-      '--islands-surface-border-left': '1px solid rgba(185, 138, 255, 0.08)',
-      '--islands-surface-border-bottom': '1px solid rgba(166, 108, 255, 0.03)',
-      '--islands-surface-border-right': '1px solid rgba(166, 108, 255, 0.03)',
-      '--islands-surface-shadow': '0 2px 9px 0 rgba(0, 0, 0, 0.42)',
-      '--islands-elevated-border-top': '1px solid rgba(185, 138, 255, 0.14)',
-      '--islands-elevated-border-left': '1px solid rgba(185, 138, 255, 0.09)',
-      '--islands-elevated-border-bottom': '1px solid rgba(166, 108, 255, 0.04)',
-      '--islands-elevated-border-right': '1px solid rgba(166, 108, 255, 0.04)',
-      '--islands-list-focus-bg': 'linear-gradient(135deg, #2a203bcf, #15132091)',
-      '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #2a203be0, #151320a8)',
-      '--islands-list-focus-active-bg': 'linear-gradient(135deg, #382a52e6, #2a203bb8)',
-      '--islands-list-hover-bg': 'linear-gradient(135deg, #2a203b73, #15132055)',
-      '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.06)',
-      '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
-      '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.1)',
-      '--islands-tab-divider': '#29233a',
-      '--islands-tab-hover-text-shadow': '0 0 6px rgba(185, 138, 255, 0.2)',
-      '--islands-hover-border': '1px solid rgba(185, 138, 255, 0.09)',
-      '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.46)',
-      '--islands-activity-border-right': '1px solid rgba(185, 138, 255, 0.06)',
-      '--islands-activity-shadow': 'inset 0 1px 3px #b98aff14, 0 1px 4px #00000059',
-      '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(166, 108, 255, 0.32))',
-      '--islands-activity-checked-bg': 'linear-gradient(180deg, #2a203bf2, #151320c4)',
-      '--islands-activity-checked-shadow': 'inset 0 1px 0 #b98aff24, 0 1px 4px #00000059',
-      '--islands-statusbar-hover': '#d8d2e8',
-      '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
-      '--islands-letterpress-opacity': '0.42',
-      '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b98aff24)',
-      '--islands-command-shadow':
-        'inset 0 1px 0 #b98aff1f, inset 1px 0 0 #b98aff0f, 0 1px 4px #00000052',
-      '--islands-notification-shadow': '0 4px 13px 0 rgba(0, 0, 0, 0.46)',
-      '--islands-widget-large-shadow': '0 8px 26px 0 rgba(0, 0, 0, 0.54)',
-      '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #2a203bd6, #15132099)',
-      '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
-      '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.44)',
-      '--islands-terminal-border-left': '1px solid rgba(185, 138, 255, 0.08)',
-    },
-  },
-  {
-    label: 'Tyrian Dawn',
-    outputPath: 'apps/vscode/island/tyrian-dawn.css',
-    tokens: {
-      '--islands-bg-canvas': '#fcfaff',
-      '--islands-bg-surface': '#f7f3fc',
-      '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(111, 53, 184, 0))',
-      '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(111, 53, 184, 0.26))',
-      '--islands-aurora-primary': 'rgba(111, 53, 184, 0.26)',
-      '--islands-aurora-secondary': 'rgba(134, 81, 157, 0.15)',
-      '--islands-aurora-tail': 'rgba(111, 53, 184, 0.08)',
-      '--islands-surface-border-top': '1px solid rgba(255, 255, 255, 0.5)',
-      '--islands-surface-border-left': '1px solid rgba(255, 255, 255, 0.3)',
-      '--islands-surface-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
-      '--islands-surface-border-right': '1px solid rgba(0, 0, 0, 0.04)',
-      '--islands-surface-shadow': '0 2px 8px 0 rgba(0, 0, 0, 0.08)',
-      '--islands-elevated-border-top': '1px solid rgba(255, 255, 255, 0.6)',
-      '--islands-elevated-border-left': '1px solid rgba(255, 255, 255, 0.4)',
-      '--islands-elevated-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
-      '--islands-elevated-border-right': '1px solid rgba(0, 0, 0, 0.04)',
-      '--islands-list-focus-bg':
-        'linear-gradient(135deg, rgba(236, 227, 248, 0.58), rgba(243, 238, 252, 0.45))',
-      '--islands-list-focus-selected-bg':
-        'linear-gradient(135deg, rgba(236, 227, 248, 0.7), rgba(243, 238, 252, 0.56))',
-      '--islands-list-focus-active-bg':
-        'linear-gradient(135deg, rgba(227, 214, 242, 0.68), rgba(236, 227, 248, 0.56))',
-      '--islands-list-hover-bg':
-        'linear-gradient(135deg, rgba(236, 227, 248, 0.34), rgba(243, 238, 252, 0.24))',
-      '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.05)',
-      '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.07)',
-      '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.08)',
-      '--islands-tab-divider': '#d9d0e8',
-      '--islands-tab-hover-text-shadow': '0 0 5px rgba(111, 53, 184, 0.14)',
-      '--islands-hover-border': '1px solid rgba(0, 0, 0, 0.08)',
-      '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.1)',
-      '--islands-activity-border-right': '1px solid rgba(0, 0, 0, 0.04)',
-      '--islands-activity-shadow':
-        'inset 0 1px 3px 0 rgba(255, 255, 255, 0.4), 0 1px 4px 0 rgba(0, 0, 0, 0.08)',
-      '--islands-activity-hover-filter': 'drop-shadow(0 0 5px rgba(111, 53, 184, 0.22))',
-      '--islands-activity-checked-bg':
-        'linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 238, 252, 0.74))',
-      '--islands-activity-checked-shadow':
-        'inset 0 1px 0 0 rgba(255, 255, 255, 0.6), inset 1px 0 0 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), inset -1px 0 0 0 rgba(0, 0, 0, 0.03), inset 0 1px 2px 0 rgba(255, 255, 255, 0.3), 0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-      '--islands-statusbar-hover': '#5a5368',
-      '--islands-file-icon-filter': 'drop-shadow(0 0 2px currentColor)',
-      '--islands-letterpress-opacity': '0.3',
-      '--islands-letterpress-filter':
-        'brightness(1) drop-shadow(2px 2px 1px rgba(0, 0, 0, 0.08)) drop-shadow(-2px -2px 1px rgba(255, 255, 255, 0.6))',
-      '--islands-command-shadow':
-        'inset 0 1px 0 0 rgba(255, 255, 255, 0.5), inset 1px 0 0 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), inset -1px 0 0 0 rgba(0, 0, 0, 0.03), inset 0 1px 3px 0 rgba(255, 255, 255, 0.25), 0 1px 4px 0 rgba(0, 0, 0, 0.06)',
-      '--islands-notification-shadow': '0 4px 12px 0 rgba(0, 0, 0, 0.1)',
-      '--islands-widget-large-shadow': '0 8px 24px 0 rgba(0, 0, 0, 0.12)',
-      '--islands-quick-row-focus-bg':
-        'linear-gradient(135deg, rgba(236, 227, 248, 0.68), rgba(243, 238, 252, 0.54))',
-      '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.06)',
-      '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.08)',
-      '--islands-terminal-border-left': '1px solid rgba(0, 0, 0, 0.06)',
-    },
-  },
-];
+};
+
+/** @type {Array<{ label: string; outputPath: string; source: import('./themeSources.mjs').ThemeSource; tokens: Record<string, string> }>} */
+export const ISLAND_CSS_THEMES = SOURCE_THEMES.map((source) => ({
+  label: source.label,
+  outputPath: source.islandCssPath,
+  source,
+  tokens: requireIslandThemeTokens(source.slug),
+}));
 
 const ROOT_LAYOUT_TOKENS = {
   '--islands-panel-radius': '24px',
@@ -195,23 +183,6 @@ const ROOT_LAYOUT_TOKENS = {
   '--islands-panel-gap': '6px',
   '--islands-panel-top': '6px',
 };
-
-/**
- * @returns {typeof ISLAND_CSS_THEMES}
- */
-function orderedIslandCssThemes() {
-  return SOURCE_THEMES.map((source) => {
-    const theme = ISLAND_CSS_THEMES.find((candidate) =>
-      candidate.outputPath.endsWith(`${source.slug}.css`)
-    );
-
-    if (theme) {
-      return theme;
-    }
-
-    throw new Error(`Missing Island CSS theme for '${source.slug}'`);
-  });
-}
 
 /**
  * @param {{ primaryRgb: string; secondaryRgb: string }} colors
@@ -276,13 +247,13 @@ function neutralDarkIslandTokens(colors) {
 }
 
 /**
- * @param {{ label: string; tokens: Record<string, string> }} theme
+ * @param {{ label: string; source: import('./themeSources.mjs').ThemeSource; tokens: Record<string, string> }} theme
  * @param {string} [repoRoot]
  * @returns {string}
  */
 export function buildIslandCss(theme, repoRoot = process.cwd()) {
   const baseCss = fs.readFileSync(path.join(repoRoot, BASE_TEMPLATE_PATH), 'utf8');
-  const sourceTheme = readIslandSourceTheme(theme.label, repoRoot);
+  const sourceTheme = readSourceTheme(theme.source, repoRoot);
 
   return `${header(theme.label)}
 
@@ -298,7 +269,7 @@ ${baseCss}`;
  * @returns {Array<{ outputPath: string; css: string }>}
  */
 export function buildAllIslandCss(repoRoot = process.cwd()) {
-  return orderedIslandCssThemes().map((theme) => ({
+  return ISLAND_CSS_THEMES.map((theme) => ({
     outputPath: theme.outputPath,
     css: buildIslandCss(theme, repoRoot),
   }));
@@ -354,25 +325,6 @@ function formatCssVariables(tokens) {
 }
 
 /**
- * @param {string} label
- * @param {string} repoRoot
- * @returns {{ colors: Record<string, string> }}
- */
-function readIslandSourceTheme(label, repoRoot) {
-  for (const source of SOURCE_THEMES) {
-    const theme = /** @type {{ name: string; colors: Record<string, string> }} */ (
-      readSourceTheme(source, repoRoot)
-    );
-
-    if (theme.name === label) {
-      return theme;
-    }
-  }
-
-  throw new Error(`Missing Island source theme '${label}'`);
-}
-
-/**
  * @param {{ colors: Record<string, string> }} theme
  * @returns {Record<string, string>}
  */
@@ -393,6 +345,20 @@ function lowerHex(color) {
   }
 
   return color.toLowerCase();
+}
+
+/**
+ * @param {string} slug
+ * @returns {Record<string, string>}
+ */
+function requireIslandThemeTokens(slug) {
+  const tokens = ISLAND_CSS_THEME_TOKENS[slug];
+
+  if (!tokens) {
+    throw new Error(`Missing Island CSS token block for '${slug}'`);
+  }
+
+  return tokens;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

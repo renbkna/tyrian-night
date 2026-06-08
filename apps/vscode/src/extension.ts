@@ -3,14 +3,39 @@ import path from 'node:path';
 
 import * as vscode from 'vscode';
 
-const TYRIAN_THEMES: Record<string, string> = {
-  'Tyrian Abyss': 'tyrian-abyss.css',
-  'Tyrian Night': 'tyrian-night.css',
-  'Tyrian Nocturne': 'tyrian-nocturne.css',
-  'Tyrian Night Old': 'tyrian-night-old.css',
-  'Tyrian Dawn': 'tyrian-dawn.css',
-};
+import {
+  readIslandBrokerStatus,
+  runIslandBrokerApply,
+  runIslandBrokerRestore,
+} from './islandBrokerClient.js';
+import {
+  readIslandWriteAccessStatus,
+  runIslandPackageAccessRestore,
+  runIslandWriteAccessUnlock,
+} from './islandWriteAccessClient.js';
+import {
+  DEFAULT_TYRIAN_THEME_LABEL,
+  getIslandCssFileForTheme,
+  isTyrianThemeLabel,
+} from './generated/themeCatalog.js';
+import type { IslandShellStatus } from './islandShell.js';
+import {
+  LATER_ACTION,
+  OPEN_DOCTOR_ACTION,
+  RESET_FILE_ACCESS_ACTION,
+  TRUST_DOCS_ACTION,
+  buildWriteAccessActions,
+  shouldOfferPackageAccessReset,
+} from './islandExtensionPolicy.js';
+import type {
+  IslandUiApplySupervisionResult as IslandApplyResult,
+  IslandUiRestoreSupervisionResult as IslandRestoreResult,
+  IslandUiSupervisorStatus as IslandSupervisorStatus,
+} from './islandSupervisor.js';
+
+const ISLAND_UI_TRUST_DOCS_URL = 'https://github.com/renbkna/tyrian-night#island-ui';
 const ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
+const ISLAND_UI_UNLOCKED_APP_ROOTS_KEY = 'tyrianNight.unlockedAppRoots';
 const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
 const UNINSTALL_WARNING_ACKNOWLEDGED_KEY = 'tyrianNight.uninstallWarningAcknowledged';
 const UNINSTALL_WARNING_MESSAGE =
@@ -20,11 +45,11 @@ let extContext: vscode.ExtensionContext;
 let syncQueue = Promise.resolve();
 
 function isTyrianTheme(theme: string | undefined): theme is string {
-  return theme !== undefined && theme in TYRIAN_THEMES;
+  return isTyrianThemeLabel(theme);
 }
 
 function getCssFileForTheme(theme: string): string {
-  return TYRIAN_THEMES[theme] ?? 'tyrian-night.css';
+  return getIslandCssFileForTheme(theme) ?? getIslandCssFileForTheme(DEFAULT_TYRIAN_THEME_LABEL)!;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -87,6 +112,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
     }
 
     await restoreIslandUi({
+      interactive: false,
       notifyWhenUnchanged: false,
       reloadMessage: 'Tyrian Night: Island UI was removed because another color theme is active.',
     });
@@ -95,6 +121,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
 
   if (!islandUiEnabled) {
     await restoreIslandUi({
+      interactive: false,
       notifyWhenUnchanged: false,
       reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
     });
@@ -104,6 +131,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
   if (!(await ensureUninstallWarningAcknowledged({ interactive: options.allowThemePrompt }))) {
     await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, false);
     await restoreIslandUi({
+      interactive: false,
       notifyWhenUnchanged: false,
       reloadMessage:
         'Tyrian Night: Island UI was removed because the uninstall warning was not acknowledged.',
@@ -112,6 +140,7 @@ async function syncIslandUi(options: { allowThemePrompt: boolean }): Promise<voi
   }
 
   await applyIslandUi({
+    interactive: false,
     notifyWhenUnchanged: false,
     reloadMessage: 'Tyrian Night: Island UI was updated. Reload VS Code to apply it.',
   });
@@ -138,7 +167,7 @@ async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promis
 
   await vscode.workspace
     .getConfiguration('workbench')
-    .update('colorTheme', 'Tyrian Night', vscode.ConfigurationTarget.Global);
+    .update('colorTheme', DEFAULT_TYRIAN_THEME_LABEL, vscode.ConfigurationTarget.Global);
 
   return true;
 }
@@ -157,7 +186,7 @@ async function applyIslandUiCommand(): Promise<void> {
 
     await vscode.workspace
       .getConfiguration('workbench')
-      .update('colorTheme', 'Tyrian Night', vscode.ConfigurationTarget.Global);
+      .update('colorTheme', DEFAULT_TYRIAN_THEME_LABEL, vscode.ConfigurationTarget.Global);
   }
 
   if (!(await enableIslandUiAfterWarning())) {
@@ -165,6 +194,7 @@ async function applyIslandUiCommand(): Promise<void> {
   }
 
   await applyIslandUi({
+    interactive: true,
     notifyWhenUnchanged: true,
     reloadMessage: 'Tyrian Night: Island UI applied. Reload VS Code to apply it.',
   });
@@ -183,19 +213,21 @@ async function repairIslandUi(): Promise<void> {
   }
 
   await applyIslandUi({
+    interactive: true,
     notifyWhenUnchanged: true,
     reloadMessage: 'Tyrian Night: Island UI repaired. Reload VS Code to apply it.',
   });
 }
 
 async function applyIslandUi(options: {
+  interactive: boolean;
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
-}): Promise<void> {
-  const activeTheme = getActiveTheme() ?? 'Tyrian Night';
+}): Promise<IslandApplyResult['kind']> {
+  const activeTheme = getActiveTheme() ?? DEFAULT_TYRIAN_THEME_LABEL;
   const cssFile = getCssFileForTheme(activeTheme);
-  const result = await runIslandCli<{ changed: boolean }>([
-    'apply',
+  const result = await runIslandCli<IslandApplyResult>([
+    'apply-supervised',
     '--app-root',
     vscode.env.appRoot,
     '--css-source',
@@ -204,43 +236,172 @@ async function applyIslandUi(options: {
     String(extContext.extension.packageJSON.version ?? 'unknown'),
   ]);
 
-  if (!result.changed) {
-    if (options.notifyWhenUnchanged) {
-      vscode.window.showInformationMessage('Tyrian Night: Island UI is already up to date.');
+  switch (result.kind) {
+    case 'applied':
+      await promptForReload(options.reloadMessage);
+      return result.kind;
+    case 'already-current':
+      if (options.notifyWhenUnchanged) {
+        vscode.window.showInformationMessage('Tyrian Night: Island UI is already up to date.');
+      }
+      return result.kind;
+    case 'permission-required':
+      if (options.interactive) {
+        await showIslandPermissionRequired(result, {
+          reloadMessage: options.reloadMessage,
+          theme: activeTheme,
+        });
+      }
+      return result.kind;
+    case 'unsupported':
+      if (options.interactive) {
+        await vscode.window
+          .showWarningMessage(
+            `Tyrian Night: This VS Code workbench layout is not supported for Island UI yet. ${result.reason}`,
+            OPEN_DOCTOR_ACTION,
+            LATER_ACTION
+          )
+          .then(async (action) => {
+            if (action === OPEN_DOCTOR_ACTION) {
+              await doctorIslandUi();
+            }
+          });
+      }
+      return result.kind;
+    case 'blocked':
+      if (options.interactive) {
+        await vscode.window.showErrorMessage(
+          `Tyrian Night: Island UI repair is blocked. ${result.reason}`
+        );
+      }
+      return result.kind;
+  }
+}
+
+async function showIslandPermissionRequired(
+  result: Extract<IslandApplyResult, { kind: 'permission-required' }>,
+  options: {
+    reloadMessage: string;
+    theme: string;
+  }
+): Promise<void> {
+  const writeAccess = await readIslandWriteAccessStatus();
+  const blockedPaths = result.writeAccess.blockedPaths
+    .map(({ path: blockedPath }) => blockedPath)
+    .join(', ');
+  const detail = blockedPaths
+    ? ` Blocked path${result.writeAccess.blockedPaths.length === 1 ? '' : 's'}: ${blockedPaths}`
+    : '';
+  const shouldProbeBroker =
+    !writeAccess.available &&
+    result.status.workbenchChecksum !== undefined &&
+    result.status.productWorkbenchChecksum !== undefined;
+  const broker = shouldProbeBroker ? await readIslandBrokerStatus() : undefined;
+  const brokerCanRepair =
+    broker?.available === true &&
+    result.status.workbenchChecksum !== undefined &&
+    result.status.productWorkbenchChecksum !== undefined;
+  const unlockCanRepair =
+    writeAccess.available &&
+    result.status.workbenchChecksum !== undefined &&
+    result.status.productWorkbenchChecksum !== undefined;
+  const actions = buildWriteAccessActions(
+    unlockCanRepair
+      ? 'Unlock Write Access'
+      : brokerCanRepair
+        ? 'Repair with Write Access'
+        : undefined
+  );
+  const brokerDetail = broker?.available
+    ? ' Tyrian could not prove the current workbench hashes for elevated repair.'
+    : ` ${writeAccess.available ? 'Tyrian could not prove the current workbench hashes for write access.' : writeAccess.reason}`;
+  const action = await vscode.window.showWarningMessage(
+    `Tyrian Night: VS Code app files are not writable, usually after a package install or update. Island UI is still desired. Tyrian can ask for system permission once to unlock write access for the current VS Code app files, then repair normally.${detail}`,
+    ...actions
+  );
+
+  if (action === 'Unlock Write Access' && unlockCanRepair && writeAccess.available) {
+    try {
+      await unlockIslandWriteAccess(result.status);
+      await continueApplyAfterWriteAccessUnlock({
+        interactive: true,
+        notifyWhenUnchanged: true,
+        reloadMessage: options.reloadMessage,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Tyrian Night: write access unlock failed. ${message}`);
     }
     return;
   }
 
-  await promptForReload(options.reloadMessage);
+  if (action === 'Repair with Write Access' && brokerCanRepair && broker?.available) {
+    try {
+      const expectedProductWorkbenchChecksum = result.status.productWorkbenchChecksum;
+      const expectedWorkbenchChecksum = result.status.workbenchChecksum;
+
+      if (
+        expectedProductWorkbenchChecksum === undefined ||
+        expectedWorkbenchChecksum === undefined
+      ) {
+        throw new Error('Tyrian could not prove the current workbench hashes for elevated repair.');
+      }
+
+      const brokerResult = await runIslandBrokerApply({
+        appRoot: vscode.env.appRoot,
+        broker,
+        expectedProductWorkbenchChecksum,
+        expectedWorkbenchChecksum,
+        theme: options.theme,
+        themeVersion: String(extContext.extension.packageJSON.version ?? 'unknown'),
+      });
+
+      if (brokerResult.changed) {
+        await promptForReload(options.reloadMessage);
+      } else {
+        vscode.window.showInformationMessage('Tyrian Night: Island UI is already up to date.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(
+        `Tyrian Night: privileged Island UI repair failed. ${message}`
+      );
+    }
+    return;
+  }
+
+  if (action === TRUST_DOCS_ACTION) {
+    await openIslandUiTrustDocs();
+    return;
+  }
+
+  if (action === OPEN_DOCTOR_ACTION) {
+    if (!writeAccess.available && brokerDetail) {
+      await vscode.window.showInformationMessage(`Tyrian Night: ${brokerDetail.trim()}`);
+    }
+    await doctorIslandUi();
+  }
 }
 
 async function restoreClassicUi(): Promise<void> {
   await extContext.globalState.update(ISLAND_UI_ENABLED_KEY, false);
   await restoreIslandUi({
+    interactive: true,
     notifyWhenUnchanged: true,
     reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
   });
 }
 
 async function doctorIslandUi(): Promise<void> {
-  const statuses = await runIslandCli<
-    Array<{
-      appRoot: string;
-      active: boolean;
-      managed: boolean;
-      classification:
-        | 'clean'
-        | 'patched'
-        | 'managed-only'
-        | 'missing'
-        | 'permission-denied'
-        | 'broken-backup'
-        | 'checksum-mismatch';
-      verificationPassed: boolean;
-      canSelfHeal: boolean;
-      issues: string[];
-    }>
-  >(['status-all', '--app-root', vscode.env.appRoot]);
+  const statuses = await runIslandCli<IslandSupervisorStatus[]>([
+    'status-all-supervised',
+    '--app-root',
+    vscode.env.appRoot,
+  ]);
+  const writeAccess = await readIslandWriteAccessStatus();
+  const desiredState = extContext.globalState.get<boolean>(ISLAND_UI_ENABLED_KEY, false)
+    ? 'enabled'
+    : 'disabled';
 
   if (statuses.length === 0) {
     vscode.window.showInformationMessage(
@@ -252,12 +413,44 @@ async function doctorIslandUi(): Promise<void> {
   const content = [
     '# Tyrian Night Doctor',
     '',
+    `VS Code: ${vscode.version}`,
+    `Desired Island UI state: ${desiredState}`,
+    `System write-access prompt: ${
+      writeAccess.available ? 'available' : `unavailable (${writeAccess.reason})`
+    }`,
+    '',
     ...statuses.map((status) => {
       const detailLines = [
         `- \`${status.appRoot}\`: ${formatDoctorClassification(status.classification)}`,
         `  Verification: ${status.verificationPassed ? 'passed' : 'failed'}`,
         `  Self-heal: ${status.canSelfHeal ? 'available via Restore Classic UI' : 'not needed'}`,
+        `  Recommended action: ${formatRecommendedAction(status.recommendedAction)}`,
+        `  Elevation needed: ${status.recommendedAction === 'elevated-repair' ? 'yes' : 'no'}`,
+        `  Restore proof: ${formatRestoreProof(status.restoreProof)}`,
       ];
+
+      if (status.workbenchChecksum) {
+        detailLines.push(`  Workbench hash: ${status.workbenchChecksum}`);
+      }
+
+      if (status.productWorkbenchChecksum) {
+        detailLines.push(`  Product workbench hash: ${status.productWorkbenchChecksum}`);
+      }
+
+      if (status.receipt) {
+        detailLines.push(
+          `  Last receipt: ${status.receipt.patchStrategy} ${status.receipt.themeVersion} at ${status.receipt.installedAt}`
+        );
+        detailLines.push(`  Receipt CSS hash: ${status.receipt.cssChecksum}`);
+      }
+
+      if (status.writeAccess) {
+        detailLines.push(`  Writable: ${status.writeAccess.writable ? 'yes' : 'no'}`);
+
+        for (const blockedPath of status.writeAccess.blockedPaths) {
+          detailLines.push(`  Blocked path: ${blockedPath.path}`);
+        }
+      }
 
       for (const issue of status.issues) {
         detailLines.push(`  Issue: ${issue}`);
@@ -282,7 +475,7 @@ async function doctorIslandUi(): Promise<void> {
     const action = await vscode.window.showWarningMessage(
       `Tyrian Night Doctor found self-healable Island UI issues in ${healableStatuses.length} VS Code installation${healableStatuses.length === 1 ? '' : 's'}.`,
       'Run Restore Classic UI',
-      'Later'
+      LATER_ACTION
     );
 
     if (action === 'Run Restore Classic UI') {
@@ -292,16 +485,26 @@ async function doctorIslandUi(): Promise<void> {
 }
 
 async function restoreIslandUi(options: {
+  interactive: boolean;
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
-}): Promise<void> {
-  const result = await runIslandCli<{
-    changed: boolean;
-    restoredAppRoots: string[];
-    failedAppRoots: Array<{ appRoot: string; reason: string }>;
-  }>(['restore-all', '--app-root', vscode.env.appRoot]);
+}): Promise<IslandRestoreResult['kind']> {
+  const result = await runIslandCli<IslandRestoreResult>([
+    'restore-supervised',
+    '--app-root',
+    vscode.env.appRoot,
+  ]);
 
-  if (result.failedAppRoots.length > 0) {
+  if (result.kind === 'permission-required') {
+    if (options.interactive) {
+      await showIslandRestorePermissionRequired(result, {
+        reloadMessage: options.reloadMessage,
+      });
+    }
+    return result.kind;
+  }
+
+  if (result.kind === 'blocked') {
     throw new Error(
       `Tyrian Night cleanup failed for ${result.failedAppRoots
         .map(({ appRoot, reason }) => `${appRoot} (${reason})`)
@@ -310,13 +513,279 @@ async function restoreIslandUi(options: {
   }
 
   if (!result.changed) {
+    if (options.interactive) {
+      await maybePromptToRestoreIslandPackageAccess({ restoreChanged: false });
+    }
+
     if (options.notifyWhenUnchanged) {
       vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
+    }
+    return result.kind;
+  }
+
+  if (options.interactive) {
+    await maybePromptToRestoreIslandPackageAccess({ restoreChanged: true });
+  }
+
+  await promptForReload(options.reloadMessage);
+  return result.kind;
+}
+
+async function showIslandRestorePermissionRequired(
+  result: Extract<IslandRestoreResult, { kind: 'permission-required' }>,
+  options: {
+    reloadMessage: string;
+  }
+): Promise<void> {
+  const writeAccess = await readIslandWriteAccessStatus();
+  const currentStatus = await readCurrentIslandSupervisorStatus();
+  const unlockCanRestore =
+    writeAccess.available &&
+    currentStatus?.workbenchChecksum !== undefined &&
+    currentStatus.productWorkbenchChecksum !== undefined;
+  const broker = unlockCanRestore ? undefined : await readIslandBrokerStatus();
+  const failedRoots = result.failedAppRoots.map(({ appRoot }) => appRoot).join(', ');
+  const detail = failedRoots
+    ? ` Affected root${result.failedAppRoots.length === 1 ? '' : 's'}: ${failedRoots}`
+    : '';
+  const actions = buildWriteAccessActions(
+    unlockCanRestore
+      ? 'Unlock Write Access'
+      : broker?.available
+        ? 'Restore with Write Access'
+        : undefined
+  );
+  const brokerDetail = broker?.available
+    ? ''
+    : ` ${writeAccess.available ? 'Tyrian could not prove the current workbench hashes for write access.' : writeAccess.reason}`;
+  const action = await vscode.window.showWarningMessage(
+    `Tyrian Night: Classic UI restore needs write access to VS Code app files. Tyrian can ask for system permission once to unlock write access for this VS Code install, then restore normally.${detail}`,
+    ...actions
+  );
+
+  if (action === 'Unlock Write Access' && unlockCanRestore && currentStatus) {
+    try {
+      await unlockIslandWriteAccess(currentStatus);
+      await continueRestoreAfterWriteAccessUnlock({
+        interactive: true,
+        notifyWhenUnchanged: true,
+        reloadMessage: options.reloadMessage,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Tyrian Night: write access unlock failed. ${message}`);
     }
     return;
   }
 
-  await promptForReload(options.reloadMessage);
+  if (action === 'Restore with Write Access' && broker?.available) {
+    try {
+      const brokerResult = await runIslandBrokerRestore({
+        appRoot: vscode.env.appRoot,
+        broker,
+      });
+
+      if (brokerResult.changed) {
+        await promptForReload(options.reloadMessage);
+      } else {
+        vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(
+        `Tyrian Night: privileged Classic UI restore failed. ${message}`
+      );
+    }
+    return;
+  }
+
+  if (action === TRUST_DOCS_ACTION) {
+    await openIslandUiTrustDocs();
+    return;
+  }
+
+  if (action === OPEN_DOCTOR_ACTION) {
+    if (!writeAccess.available && brokerDetail) {
+      await vscode.window.showInformationMessage(`Tyrian Night: ${brokerDetail.trim()}`);
+    }
+    await doctorIslandUi();
+  }
+}
+
+async function continueApplyAfterWriteAccessUnlock(options: {
+  interactive: boolean;
+  notifyWhenUnchanged: boolean;
+  reloadMessage: string;
+}): Promise<void> {
+  const outcome = await applyIslandUi({
+    ...options,
+    interactive: false,
+  });
+
+  if (outcome !== 'permission-required') {
+    return;
+  }
+
+  const currentStatus = await readCurrentIslandSupervisorStatus();
+
+  if (currentStatus?.active) {
+    await promptForReload(options.reloadMessage);
+    return;
+  }
+
+  vscode.window.showErrorMessage(
+    'Tyrian Night: write access was unlocked, but Island UI repair still cannot write VS Code app files. Open Tyrian Night: Doctor Island UI for details.'
+  );
+}
+
+async function continueRestoreAfterWriteAccessUnlock(options: {
+  interactive: boolean;
+  notifyWhenUnchanged: boolean;
+  reloadMessage: string;
+}): Promise<void> {
+  const outcome = await restoreIslandUi({
+    ...options,
+    interactive: false,
+  });
+
+  if (outcome !== 'permission-required') {
+    return;
+  }
+
+  const currentStatus = await readCurrentIslandSupervisorStatus();
+
+  if (currentStatus && !currentStatus.active && !currentStatus.managed) {
+    await promptForReload(options.reloadMessage);
+    return;
+  }
+
+  vscode.window.showErrorMessage(
+    'Tyrian Night: write access was unlocked, but Classic UI restore still cannot write VS Code app files. Open Tyrian Night: Doctor Island UI for details.'
+  );
+}
+
+async function unlockIslandWriteAccess(status: IslandShellStatus): Promise<void> {
+  const expectedProductWorkbenchChecksum = status.productWorkbenchChecksum;
+  const expectedWorkbenchChecksum = status.workbenchChecksum;
+
+  if (expectedProductWorkbenchChecksum === undefined || expectedWorkbenchChecksum === undefined) {
+    throw new Error('Tyrian could not prove the current workbench hashes for write access.');
+  }
+
+  const writeAccess = await readIslandWriteAccessStatus();
+
+  if (!writeAccess.available) {
+    throw new Error(writeAccess.reason);
+  }
+
+  await runIslandWriteAccessUnlock({
+    appRoot: vscode.env.appRoot,
+    expectedProductWorkbenchChecksum,
+    expectedWorkbenchChecksum,
+    writeAccess,
+  });
+  await rememberUnlockedAppRoot(vscode.env.appRoot);
+}
+
+async function maybePromptToRestoreIslandPackageAccess(options: {
+  restoreChanged: boolean;
+}): Promise<void> {
+  if (!options.restoreChanged) {
+    return;
+  }
+
+  if (!isUnlockedAppRootRemembered(vscode.env.appRoot)) {
+    return;
+  }
+
+  const writeAccess = await readIslandWriteAccessStatus();
+
+  if (!writeAccess.available) {
+    return;
+  }
+
+  const currentStatus = await readCurrentIslandSupervisorStatus();
+
+  if (
+    !shouldOfferPackageAccessReset(
+      currentStatus,
+      writeAccess.available,
+      options.restoreChanged,
+      isUnlockedAppRootRemembered(vscode.env.appRoot)
+    )
+  ) {
+    return;
+  }
+
+  const action = await vscode.window.showWarningMessage(
+    'Tyrian Night: Classic UI is restored. Reset VS Code app file ownership back to package-style access?',
+    RESET_FILE_ACCESS_ACTION,
+    TRUST_DOCS_ACTION,
+    LATER_ACTION
+  );
+
+  if (action === TRUST_DOCS_ACTION) {
+    await openIslandUiTrustDocs();
+    return;
+  }
+
+  if (action !== RESET_FILE_ACCESS_ACTION) {
+    return;
+  }
+
+  try {
+    await runIslandPackageAccessRestore({
+      appRoot: vscode.env.appRoot,
+      expectedProductWorkbenchChecksum: currentStatus.productWorkbenchChecksum,
+      expectedWorkbenchChecksum: currentStatus.workbenchChecksum,
+      writeAccess,
+    });
+    await forgetUnlockedAppRoot(vscode.env.appRoot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    vscode.window.showWarningMessage(
+      `Tyrian Night: Classic UI was restored, but VS Code file ownership could not be reset automatically. ${message}`
+    );
+  }
+}
+
+function readUnlockedAppRoots(): string[] {
+  const appRoots = extContext.globalState.get<unknown>(ISLAND_UI_UNLOCKED_APP_ROOTS_KEY, []);
+
+  return Array.isArray(appRoots)
+    ? appRoots.filter((appRoot): appRoot is string => typeof appRoot === 'string')
+    : [];
+}
+
+function isUnlockedAppRootRemembered(appRoot: string): boolean {
+  return readUnlockedAppRoots().includes(appRoot);
+}
+
+async function rememberUnlockedAppRoot(appRoot: string): Promise<void> {
+  const appRoots = new Set(readUnlockedAppRoots());
+  appRoots.add(appRoot);
+  await extContext.globalState.update(ISLAND_UI_UNLOCKED_APP_ROOTS_KEY, [...appRoots]);
+}
+
+async function forgetUnlockedAppRoot(appRoot: string): Promise<void> {
+  await extContext.globalState.update(
+    ISLAND_UI_UNLOCKED_APP_ROOTS_KEY,
+    readUnlockedAppRoots().filter((storedAppRoot) => storedAppRoot !== appRoot)
+  );
+}
+
+async function openIslandUiTrustDocs(): Promise<void> {
+  await vscode.env.openExternal(vscode.Uri.parse(ISLAND_UI_TRUST_DOCS_URL));
+}
+
+async function readCurrentIslandSupervisorStatus(): Promise<IslandSupervisorStatus | undefined> {
+  const statuses = await runIslandCli<IslandSupervisorStatus[]>([
+    'status-all-supervised',
+    '--app-root',
+    vscode.env.appRoot,
+  ]);
+
+  return statuses.find((status) => status.appRoot === vscode.env.appRoot);
 }
 
 function runIslandCli<T>(argumentsList: string[]): Promise<T> {
@@ -411,6 +880,32 @@ function formatDoctorClassification(
       return 'Broken backup';
     case 'checksum-mismatch':
       return 'Checksum mismatch';
+  }
+}
+
+function formatRecommendedAction(action: IslandSupervisorStatus['recommendedAction']): string {
+  switch (action) {
+    case 'none':
+      return 'None';
+    case 'apply':
+      return 'Apply Island UI';
+    case 'restore':
+      return 'Restore Classic UI';
+    case 'elevated-repair':
+      return 'Repair with write access';
+    case 'inspect':
+      return 'Inspect manually';
+  }
+}
+
+function formatRestoreProof(proof: IslandShellStatus['restoreProof']): string {
+  switch (proof) {
+    case 'none':
+      return 'None';
+    case 'manifest-v2-backup-pair':
+      return 'Manifest v2 backup pair';
+    case 'strip-tyrian-block':
+      return 'Strip Tyrian block only';
   }
 }
 
