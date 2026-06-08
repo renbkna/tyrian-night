@@ -35,7 +35,10 @@ export const RICE_LAYOUT_FILES = [
   },
 ];
 export const RICE_REQUIRED_COMMANDS = TYRIAN_REQUIRED_COMMANDS;
-export const RICE_LAYOUT_REQUIRED_COMMANDS = ['qdbus6'];
+export const RICE_LAYOUT_REQUIRED_COMMANDS = ['qdbus6', 'kscreen-doctor'];
+// Preserve KDE's alias applet IDs: icontasks/minimizeall have X-Plasma-RootPath
+// metadata that resolves to compiled taskmanager/showdesktop roots, and replacing
+// the IDs changes the exact panel mode/look even though Plasma logs mainscript warnings.
 
 /**
  * @typedef {(command: string, args: string[], options?: import('node:child_process').ExecFileSyncOptions) => Buffer | string} CommandRunner
@@ -113,15 +116,17 @@ export function checkRiceSnapshot(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string }} [options]
+ * @param {{ repoRoot?: string; home?: string; runCommand?: CommandRunner }} [options]
  * @returns {void}
  */
 export function captureRiceLayout(options = {}) {
   const root = options.repoRoot ?? repoRoot;
   const userHome = options.home ?? home;
+  const runCommand = options.runCommand ?? execFileSync;
   const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
   const desktopLayout = fs.readFileSync(desktopLayoutPath, 'utf8');
   const wallpaperSource = findWallpaperSource(desktopLayout);
+  const panelStateById = readLivePanelStateById(runCommand);
 
   if (!wallpaperSource) {
     throw new Error(`Could not find an existing wallpaper Image= path in ${desktopLayoutPath}`);
@@ -136,6 +141,7 @@ export function captureRiceLayout(options = {}) {
 
     if (file.portableWallpaper) {
       content = sanitizePlasmaDesktopLayout(makeWallpaperPortable(content, wallpaperSource));
+      content = applyPanelStateToDesktopLayout(content, panelStateById);
     } else if (file.snapshotPath === RICE_LAYOUT_FILES[1].snapshotPath) {
       content = sanitizePlasmaShellConfig(content);
     }
@@ -267,17 +273,28 @@ export function installPlasmaLayout(options = {}) {
     sourceContent: fs.readFileSync(path.join(root, file.snapshotPath), 'utf8'),
   }));
   const currentActivityId = apply ? readCurrentPlasmaActivityId(runCommand) : '';
+  const primaryTarget = apply
+    ? readPrimaryPlasmaTarget(runCommand)
+    : { height: 0, screen: 0, width: 0 };
   const installEntries = sourceEntries.map(({ file, targetPath, sourceContent }) => {
     let installedContent = sourceContent.replaceAll('{{TYRIAN_RICE_ROOT}}', runtimeRoot);
 
     if (apply && file.portableWallpaper) {
       installedContent = hydratePlasmaDesktopActivityIds(installedContent, currentActivityId);
+      installedContent = hydratePlasmaPrimaryScreenAssignments(installedContent, primaryTarget);
+    } else if (apply && file.homePath === RICE_LAYOUT_FILES[1].homePath) {
+      installedContent = hydratePlasmaShellPanelViews(installedContent, primaryTarget);
     }
 
     return {
+      file,
       installedContent,
       targetPath,
     };
+  });
+
+  operation(`${apply ? 'stop' : 'would stop'} Plasma shell before restoring layout`, apply, () => {
+    stopPlasmaShell(runCommand);
   });
 
   for (const { installedContent, targetPath } of installEntries) {
@@ -287,8 +304,16 @@ export function installPlasmaLayout(options = {}) {
     });
   }
 
-  operation(`${apply ? 'restart' : 'would restart'} Plasma shell`, apply, () => {
-    restartPlasmaShell(runCommand);
+  operation(`${apply ? 'start' : 'would start'} Plasma shell`, apply, () => {
+    startPlasmaShell(runCommand);
+  });
+
+  const panelStateById = readSnapshotPanelStateById(
+    installEntries.find(({ file }) => file.portableWallpaper)?.installedContent ?? ''
+  );
+
+  operation(`${apply ? 'restore' : 'would restore'} Plasma panel runtime state`, apply, () => {
+    restorePlasmaPanelState(panelStateById, primaryTarget.screen, runCommand);
   });
 
   const wallpaperPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
@@ -332,6 +357,179 @@ export function hydratePlasmaDesktopActivityIds(desktopLayout, activityId) {
 }
 
 /**
+ * @param {string} desktopLayout
+ * @param {{ screen: number; width: number; height: number; otherScreens?: number[] }} primaryTarget
+ * @returns {string}
+ */
+function hydratePlasmaPrimaryScreenAssignments(desktopLayout, primaryTarget) {
+  const primaryScreenValue = String(primaryTarget.screen);
+  const otherScreens = primaryTarget.otherScreens ?? [];
+  let nextSecondaryDesktopScreenIndex = 0;
+
+  return replaceContainmentSections(desktopLayout, (section) => {
+    if (/^plugin=org\.kde\.desktopcontainment$/mu.test(section)) {
+      let nextSection = upsertSectionKey(section, 'lastScreen', primaryScreenValue);
+      nextSection = hydratePrimaryDesktopGeometry(nextSection, primaryTarget);
+
+      return nextSection;
+    }
+
+    if (/^plugin=org\.kde\.plasma\.folder$/mu.test(section)) {
+      const screen = otherScreens[nextSecondaryDesktopScreenIndex++] ?? primaryTarget.screen;
+
+      return upsertSectionKey(section, 'lastScreen', String(screen));
+    }
+
+    if (/^plugin=org\.kde\.panel$/mu.test(section)) {
+      return upsertSectionKey(section, 'lastScreen', primaryScreenValue);
+    }
+
+    return section;
+  });
+}
+
+/**
+ * @param {string} shellConfig
+ * @param {{ width: number }} primaryTarget
+ * @returns {string}
+ */
+function hydratePlasmaShellPanelViews(shellConfig, primaryTarget) {
+  if (primaryTarget.width <= 0) {
+    return shellConfig;
+  }
+
+  const targetWidth = String(primaryTarget.width);
+
+  return shellConfig
+    .split(/(?=^\[)/gmu)
+    .map((section) => {
+      const header = section.split('\n', 1)[0];
+
+      if (/^\[PlasmaViews\]\[Panel \d+\]\[Horizontal\d+\]$/u.test(header)) {
+        return '';
+      }
+
+      if (!/^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]$/u.test(header)) {
+        return section;
+      }
+
+      let nextSection = section;
+      nextSection = upsertSectionKey(nextSection, 'length', targetWidth);
+      nextSection = upsertSectionKey(nextSection, 'maxLength', targetWidth);
+      nextSection = upsertSectionKey(nextSection, 'minLength', targetWidth);
+
+      return nextSection;
+    })
+    .join('');
+}
+
+/**
+ * @param {string} section
+ * @param {{ width: number; height: number }} primaryTarget
+ * @returns {string}
+ */
+function hydratePrimaryDesktopGeometry(section, primaryTarget) {
+  if (primaryTarget.width <= 0 || primaryTarget.height <= 0) {
+    return section;
+  }
+
+  const sourceSize = readDesktopGeometrySourceSize(section);
+
+  if (!sourceSize) {
+    return section;
+  }
+
+  const targetSize = `${primaryTarget.width}x${primaryTarget.height}`;
+  let nextSection = section.replace(
+    /^ItemGeometries-(\d+)x(\d+)=(.*)$/gmu,
+    (_line, width, height, entries) =>
+      `ItemGeometries-${targetSize}=${scaleDesktopAppletGeometries(
+        entries,
+        Number(width),
+        Number(height),
+        primaryTarget.width,
+        primaryTarget.height
+      )}`
+  );
+
+  nextSection = nextSection.replace(
+    /^ItemGeometriesHorizontal=(.*)$/gmu,
+    (_line, entries) =>
+      `ItemGeometriesHorizontal=${scaleDesktopAppletGeometries(
+        entries,
+        sourceSize.width,
+        sourceSize.height,
+        primaryTarget.width,
+        primaryTarget.height
+      )}`
+  );
+
+  return upsertSectionKey(nextSection, 'lastResolution', targetSize);
+}
+
+/**
+ * @param {string} section
+ * @returns {{ width: number; height: number } | undefined}
+ */
+function readDesktopGeometrySourceSize(section) {
+  const itemGeometrySize = section.match(/^ItemGeometries-(\d+)x(\d+)=/mu);
+
+  if (itemGeometrySize) {
+    return {
+      height: Number(itemGeometrySize[2]),
+      width: Number(itemGeometrySize[1]),
+    };
+  }
+
+  const lastResolution = section.match(/^lastResolution=(\d+)x(\d+)$/mu);
+
+  if (lastResolution) {
+    return {
+      height: Number(lastResolution[2]),
+      width: Number(lastResolution[1]),
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * @param {string} value
+ * @param {number} sourceWidth
+ * @param {number} sourceHeight
+ * @param {number} targetWidth
+ * @param {number} targetHeight
+ * @returns {string}
+ */
+function scaleDesktopAppletGeometries(value, sourceWidth, sourceHeight, targetWidth, targetHeight) {
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return value;
+  }
+
+  const xRatio = targetWidth / sourceWidth;
+  const yRatio = targetHeight / sourceHeight;
+  const hasTrailingSeparator = value.endsWith(';');
+  const entries = value
+    .split(';')
+    .filter((entry, index, allEntries) => entry.length > 0 || index < allEntries.length - 1)
+    .map((entry) =>
+      entry.replace(
+        /^(Applet-\d+):(-?\d+),(-?\d+),(\d+),(\d+),(.*)$/u,
+        (_match, applet, x, y, width, height, suffix) =>
+          [
+            `${applet}:${Math.round(Number(x) * xRatio)}`,
+            Math.round(Number(y) * yRatio),
+            Math.round(Number(width) * xRatio),
+            Math.round(Number(height) * yRatio),
+            suffix,
+          ].join(',')
+      )
+    );
+
+  return `${entries.join(';')}${hasTrailingSeparator ? ';' : ''}`;
+}
+
+/**
  * @param {CommandRunner} runCommand
  * @returns {string}
  */
@@ -353,6 +551,398 @@ function readCurrentPlasmaActivityId(runCommand) {
   }
 
   return activityId;
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {{ screen: number; width: number; height: number; otherScreens: number[] }}
+ */
+function readPrimaryPlasmaTarget(runCommand) {
+  const primaryGeometry = readPrimaryOutputGeometry(runCommand);
+  const plasmaScreens = readPlasmaScreenGeometries(runCommand);
+  const matchingScreen = plasmaScreens.find(
+    (screen) =>
+      screen.x === primaryGeometry.x &&
+      screen.y === primaryGeometry.y &&
+      screen.width === primaryGeometry.width &&
+      screen.height === primaryGeometry.height
+  );
+
+  return {
+    height: primaryGeometry.height,
+    otherScreens: plasmaScreens
+      .map((screen) => screen.screen)
+      .filter((screen) => screen !== (matchingScreen?.screen ?? 0)),
+    screen: matchingScreen?.screen ?? 0,
+    width: primaryGeometry.width,
+  };
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {{ x: number; y: number; width: number; height: number }}
+ */
+function readPrimaryOutputGeometry(runCommand) {
+  const output = stripAnsi(String(runCommand('kscreen-doctor', ['-o'], { encoding: 'utf8' })));
+  const blocks = output.split(/\n(?=Output:\s+\d+\s)/u);
+  const outputBlocks = blocks
+    .map((block) => ({
+      block,
+      priority: Number(block.match(/priority\s+(\d+)/u)?.[1] ?? Number.MAX_SAFE_INTEGER),
+      geometry: block.match(/Geometry:\s+(-?\d+),(-?\d+)\s+(\d+)x(\d+)/u),
+      enabled: /\benabled\b/u.test(block),
+      connected: /\bconnected\b/u.test(block),
+    }))
+    .filter(({ connected, enabled, geometry }) => connected && enabled && geometry);
+  const primary = outputBlocks.sort((left, right) => left.priority - right.priority)[0];
+
+  if (!primary?.geometry) {
+    throw new Error('Could not read primary monitor geometry from kscreen-doctor.');
+  }
+
+  return {
+    x: Number(primary.geometry[1]),
+    y: Number(primary.geometry[2]),
+    width: Number(primary.geometry[3]),
+    height: Number(primary.geometry[4]),
+  };
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {Array<{ screen: number; x: number; y: number; width: number; height: number }>}
+ */
+function readPlasmaScreenGeometries(runCommand) {
+  const output = String(
+    runCommand(
+      'qdbus6',
+      [
+        'org.kde.plasmashell',
+        '/PlasmaShell',
+        'org.kde.PlasmaShell.evaluateScript',
+        [
+          'var values = [];',
+          'var seen = {};',
+          'var allDesktops = desktops();',
+          'for (var desktopIndex = 0; desktopIndex < allDesktops.length; desktopIndex++) {',
+          '  var i = allDesktops[desktopIndex].screen;',
+          '  if (seen[i]) continue;',
+          '  seen[i] = true;',
+          '  try {',
+          '    var geometry = screenGeometry(i);',
+          '    if (geometry.valid && !geometry.empty) {',
+          '      values.push({ screen: i, x: geometry.x, y: geometry.y, width: geometry.width, height: geometry.height });',
+          '    }',
+          '  } catch (error) {}',
+          '}',
+          'print(JSON.stringify(values));',
+        ].join('\n'),
+      ],
+      { encoding: 'utf8' }
+    )
+  ).trim();
+  const parsed = parseJsonFromQdbusOutput(output);
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed.filter(
+    (screen) =>
+      Number.isSafeInteger(screen?.screen) &&
+      Number.isFinite(screen.x) &&
+      Number.isFinite(screen.y) &&
+      Number.isFinite(screen.width) &&
+      Number.isFinite(screen.height)
+  );
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ */
+function readLivePanelStateById(runCommand) {
+  try {
+    const output = String(
+      runCommand(
+        'qdbus6',
+        [
+          'org.kde.plasmashell',
+          '/PlasmaShell',
+          'org.kde.PlasmaShell.evaluateScript',
+          [
+            'var values = [];',
+            'var fallbackWidth = 0;',
+            'desktops().forEach(function(desktop) {',
+            '  try {',
+            '    var desktopGeometry = screenGeometry(desktop.screen);',
+            '    fallbackWidth = Math.max(fallbackWidth, desktopGeometry.width);',
+            '  } catch (error) {}',
+            '});',
+            'var ids = panelIds;',
+            'for (var i = 0; i < ids.length; i++) {',
+            '  var panel = panelById(ids[i]);',
+            '  var width = fallbackWidth;',
+            '  panel.currentConfigGroup = [];',
+            '  var lastScreen = Number(panel.readConfig("lastScreen"));',
+            '  try {',
+            '    var panelGeometry = screenGeometry(lastScreen);',
+            '    if (panelGeometry.width > 0) width = panelGeometry.width;',
+            '  } catch (error) {}',
+            '  values.push({',
+            '    id: String(ids[i]),',
+            '    hiding: String(panel.hiding),',
+            '    alignment: String(panel.alignment),',
+            '    lengthRatio: width > 0 ? panel.length / width : 1,',
+            '    height: panel.height',
+            '  });',
+            '}',
+            'print(JSON.stringify(values));',
+          ].join('\n'),
+        ],
+        { encoding: 'utf8' }
+      )
+    ).trim();
+
+    return parsePanelStateJson(output);
+  } catch (error) {
+    console.warn(`Could not capture live Plasma panel runtime state: ${String(error)}`);
+    return new Map();
+  }
+}
+
+/**
+ * @param {string} output
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ */
+function parsePanelStateJson(output) {
+  const parsed = parseJsonFromQdbusOutput(output);
+
+  if (!Array.isArray(parsed)) {
+    return new Map();
+  }
+
+  return new Map(
+    parsed
+      .filter(
+        (entry) =>
+          typeof entry?.id === 'string' &&
+          (typeof entry.hiding === 'string' ||
+            typeof entry.alignment === 'string' ||
+            Number.isFinite(entry.lengthRatio) ||
+            Number.isFinite(entry.height))
+      )
+      .map((entry) => [
+        entry.id,
+        {
+          alignment: typeof entry.alignment === 'string' ? entry.alignment : undefined,
+          height: Number.isFinite(entry.height) ? Number(entry.height) : undefined,
+          hiding: typeof entry.hiding === 'string' ? entry.hiding : undefined,
+          lengthRatio: Number.isFinite(entry.lengthRatio) ? Number(entry.lengthRatio) : undefined,
+        },
+      ])
+  );
+}
+
+/**
+ * @param {string} desktopLayout
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @returns {string}
+ */
+function applyPanelStateToDesktopLayout(desktopLayout, panelStateById) {
+  if (panelStateById.size === 0) {
+    return desktopLayout;
+  }
+
+  return replaceContainmentSections(desktopLayout, (section, id) => {
+    if (!/^plugin=org\.kde\.panel$/mu.test(section)) {
+      return section;
+    }
+
+    const state = panelStateById.get(id);
+
+    if (!state) {
+      return section;
+    }
+
+    let nextSection = section;
+
+    if (state.hiding) {
+      nextSection = upsertSectionKey(nextSection, 'hiding', state.hiding);
+    }
+
+    if (state.alignment) {
+      nextSection = upsertSectionKey(nextSection, 'tyrianPanelAlignment', state.alignment);
+    }
+
+    if (state.lengthRatio !== undefined) {
+      nextSection = upsertSectionKey(
+        nextSection,
+        'tyrianPanelLengthRatio',
+        String(state.lengthRatio)
+      );
+    }
+
+    if (state.height !== undefined) {
+      nextSection = upsertSectionKey(nextSection, 'tyrianPanelHeight', String(state.height));
+    }
+
+    return nextSection;
+  });
+}
+
+/**
+ * @param {string} desktopLayout
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ */
+function readSnapshotPanelStateById(desktopLayout) {
+  const panelStateById = new Map();
+
+  replaceContainmentSections(desktopLayout, (section, id) => {
+    if (!/^plugin=org\.kde\.panel$/mu.test(section)) {
+      return section;
+    }
+
+    panelStateById.set(id, {
+      alignment: section.match(/^tyrianPanelAlignment=(.+)$/mu)?.[1],
+      height: parseOptionalNumber(section.match(/^tyrianPanelHeight=(.+)$/mu)?.[1]),
+      hiding: section.match(/^hiding=(.+)$/mu)?.[1],
+      lengthRatio: parseOptionalNumber(section.match(/^tyrianPanelLengthRatio=(.+)$/mu)?.[1]),
+    });
+
+    return section;
+  });
+
+  return panelStateById;
+}
+
+/**
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @param {number} primaryScreen
+ * @param {CommandRunner} runCommand
+ * @returns {void}
+ */
+function restorePlasmaPanelState(panelStateById, primaryScreen, runCommand) {
+  if (panelStateById.size === 0) {
+    return;
+  }
+
+  runCommand(
+    'qdbus6',
+    [
+      'org.kde.plasmashell',
+      '/PlasmaShell',
+      'org.kde.PlasmaShell.evaluateScript',
+      buildPlasmaPanelStateScript(panelStateById, primaryScreen),
+    ],
+    { stdio: 'inherit' }
+  );
+}
+
+/**
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @param {number} primaryScreen
+ * @returns {string}
+ */
+function buildPlasmaPanelStateScript(panelStateById, primaryScreen) {
+  return [
+    `var panelStateById = ${JSON.stringify(Object.fromEntries(panelStateById))};`,
+    `var primaryScreen = ${JSON.stringify(primaryScreen)};`,
+    'var primaryGeometry = screenGeometry(primaryScreen);',
+    'for (var id in panelStateById) {',
+    '  var panel = panelById(Number(id));',
+    '  if (panel) {',
+    '    var state = panelStateById[id];',
+    '    panel.currentConfigGroup = [];',
+    '    panel.writeConfig("lastScreen", String(primaryScreen));',
+    '    if (state.hiding) panel.hiding = state.hiding;',
+    '    if (state.alignment) panel.alignment = state.alignment;',
+    '    if (state.height) panel.height = state.height;',
+    '    if (state.lengthRatio) {',
+    '      var length = Math.round(primaryGeometry.width * state.lengthRatio);',
+    '      panel.minimumLength = length;',
+    '      panel.maximumLength = length;',
+    '      panel.length = length;',
+    '    }',
+    '    panel.reloadConfig();',
+    '  }',
+    '}',
+  ].join('\n');
+}
+
+/**
+ * @param {string | undefined} value
+ * @returns {number | undefined}
+ */
+function parseOptionalNumber(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * @param {string} output
+ * @returns {unknown}
+ */
+function parseJsonFromQdbusOutput(output) {
+  const jsonStart = output.indexOf('[');
+
+  if (jsonStart === -1) {
+    return undefined;
+  }
+
+  return JSON.parse(output.slice(jsonStart));
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripAnsi(value) {
+  const escape = String.fromCharCode(27);
+
+  return value.replaceAll(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, 'gu'), '');
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeRegExp(value) {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+/**
+ * @param {string} content
+ * @param {(section: string, id: string) => string} replaceSection
+ * @returns {string}
+ */
+function replaceContainmentSections(content, replaceSection) {
+  return content.replace(
+    /(\[Containments\]\[(\d+)\]\n(?:(?!^\[).*\n?)*)/gmu,
+    (section, _fullMatch, id) => replaceSection(section, id)
+  );
+}
+
+/**
+ * @param {string} section
+ * @param {string} key
+ * @param {string} value
+ * @returns {string}
+ */
+function upsertSectionKey(section, key, value) {
+  const line = `${key}=${value}`;
+  const pattern = new RegExp(`^${escapeRegExp(key)}=.*$`, 'mu');
+
+  if (pattern.test(section)) {
+    return section.replace(pattern, line);
+  }
+
+  return section.endsWith('\n') ? `${section}${line}\n` : `${section}\n${line}\n`;
 }
 
 /**
@@ -451,9 +1041,7 @@ function makeWallpaperPortable(desktopLayout, wallpaperSource) {
  */
 function sanitizePlasmaDesktopLayout(desktopLayout) {
   return desktopLayout
-    .replaceAll(/^ItemGeometries[^=]*=.*$/gmu, '')
     .replaceAll(/^activityId=.+$/gmu, 'activityId=')
-    .replaceAll(/^lastResolution=.+$/gmu, '')
     .replaceAll(/^lastScreen=.+$/gmu, '')
     .replaceAll(/^positions=.+$/gmu, 'positions={}')
     .replaceAll(/^itemsOnDisabledScreens=.+$/gmu, 'itemsOnDisabledScreens=')
@@ -466,7 +1054,29 @@ function sanitizePlasmaDesktopLayout(desktopLayout) {
  * @returns {string}
  */
 function sanitizePlasmaShellConfig(shellConfig) {
-  return shellConfig.replaceAll(/^\[Updates\]\n(?:[^[\n].*\n?)*/gmu, '');
+  return shellConfig
+    .split(/(?=^\[)/gmu)
+    .map((section) => {
+      const header = section.split('\n', 1)[0];
+
+      if (/^\[Updates\]$/u.test(header)) {
+        return '';
+      }
+
+      if (/^\[PlasmaViews\]\[Panel \d+\]\[Horizontal\d+\]$/u.test(header)) {
+        return '';
+      }
+
+      if (!/^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]$/u.test(header)) {
+        return section;
+      }
+
+      return section
+        .replaceAll(/^length=.+\n?/gmu, '')
+        .replaceAll(/^maxLength=.+\n?/gmu, '')
+        .replaceAll(/^minLength=.+\n?/gmu, '');
+    })
+    .join('');
 }
 
 /**
@@ -479,8 +1089,6 @@ function assertPortablePlasmaLayoutSnapshot(desktopLayout) {
     [/^(?:Image|PreviewImage)=\//mu, 'absolute wallpaper path'],
     [/^(?:Image|PreviewImage)=file:\/\//mu, 'file URI wallpaper path'],
     [/^activityId=.+$/mu, 'KDE activity UUID'],
-    [/^ItemGeometries[^=]*=.+$/mu, 'display geometry state'],
-    [/^lastResolution=.+$/mu, 'display resolution state'],
     [/^lastScreen=.+$/mu, 'display screen assignment state'],
     [/^positions=.+desktop:\//mu, 'desktop icon positions'],
     [/^itemsOnDisabledScreens=.+desktop:\//mu, 'disabled-screen desktop items'],
@@ -509,6 +1117,22 @@ function assertNoHomePaths(layoutContents) {
     if (/^performed=\/.+$/mu.test(content)) {
       throw new Error(
         `${snapshotPath} contains KDE update-state paths; recapture or sanitize the rice`
+      );
+    }
+
+    if (/^\[PlasmaViews\]\[Panel \d+\]\[Horizontal\d+\]$/mu.test(content)) {
+      throw new Error(
+        `${snapshotPath} contains per-resolution Plasma panel view state; recapture or sanitize the rice`
+      );
+    }
+
+    if (
+      /^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]\n(?:[^[\n].*\n?)*^(?:length|maxLength|minLength)=/mu.test(
+        content
+      )
+    ) {
+      throw new Error(
+        `${snapshotPath} contains fixed Plasma panel pixel widths; recapture or sanitize the rice`
       );
     }
   }
@@ -589,15 +1213,28 @@ function backupPath(targetPath, backupRoot, userHome) {
  * @param {CommandRunner} runCommand
  * @returns {void}
  */
-function restartPlasmaShell(runCommand) {
+function stopPlasmaShell(runCommand) {
   try {
-    runCommand('systemctl', ['--user', 'restart', 'plasma-plasmashell.service'], {
+    runCommand('systemctl', ['--user', 'stop', 'plasma-plasmashell.service'], {
       stdio: 'inherit',
     });
   } catch (error) {
-    console.warn(
-      'Could not restart Plasma shell automatically; log out/in or restart plasmashell.'
-    );
+    console.warn('Could not stop Plasma shell automatically; layout restore may be overwritten.');
+    console.warn(String(error));
+  }
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {void}
+ */
+function startPlasmaShell(runCommand) {
+  try {
+    runCommand('systemctl', ['--user', 'start', 'plasma-plasmashell.service'], {
+      stdio: 'inherit',
+    });
+  } catch (error) {
+    console.warn('Could not start Plasma shell automatically; log out/in or start plasmashell.');
     console.warn(String(error));
   }
 }

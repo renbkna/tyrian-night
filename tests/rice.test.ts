@@ -69,6 +69,7 @@ test('rice snapshot is complete and portable', () => {
   checkRiceSnapshot({ repoRoot: root });
 
   const desktopLayout = fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8');
+  const shellLayout = fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, RICE_MANIFEST_PATH), 'utf8')) as {
     layoutFiles: typeof RICE_LAYOUT_FILES;
     requirements: string;
@@ -81,8 +82,6 @@ test('rice snapshot is complete and portable', () => {
   expect(desktopLayout).not.toMatch(/^PreviewImage=\//mu);
   expect(desktopLayout).not.toMatch(/^(?:Image|PreviewImage)=file:\/\//mu);
   expect(desktopLayout).not.toMatch(/^activityId=.+$/mu);
-  expect(desktopLayout).not.toMatch(/^ItemGeometries[^=]*=.+$/mu);
-  expect(desktopLayout).not.toMatch(/^lastResolution=.+$/mu);
   expect(desktopLayout).not.toMatch(/^lastScreen=.+$/mu);
   expect(desktopLayout).not.toMatch(/^positions=.+desktop:\//mu);
   expect(desktopLayout).not.toMatch(/^itemsOnDisabledScreens=.+desktop:\//mu);
@@ -90,8 +89,12 @@ test('rice snapshot is complete and portable', () => {
   expect(desktopLayout).not.toMatch(/^lastPreset=\/.+$/mu);
   expect(desktopLayout).not.toMatch(/\/home\/[^/\s]+/u);
   expect(desktopLayout).not.toContain('desktop:/');
-  expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8')).not.toMatch(
-    /^performed=\/.+$/mu
+  expect(desktopLayout).toContain('org.kde.plasma.icontasks');
+  expect(desktopLayout).toContain('org.kde.plasma.minimizeall');
+  expect(shellLayout).not.toMatch(/^performed=\/.+$/mu);
+  expect(shellLayout).not.toMatch(/^\[PlasmaViews\]\[Panel \d+\]\[Horizontal\d+\]$/mu);
+  expect(shellLayout).not.toMatch(
+    /^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]\n(?:[^[\n].*\n?)*^(?:length|maxLength|minLength)=/mu
   );
   expect(fs.existsSync(path.join(root, RICE_WALLPAPER_PATH))).toBe(true);
   expect(manifest.requirements).toBe(RICE_REQUIREMENTS_PATH);
@@ -117,11 +120,25 @@ test('capturing rice keeps the requirements manifest pointer', () => {
       [
         '[Containments][1]',
         'activityId=machine-specific',
-        'ItemGeometries-2560x1440=Applet-1:128,256,592,336,0;',
+        'ItemGeometries-3840x2160=Applet-1:192,384,888,504,0;',
         'ItemGeometriesHorizontal=Applet-2:128,256,592,336,0;',
-        'lastResolution=2048x1152',
+        'lastResolution=3840x2160',
         'lastScreen=0',
         'plugin=org.kde.desktopcontainment',
+        '',
+        '[Containments][149]',
+        'formfactor=2',
+        'location=4',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][149][Applets][152]',
+        'plugin=org.kde.plasma.icontasks',
+        '',
+        '[Containments][149][Applets][235]',
+        'plugin=org.kde.plasma.minimizeall',
+        '',
+        '[Containments][149][Applets][206][Configuration][General]',
+        'panelWidgets=[{"id":152,"name":"org.kde.plasma.icontasks"},{"id":235,"name":"org.kde.plasma.minimizeall"}]',
         '',
         '[Containments][1][Wallpaper][org.kde.image][General]',
         `Image=${wallpaperPath}`,
@@ -140,7 +157,17 @@ test('capturing rice keeps the requirements manifest pointer', () => {
       '[General]\n\n[Updates]\nperformed=/usr/share/plasma/update.js\n'
     );
 
-    captureRiceLayout({ repoRoot: root, home: userHome });
+    captureRiceLayout({
+      repoRoot: root,
+      home: userHome,
+      runCommand: (command, args) => {
+        if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
+          return '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":1,"height":42}]';
+        }
+
+        return '';
+      },
+    });
 
     const manifest = JSON.parse(fs.readFileSync(path.join(root, RICE_MANIFEST_PATH), 'utf8')) as {
       requirements: string;
@@ -154,13 +181,25 @@ test('capturing rice keeps the requirements manifest pointer', () => {
     expect(capturedDesktop).toContain(RICE_WALLPAPER_PLACEHOLDER);
     expect(capturedDesktop).not.toContain('desktop:/private.txt');
     expect(capturedDesktop).not.toContain('/home/example');
-    expect(capturedDesktop).not.toContain('ItemGeometries');
-    expect(capturedDesktop).not.toContain('lastResolution');
+    expect(capturedDesktop).toContain('ItemGeometries-3840x2160');
+    expect(capturedDesktop).toContain('lastResolution=3840x2160');
     expect(capturedDesktop).not.toContain('lastScreen');
+    expect(capturedDesktop).toMatch(/\[Containments\]\[149\][\s\S]*?hiding=dodgewindows/mu);
+    expect(capturedDesktop).toMatch(/\[Containments\]\[149\][\s\S]*?tyrianPanelLengthRatio=1/mu);
+    expect(capturedDesktop).toContain('plugin=org.kde.plasma.icontasks');
+    expect(capturedDesktop).toContain('plugin=org.kde.plasma.minimizeall');
+    expect(capturedDesktop).toContain('"name":"org.kde.plasma.icontasks"');
+    expect(capturedDesktop).toContain('"name":"org.kde.plasma.minimizeall"');
     expect(capturedDesktop).toContain(`PreviewImage=${RICE_WALLPAPER_PLACEHOLDER}`);
     expect(
       fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8')
     ).not.toContain('[Updates]');
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8')).not.toMatch(
+      /^\[PlasmaViews\]\[Panel \d+\]\[Horizontal\d+\]$/mu
+    );
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8')).not.toMatch(
+      /^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]\n(?:[^[\n].*\n?)*^(?:length|maxLength|minLength)=/mu
+    );
     expect(manifest).not.toHaveProperty('wallpaperSourceName');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -223,9 +262,9 @@ test('capturing rice validates portability before overwriting tracked snapshots'
     );
     fs.writeFileSync(shellLayoutPath, '[General]\nlastPreset=/home/example/private\n');
 
-    expect(() => captureRiceLayout({ repoRoot: root, home: userHome })).toThrow(
-      `${RICE_LAYOUT_FILES[1].snapshotPath} contains a user home path`
-    );
+    expect(() =>
+      captureRiceLayout({ repoRoot: root, home: userHome, runCommand: mockRiceRuntimeCommand })
+    ).toThrow(`${RICE_LAYOUT_FILES[1].snapshotPath} contains a user home path`);
     expect(fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH), 'utf8')).toBe(existingWallpaper);
     expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8')).toBe(
       existingShellSnapshot
@@ -246,19 +285,28 @@ test('layout-only rice install does not require terminal style commands', () => 
         home: path.join(root, 'home'),
         apply: true,
         layoutOnly: true,
-        hasCommand: (command) => command === 'qdbus6',
+        hasCommand: (command) => command === 'qdbus6' || command === 'kscreen-doctor',
         runCommand: (command, args) => {
           commandCalls.push({ command, args });
 
-          if (args.includes('org.kde.ActivityManager.Activities.CurrentActivity')) {
-            return 'current-activity';
-          }
-
-          return '';
+          return mockRiceRuntimeCommand(command, args);
         },
       })
     ).not.toThrow();
-    expect(commandCalls.map(({ command }) => command)).toEqual(['qdbus6', 'systemctl', 'qdbus6']);
+    expect(commandCalls.map(({ command }) => command)).toEqual([
+      'qdbus6',
+      'kscreen-doctor',
+      'qdbus6',
+      'systemctl',
+      'systemctl',
+      'qdbus6',
+    ]);
+    expect(
+      commandCalls.filter(({ command }) => command === 'systemctl').map(({ args }) => args)
+    ).toEqual([
+      ['--user', 'stop', 'plasma-plasmashell.service'],
+      ['--user', 'start', 'plasma-plasmashell.service'],
+    ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -312,11 +360,7 @@ test('full rice install honors injected home and command runner for style and la
         runCommand: (command, args) => {
           commandCalls.push({ command, args });
 
-          if (args.includes('org.kde.ActivityManager.Activities.CurrentActivity')) {
-            return 'current-activity';
-          }
-
-          return '';
+          return mockRiceRuntimeCommand(command, args);
         },
       })
     ).not.toThrow();
@@ -331,7 +375,11 @@ test('full rice install honors injected home and command runner for style and la
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
       'qdbus6',
+      'kscreen-doctor',
+      'qdbus6',
       'systemctl',
+      'systemctl',
+      'qdbus6',
       'qdbus6',
     ]);
     expect(commandCalls.filter(({ command }) => command === 'kwriteconfig6')).toEqual([
@@ -362,7 +410,99 @@ test('full rice install honors injected home and command runner for style and la
 });
 
 test('Plasma layout restore has its own runtime command contract', () => {
-  expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6']);
+  expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6', 'kscreen-doctor']);
+});
+
+test('Plasma layout restore maps captured panels to the current primary screen', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const desktopSnapshotPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
+  const commandCalls: Array<{ command: string; args: string[] }> = [];
+
+  try {
+    fs.writeFileSync(
+      desktopSnapshotPath,
+      fs
+        .readFileSync(desktopSnapshotPath, 'utf8')
+        .replace(
+          'plugin=org.kde.desktopcontainment',
+          [
+            'plugin=org.kde.desktopcontainment',
+            'ItemGeometries-1920x1080=Applet-1:960,540,300,150,0;',
+            'ItemGeometriesHorizontal=Applet-2:192,108,384,216,0;',
+            'lastResolution=1920x1080',
+          ].join('\n')
+        )
+    );
+    fs.appendFileSync(
+      desktopSnapshotPath,
+      [
+        '',
+        '[Containments][148]',
+        'formfactor=0',
+        'location=0',
+        '',
+        'plugin=org.kde.plasma.folder',
+        '',
+        '',
+        '[Containments][149]',
+        'formfactor=2',
+        'hiding=dodgewindows',
+        'immutability=1',
+        '',
+        'location=4',
+        'plugin=org.kde.panel',
+        'tyrianPanelAlignment=center',
+        'tyrianPanelHeight=42',
+        'tyrianPanelLengthRatio=1',
+        '',
+      ].join('\n')
+    );
+
+    installPlasmaLayout({
+      repoRoot: root,
+      home,
+      apply: true,
+      runCommand: (command, args) => {
+        commandCalls.push({ command, args });
+        return mockRiceRuntimeCommand(command, args);
+      },
+    });
+
+    const installedDesktop = fs.readFileSync(
+      path.join(home, RICE_LAYOUT_FILES[0].homePath),
+      'utf8'
+    );
+    const panelStateScript = commandCalls
+      .filter(
+        ({ command, args }) =>
+          command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')
+      )
+      .map(({ args }) => String(args.at(-1)))
+      .find((script) => script.includes('panelStateById'));
+
+    expect(installedDesktop).toMatch(/\[Containments\]\[149\][\s\S]*?lastScreen=0/mu);
+    expect(installedDesktop).toMatch(/\[Containments\]\[148\][\s\S]*?lastScreen=1/mu);
+    expect(installedDesktop).toContain('ItemGeometries-2560x1440=Applet-1:1280,720,400,200,0;');
+    expect(installedDesktop).toContain('ItemGeometriesHorizontal=Applet-2:256,144,512,288,0;');
+    expect(installedDesktop).toContain('lastResolution=2560x1440');
+    expect(panelStateScript).toContain('"149"');
+    expect(panelStateScript).toContain('"hiding":"dodgewindows"');
+    expect(panelStateScript).toContain('panel.writeConfig("lastScreen", String(primaryScreen))');
+    expect(panelStateScript).not.toContain('panel.screen = primaryScreen');
+
+    const installedShell = fs.readFileSync(path.join(home, RICE_LAYOUT_FILES[1].homePath), 'utf8');
+
+    expect(installedShell).toMatch(
+      /^\[PlasmaViews\]\[Panel 149\]\[Defaults\]\n[\s\S]*?^length=2560$/mu
+    );
+    expect(installedShell).toMatch(
+      /^\[PlasmaViews\]\[Panel 231\]\[Defaults\]\n[\s\S]*?^length=2560$/mu
+    );
+    expect(installedShell).not.toContain('[PlasmaViews][Panel 231][Horizontal2048]');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Rice runtime and live installer share the same command-policy root set', () => {
@@ -506,7 +646,7 @@ test('capturing rice accepts live Plasma file URI wallpaper paths', () => {
     );
     fs.writeFileSync(shellLayoutPath, '[General]\n');
 
-    captureRiceLayout({ repoRoot: root, home: userHome });
+    captureRiceLayout({ repoRoot: root, home: userHome, runCommand: mockRiceRuntimeCommand });
 
     const capturedDesktop = fs.readFileSync(
       path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
@@ -541,7 +681,19 @@ function makeTempRiceRepo() {
       '',
     ].join('\n')
   );
-  fs.writeFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), '[General]\n');
+  fs.writeFileSync(
+    path.join(root, RICE_LAYOUT_FILES[1].snapshotPath),
+    [
+      '[General]',
+      '',
+      '[PlasmaViews][Panel 149][Defaults]',
+      'thickness=42',
+      '',
+      '[PlasmaViews][Panel 231][Defaults]',
+      'thickness=30',
+      '',
+    ].join('\n')
+  );
   fs.writeFileSync(
     path.join(root, RICE_MANIFEST_PATH),
     `${JSON.stringify(
@@ -558,4 +710,38 @@ function makeTempRiceRepo() {
   );
 
   return root;
+}
+
+function mockRiceRuntimeCommand(command: string, args: string[]) {
+  if (command === 'kscreen-doctor') {
+    return [
+      'Output: 1 HDMI-A-1',
+      '  enabled',
+      '  connected',
+      '  priority 1',
+      '  Geometry: 0,0 2560x1440',
+      '',
+    ].join('\n');
+  }
+
+  if (args.includes('org.kde.ActivityManager.Activities.CurrentActivity')) {
+    return 'current-activity';
+  }
+
+  if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
+    const script = String(args.at(-1));
+
+    if (script.includes('screenGeometry')) {
+      return [
+        '[',
+        '{"screen":0,"x":0,"y":0,"width":2560,"height":1440},',
+        '{"screen":1,"x":2560,"y":96,"width":2048,"height":1152}',
+        ']',
+      ].join('\n');
+    }
+
+    return '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":1,"height":42}]';
+  }
+
+  return '';
 }
