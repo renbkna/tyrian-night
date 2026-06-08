@@ -72,7 +72,7 @@ test('broker apply and restore commands carry caller ownership for user registry
       callerUid: 1000,
       expectedProductWorkbenchChecksum: 'product-hash',
       expectedWorkbenchChecksum: 'workbench-hash',
-      registryHome: '/home/ren',
+      registryHome: '/home/example',
       theme: 'Tyrian Night',
       themeVersion: 'test',
     })
@@ -86,7 +86,7 @@ test('broker apply and restore commands carry caller ownership for user registry
     '--asset-root',
     '/usr/local/share/tyrian-night/vscode/island',
     '--registry-home',
-    '/home/ren',
+    '/home/example',
     '--expected-workbench-checksum',
     'workbench-hash',
     '--expected-product-workbench-checksum',
@@ -107,7 +107,7 @@ test('broker apply and restore commands carry caller ownership for user registry
       broker,
       callerGid: 1000,
       callerUid: 1000,
-      registryHome: '/home/ren',
+      registryHome: '/home/example',
     })
   ).toEqual([
     '/usr/bin/pkexec',
@@ -117,7 +117,7 @@ test('broker apply and restore commands carry caller ownership for user registry
     '--app-root',
     '/usr/share/code/resources/app',
     '--registry-home',
-    '/home/ren',
+    '/home/example',
     '--caller-uid',
     '1000',
     '--caller-gid',
