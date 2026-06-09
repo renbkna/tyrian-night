@@ -244,7 +244,7 @@
     "tab.unfocusedActiveBackground": "#FCFAFF",
     "tab.unfocusedInactiveBackground": "#F7F3FC",
     "editor.lineHighlightBackground": "#F3EEFC",
-    "editor.lineHighlightBorder": "#00000000",
+    "editor.lineHighlightBorder": "#C9BEDB",
     "editorWidget.background": "#F7F3FC",
     "editorWidget.border": "#D9D0E8",
     "editorHoverWidget.statusBarBackground": "#F3EEFC",

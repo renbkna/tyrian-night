@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 
 import {
+  buildWriteAccessActions,
   OPEN_DOCTOR_ACTION,
   RESET_FILE_ACCESS_ACTION,
-  TRUST_DOCS_ACTION,
-  buildWriteAccessActions,
   shouldOfferPackageAccessReset,
+  TRUST_DOCS_ACTION,
 } from '../apps/vscode/src/islandExtensionPolicy';
 import type { IslandUiSupervisorStatus } from '../apps/vscode/src/islandSupervisor';
 

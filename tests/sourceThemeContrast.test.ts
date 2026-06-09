@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 import { expect, test } from 'bun:test';
 
-import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
+import { isTransparentHex, opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type HighlightSettings = {
@@ -149,6 +149,17 @@ test('source themes keep interactive label text within the contrast contract', (
         contrastRatio(theme.colors[foregroundKey], theme.colors[backgroundKey])
       ).toBeGreaterThanOrEqual(AA_TEXT_CONTRAST);
     }
+  }
+});
+
+test('source themes expose visible active line borders', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const activeLineBorder = theme.colors['editor.lineHighlightBorder'];
+
+    expect(activeLineBorder).toBeDefined();
+    expect(isTransparentHex(activeLineBorder)).toBe(false);
+    expect(activeLineBorder).not.toBe(theme.colors['editorWidget.border']);
   }
 });
 
