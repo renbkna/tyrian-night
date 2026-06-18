@@ -10,6 +10,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  * @typedef {'dark' | 'light'} ThemeAppearance
  * @typedef {{
  *   appearance: ThemeAppearance;
+ *   default?: boolean;
+ *   label: string;
+ *   slug: string;
+ *   vscodeUiTheme: 'vs' | 'vs-dark';
+ * }} ThemeCatalogEntry
+ * @typedef {{
+ *   appearance: ThemeAppearance;
+ *   isDefault: boolean;
  *   islandCssFile: string;
  *   islandCssPath: string;
  *   label: string;
@@ -22,7 +30,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  */
 
 /** @type {ThemeSource[]} */
-export const SOURCE_THEMES = readJson(path.join(repoRoot, 'source/themeCatalog.json'));
+export const SOURCE_THEMES = normalizeThemeCatalog(
+  readJson(path.join(repoRoot, 'source/themeCatalog.json'))
+);
 
 /**
  * @template T
@@ -41,4 +51,34 @@ export function readJson(filePath) {
  */
 export function readSourceTheme(source, repoRoot = process.cwd()) {
   return readJson(path.join(repoRoot, source.sourcePath));
+}
+
+/**
+ * @param {ThemeCatalogEntry[]} catalog
+ * @returns {ThemeSource[]}
+ */
+export function normalizeThemeCatalog(catalog) {
+  const themes = catalog.map((entry) => {
+    const slug = entry.slug;
+
+    return {
+      appearance: entry.appearance,
+      isDefault: entry.default === true,
+      islandCssFile: `${slug}.css`,
+      islandCssPath: `apps/vscode/island/${slug}.css`,
+      label: entry.label,
+      paletteName: slug.replaceAll('-', '_'),
+      slug,
+      sourcePath: `source/themes/${slug}.json`,
+      vscodeContributionPath: `./source/themes/${slug}.json`,
+      vscodeUiTheme: entry.vscodeUiTheme,
+    };
+  });
+  const defaultThemes = themes.filter((theme) => theme.isDefault);
+
+  if (defaultThemes.length !== 1) {
+    throw new Error(`Expected exactly one default source theme, found ${defaultThemes.length}.`);
+  }
+
+  return themes;
 }

@@ -1,14 +1,12 @@
 {
   "brokerScriptName": "islandBroker.js",
-  "defaultAssetRoot": "/usr/local/share/tyrian-night/vscode/island",
-  "defaultBrokerLibRoot": "/usr/local/lib/tyrian-night",
   "assetRoots": [
     "/usr/share/tyrian-night/vscode/island",
     "/usr/local/share/tyrian-night/vscode/island"
   ],
+  "chmodPath": "/usr/bin/chmod",
   "brokerLibRoots": ["/usr/lib/tyrian-night", "/usr/local/lib/tyrian-night"],
   "chownPath": "/usr/bin/chown",
   "nodePath": "/usr/bin/node",
-  "packageSlug": "tyrian-night",
   "pkexecPath": "/usr/bin/pkexec"
 }

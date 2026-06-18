@@ -1,3 +1,5 @@
+import { parseArgs as parseNodeArgs } from 'node:util';
+
 import {
   applyIslandShell,
   readAllIslandShellStatuses,
@@ -11,40 +13,38 @@ import {
   restoreIslandUiSupervised,
 } from './islandSupervisor.js';
 
+type IslandCliArgs = {
+  'app-root'?: string;
+  'css-source'?: string;
+  'theme-version'?: string;
+};
+
 async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
-  const args = parseArgs(rest);
+  const { args, command } = parseCommandLine(process.argv.slice(2));
 
   switch (command) {
     case 'apply':
-      requireArg(args, 'app-root');
-      requireArg(args, 'css-source');
-      requireArg(args, 'theme-version');
       writeJson(
         await applyIslandShell({
-          appRoot: args['app-root'],
-          cssSourcePath: args['css-source'],
-          themeVersion: args['theme-version'],
+          appRoot: requireArg(args, 'app-root'),
+          cssSourcePath: requireArg(args, 'css-source'),
+          themeVersion: requireArg(args, 'theme-version'),
         })
       );
       return;
     case 'apply-supervised':
-      requireArg(args, 'app-root');
-      requireArg(args, 'css-source');
-      requireArg(args, 'theme-version');
       writeJson(
         await applyIslandUiSupervised({
-          appRoot: args['app-root'],
-          cssSourcePath: args['css-source'],
-          themeVersion: args['theme-version'],
+          appRoot: requireArg(args, 'app-root'),
+          cssSourcePath: requireArg(args, 'css-source'),
+          themeVersion: requireArg(args, 'theme-version'),
         })
       );
       return;
     case 'restore':
-      requireArg(args, 'app-root');
       writeJson(
         await restoreIslandShell({
-          appRoot: args['app-root'],
+          appRoot: requireArg(args, 'app-root'),
         })
       );
       return;
@@ -63,10 +63,9 @@ async function main(): Promise<void> {
       );
       return;
     case 'status':
-      requireArg(args, 'app-root');
       writeJson(
         await readIslandShellStatus({
-          appRoot: args['app-root'],
+          appRoot: requireArg(args, 'app-root'),
         })
       );
       return;
@@ -91,27 +90,34 @@ async function main(): Promise<void> {
   }
 }
 
-function parseArgs(argv: string[]): Record<string, string> {
-  const parsed: Record<string, string> = {};
+function parseCommandLine(argv: string[]): { args: IslandCliArgs; command: string | undefined } {
+  const { positionals, values } = parseNodeArgs({
+    allowPositionals: true,
+    args: argv,
+    options: {
+      'app-root': { type: 'string' },
+      'css-source': { type: 'string' },
+      'theme-version': { type: 'string' },
+    },
+    strict: true,
+  });
+  const [command, ...extraPositionals] = positionals;
 
-  for (let index = 0; index < argv.length; index += 2) {
-    const key = argv[index];
-    const value = argv[index + 1];
-
-    if (!key?.startsWith('--') || value === undefined) {
-      throw new Error(`Invalid argument sequence near '${key ?? ''}'.`);
-    }
-
-    parsed[key.slice(2)] = value;
+  if (extraPositionals.length > 0) {
+    throw new Error(`Unexpected argument '${extraPositionals[0]}'.`);
   }
 
-  return parsed;
+  return { args: values, command };
 }
 
-function requireArg(args: Record<string, string>, name: string): void {
-  if (!args[name]) {
+function requireArg(args: IslandCliArgs, name: keyof IslandCliArgs): string {
+  const value = args[name];
+
+  if (!value) {
     throw new Error(`Missing required argument '--${name}'.`);
   }
+
+  return value;
 }
 
 function writeJson(value: unknown): void {

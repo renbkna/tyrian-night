@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // @ts-check
 
+import { parseArgs as parseNodeArgs } from 'node:util';
+
 import {
   auditRolePairs,
   auditSampleSequence,
@@ -13,7 +15,7 @@ import {
 } from './colorScience.mjs';
 import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
 
-const args = parseArgs(process.argv.slice(2));
+const args = parseAuditArgs(process.argv.slice(2));
 const themes = SOURCE_THEMES.map((source) => readSourceTheme(source));
 
 if (args.help) {
@@ -186,27 +188,36 @@ Metrics:
  * @param {string[]} rawArgs
  * @returns {{ candidates: string[]; help: boolean; limit: number; role?: string }}
  */
-function parseArgs(rawArgs) {
-  /** @type {{ candidates: string[]; help: boolean; limit: number; role?: string }} */
-  const parsed = { candidates: [], help: false, limit: 8 };
+function parseAuditArgs(rawArgs) {
+  const { values } = parseNodeArgs({
+    allowPositionals: false,
+    args: rawArgs,
+    options: {
+      candidates: { type: 'string' },
+      help: { type: 'boolean', short: 'h' },
+      limit: { type: 'string' },
+      role: { type: 'string' },
+    },
+    strict: true,
+  });
+  const limit = values.limit === undefined ? 8 : Number.parseInt(values.limit, 10);
 
-  for (let index = 0; index < rawArgs.length; index += 1) {
-    const arg = rawArgs[index];
-
-    if (arg === '--help' || arg === '-h') {
-      parsed.help = true;
-    } else if (arg === '--role') {
-      parsed.role = rawArgs[++index];
-    } else if (arg === '--candidates') {
-      parsed.candidates = rawArgs[++index].split(',').map((candidate) => candidate.trim());
-    } else if (arg === '--limit') {
-      parsed.limit = Number.parseInt(rawArgs[++index], 10);
-    } else {
-      throw new Error(`Unknown argument '${arg}'`);
-    }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`Invalid --limit '${values.limit}'.`);
   }
 
-  return parsed;
+  return {
+    candidates:
+      values.candidates === undefined
+        ? []
+        : values.candidates
+            .split(',')
+            .map((candidate) => candidate.trim())
+            .filter(Boolean),
+    help: values.help === true,
+    limit,
+    role: values.role,
+  };
 }
 
 /**

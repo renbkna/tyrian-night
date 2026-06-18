@@ -31,5 +31,26 @@ user.settings.json
 .machine-backups/
 
 # Build artifacts
+out/*.js
 out/*.map
 .vscode-test/
+
+# Generated theme/package artifacts
+apps/vscode/src/generated/
+apps/vscode/island/tyrian-*.css
+apps/zed/themes/tyrian-night.json
+desktop/caelestia/hypr/
+desktop/caelestia/schemes/
+desktop/caelestia/state/
+desktop/kde/color-schemes/
+desktop/kde/plasma/desktoptheme/
+desktop/kde/plasma/look-and-feel/
+desktop/kde/union/css/styles/
+terminal/fastfetch/tyrian-night.jsonc
+terminal/fish/config.example.fish
+terminal/fish/functions/fish_greeting.fish
+terminal/fish/themes/
+terminal/ghostty/config.example
+terminal/ghostty/ghostty.css
+terminal/ghostty/themes/
+terminal/starship/tyrian-night.toml

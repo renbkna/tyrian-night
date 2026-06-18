@@ -97,28 +97,7 @@ export async function runIslandBrokerApply(options: {
   theme: string;
   themeVersion: string;
 }): Promise<IslandBrokerApplyResult> {
-  return runBrokerCommand<IslandBrokerApplyResult>(buildIslandBrokerApplyCommand(options));
-}
-
-export async function runIslandBrokerRestore(options: {
-  appRoot: string;
-  broker: Extract<IslandBrokerStatus, { available: true }>;
-}): Promise<IslandBrokerRestoreResult> {
-  return runBrokerCommand<IslandBrokerRestoreResult>(buildIslandBrokerRestoreCommand(options));
-}
-
-export function buildIslandBrokerApplyCommand(options: {
-  appRoot: string;
-  broker: Extract<IslandBrokerStatus, { available: true }>;
-  callerGid?: number;
-  callerUid?: number;
-  expectedProductWorkbenchChecksum: string;
-  expectedWorkbenchChecksum: string;
-  registryHome?: string;
-  theme: string;
-  themeVersion: string;
-}): string[] {
-  return [
+  return runBrokerCommand<IslandBrokerApplyResult>([
     options.broker.pkexecPath,
     options.broker.nodePath,
     options.broker.brokerPath,
@@ -128,7 +107,7 @@ export function buildIslandBrokerApplyCommand(options: {
     '--asset-root',
     options.broker.assetRoot,
     '--registry-home',
-    options.registryHome ?? os.homedir(),
+    os.homedir(),
     '--expected-workbench-checksum',
     options.expectedWorkbenchChecksum,
     '--expected-product-workbench-checksum',
@@ -137,18 +116,15 @@ export function buildIslandBrokerApplyCommand(options: {
     options.theme,
     '--theme-version',
     options.themeVersion,
-    ...buildCallerOwnershipArgs(options),
-  ];
+    ...buildCallerOwnershipArgs(),
+  ]);
 }
 
-export function buildIslandBrokerRestoreCommand(options: {
+export async function runIslandBrokerRestore(options: {
   appRoot: string;
   broker: Extract<IslandBrokerStatus, { available: true }>;
-  callerGid?: number;
-  callerUid?: number;
-  registryHome?: string;
-}): string[] {
-  return [
+}): Promise<IslandBrokerRestoreResult> {
+  return runBrokerCommand<IslandBrokerRestoreResult>([
     options.broker.pkexecPath,
     options.broker.nodePath,
     options.broker.brokerPath,
@@ -156,9 +132,9 @@ export function buildIslandBrokerRestoreCommand(options: {
     '--app-root',
     options.appRoot,
     '--registry-home',
-    options.registryHome ?? os.homedir(),
-    ...buildCallerOwnershipArgs(options),
-  ];
+    os.homedir(),
+    ...buildCallerOwnershipArgs(),
+  ]);
 }
 
 async function runBrokerCommand<T>(command: string[]): Promise<T> {

@@ -2,6 +2,14 @@ import fs from 'node:fs';
 
 import { expect, test } from 'bun:test';
 
+import {
+  DEFAULT_ISLAND_BROKER_ASSET_ROOTS,
+  DEFAULT_ISLAND_BROKER_PATHS,
+  ISLAND_BROKER_CHMOD_PATH,
+  ISLAND_BROKER_CHOWN_PATH,
+  ISLAND_BROKER_NODE_PATH,
+  ISLAND_BROKER_PKEXEC_PATH,
+} from '../apps/vscode/src/generated/islandBrokerInstallContract';
 import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog';
 import { SOURCE_THEMES } from '../scripts/themeSources.mjs';
 
@@ -29,7 +37,7 @@ test('manifest declares the VS Code host and contribution contracts this extensi
   expect(manifest.extensionKind).toEqual(['ui']);
   expect(manifest.activationEvents).toContain('onStartupFinished');
   expect(fs.existsSync(stripRelativePrefix(manifest.icon))).toBe(true);
-  expect(fs.existsSync(stripRelativePrefix(manifest.main))).toBe(true);
+  expect(manifest.main).toBe('./out/extension.js');
 
   for (const { command } of manifest.contributes.commands) {
     expect(extensionSource).toContain(`registerCommand('${command}'`);
@@ -91,6 +99,45 @@ test('VS Code package includes only VS Code runtime and marketplace assets', () 
   expect(ignoredFiles).not.toContain('source/**');
 });
 
+test('generated Island broker contract exposes only runtime discovery defaults', () => {
+  expect(DEFAULT_ISLAND_BROKER_PATHS).toEqual([
+    '/usr/lib/tyrian-night/islandBroker.js',
+    '/usr/local/lib/tyrian-night/islandBroker.js',
+  ]);
+  expect(DEFAULT_ISLAND_BROKER_ASSET_ROOTS).toEqual([
+    '/usr/share/tyrian-night/vscode/island',
+    '/usr/local/share/tyrian-night/vscode/island',
+  ]);
+  expect(ISLAND_BROKER_CHMOD_PATH).toBe('/usr/bin/chmod');
+  expect(ISLAND_BROKER_CHOWN_PATH).toBe('/usr/bin/chown');
+  expect(ISLAND_BROKER_NODE_PATH).toBe('/usr/bin/node');
+  expect(ISLAND_BROKER_PKEXEC_PATH).toBe('/usr/bin/pkexec');
+});
+
+test('source theme catalog owns identity only and marks one explicit default', () => {
+  const catalog = readJson<Array<Record<string, unknown>>>('source/themeCatalog.json');
+  const defaultEntries = catalog.filter((entry) => entry.default === true);
+
+  expect(defaultEntries).toEqual([
+    expect.objectContaining({
+      label: 'Tyrian Night',
+      slug: 'tyrian-night',
+    }),
+  ]);
+
+  for (const entry of catalog) {
+    expect(entry).not.toHaveProperty('sourcePath');
+    expect(entry).not.toHaveProperty('vscodeContributionPath');
+    expect(entry).not.toHaveProperty('islandCssFile');
+    expect(entry).not.toHaveProperty('islandCssPath');
+    expect(entry).not.toHaveProperty('paletteName');
+  }
+});
+
+test('generated theme catalog default does not depend on source catalog position', () => {
+  expect(TYRIAN_THEME_CATALOG.find((theme) => theme.isDefault)?.label).toBe('Tyrian Night');
+});
+
 test('VS Code companion settings example is parseable and aligned with Tyrian defaults', () => {
   const settings = readJson<Record<string, unknown>>('apps/vscode/settings.example.json');
 
@@ -144,13 +191,21 @@ test('package scripts own the full verification path without npm shims', () => {
   }>('tsconfig.json');
 
   expect(manifest.scripts['vscode:prepublish']).toBeUndefined();
-  expect(manifest.scripts.verify).toContain('bun run check:contracts');
-  expect(manifest.scripts.verify).toContain('bun run check:island-css');
+  expect(manifest.scripts.verify).toContain('bun run build:generated');
+  expect(manifest.scripts.verify).toContain('bun run check:generated');
   expect(manifest.scripts.verify).toContain('bun run check:rice');
-  expect(manifest.scripts['install:island-broker']).toBe('node scripts/installIslandBroker.mjs');
-  expect(manifest.scripts['install:island-broker:apply']).toBe(
-    'node scripts/installIslandBroker.mjs --apply'
-  );
+  expect(manifest.scripts['build:generated']).toContain('bun run build:contracts');
+  expect(manifest.scripts['build:generated']).toContain('bun run build:island-css');
+  expect(manifest.scripts['build:generated']).toContain('bun run build:zed-theme');
+  expect(manifest.scripts['build:generated']).toContain('bun run build:terminal-themes');
+  expect(manifest.scripts['build:generated']).toContain('bun run build:desktop-themes');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:contracts');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:island-css');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:terminal-themes');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:desktop-themes');
+  expect(manifest.scripts['install:island-broker']).toBeUndefined();
+  expect(manifest.scripts['install:island-broker:apply']).toBeUndefined();
+  expect(manifest.scripts.build).toBe('bun run build:generated && tsup');
   expect(manifest.scripts['package:check']).toBe('bun run verify && bun run build');
   expect(manifest.scripts.package).toBe(
     'bun run package:check && mkdir -p dist && vsce package --no-dependencies --out dist/tyrian-night.vsix'

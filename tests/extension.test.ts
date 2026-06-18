@@ -266,7 +266,7 @@ test('permission-required Island UI prompt can open the public trust docs before
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['apply-supervised']);
 });
 
-test('write-access unlock does not repeat the permission prompt when reload sees the patch', async () => {
+test('write-access unlock rejects untrusted app roots before remembering access', async () => {
   const appRoot = await createWritableAppRoot();
   const workbenchHash = await readWorkbenchHash(appRoot);
   vscodeAppRoot = appRoot;
@@ -275,42 +275,17 @@ test('write-access unlock does not repeat the permission prompt when reload sees
     const repairCommand = await activateAndGetRepairCommand();
     resetObservations();
     queuedWarningResponses.push('I Understand', 'Unlock Write Access');
-    queuedSpawnResponses.push(
-      {
-        kind: 'permission-required',
-        changed: true,
-        status: fakeIslandStatus('clean', workbenchHash),
-        writeAccess: {
-          writable: false,
-          blockedPaths: [{ path: path.join(appRoot, 'product.json'), reason: 'EACCES' }],
-          issues: [`Tyrian cannot write '${path.join(appRoot, 'product.json')}'.`],
-        },
-        reason: 'EACCES: permission denied',
+    queuedSpawnResponses.push({
+      kind: 'permission-required',
+      changed: true,
+      status: fakeIslandStatus('clean', workbenchHash),
+      writeAccess: {
+        writable: false,
+        blockedPaths: [{ path: path.join(appRoot, 'product.json'), reason: 'EACCES' }],
+        issues: [`Tyrian cannot write '${path.join(appRoot, 'product.json')}'.`],
       },
-      {},
-      {
-        kind: 'permission-required',
-        changed: true,
-        status: fakeIslandStatus('clean', workbenchHash),
-        writeAccess: {
-          writable: false,
-          blockedPaths: [{ path: path.join(appRoot, 'product.json'), reason: 'EACCES' }],
-          issues: [`Tyrian cannot write '${path.join(appRoot, 'product.json')}'.`],
-        },
-        reason: 'EACCES: permission denied',
-      },
-      [
-        {
-          ...fakeIslandStatus('patched', workbenchHash),
-          writeAccess: {
-            writable: true,
-            blockedPaths: [],
-            issues: [],
-          },
-          recommendedAction: 'none',
-        },
-      ]
-    );
+      reason: 'EACCES: permission denied',
+    });
 
     await repairCommand();
 
@@ -322,10 +297,13 @@ test('write-access unlock does not repeat the permission prompt when reload sees
       .map((call) => call.args[1]);
 
     expect(permissionPrompts).toHaveLength(1);
-    expect(cliCommands).toEqual(['apply-supervised', 'apply-supervised', 'status-all-supervised']);
+    expect(cliCommands).toEqual(['apply-supervised']);
     expect(
-      informationMessages.some(([message]) => String(message).includes('Reload VS Code'))
+      informationMessages.some(([message]) =>
+        String(message).includes('write access unlock failed')
+      )
     ).toBe(true);
+    expect(globalStateUpdates).not.toContainEqual(['tyrianNight.unlockedAppRoots', [appRoot]]);
   } finally {
     await fs.rm(appRoot, { force: true, recursive: true });
   }

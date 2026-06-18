@@ -4,11 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
-import {
-  buildIslandBrokerApplyCommand,
-  buildIslandBrokerRestoreCommand,
-  readIslandBrokerStatus,
-} from '../apps/vscode/src/islandBrokerClient';
+import { readIslandBrokerStatus } from '../apps/vscode/src/islandBrokerClient';
 
 let testRoot: string;
 
@@ -53,76 +49,6 @@ test('broker discovery reports missing pkexec before probing helper paths', asyn
     available: false,
     reason: 'System privilege prompt is unavailable: pkexec was not found.',
   });
-});
-
-test('broker apply and restore commands carry caller ownership for user registry repair', () => {
-  const broker = {
-    available: true,
-    assetRoot: '/usr/local/share/tyrian-night/vscode/island',
-    brokerPath: '/usr/local/lib/tyrian-night/islandBroker.js',
-    nodePath: '/usr/bin/node',
-    pkexecPath: '/usr/bin/pkexec',
-  } as const;
-
-  expect(
-    buildIslandBrokerApplyCommand({
-      appRoot: '/usr/share/code/resources/app',
-      broker,
-      callerGid: 1000,
-      callerUid: 1000,
-      expectedProductWorkbenchChecksum: 'product-hash',
-      expectedWorkbenchChecksum: 'workbench-hash',
-      registryHome: '/home/example',
-      theme: 'Tyrian Night',
-      themeVersion: 'test',
-    })
-  ).toEqual([
-    '/usr/bin/pkexec',
-    '/usr/bin/node',
-    '/usr/local/lib/tyrian-night/islandBroker.js',
-    'apply',
-    '--app-root',
-    '/usr/share/code/resources/app',
-    '--asset-root',
-    '/usr/local/share/tyrian-night/vscode/island',
-    '--registry-home',
-    '/home/example',
-    '--expected-workbench-checksum',
-    'workbench-hash',
-    '--expected-product-workbench-checksum',
-    'product-hash',
-    '--theme',
-    'Tyrian Night',
-    '--theme-version',
-    'test',
-    '--caller-uid',
-    '1000',
-    '--caller-gid',
-    '1000',
-  ]);
-
-  expect(
-    buildIslandBrokerRestoreCommand({
-      appRoot: '/usr/share/code/resources/app',
-      broker,
-      callerGid: 1000,
-      callerUid: 1000,
-      registryHome: '/home/example',
-    })
-  ).toEqual([
-    '/usr/bin/pkexec',
-    '/usr/bin/node',
-    '/usr/local/lib/tyrian-night/islandBroker.js',
-    'restore',
-    '--app-root',
-    '/usr/share/code/resources/app',
-    '--registry-home',
-    '/home/example',
-    '--caller-uid',
-    '1000',
-    '--caller-gid',
-    '1000',
-  ]);
 });
 
 async function writeExecutable(fileName: string): Promise<string> {

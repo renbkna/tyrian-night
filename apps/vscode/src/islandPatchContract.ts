@@ -1,8 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-export { TYRIAN_THEME_CSS } from './generated/themeCatalog.js';
-
 export const ISLAND_PATCH_CONTRACT_VERSION = 2;
 export const ISLAND_PATCH_STRATEGY = 'stylesheet-link-v1';
 

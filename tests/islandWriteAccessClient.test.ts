@@ -6,8 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
 import {
-  buildIslandPackageAccessRestoreCommands,
-  buildIslandWriteAccessUnlockCommands,
+  runIslandPackageAccessRestore,
   runIslandWriteAccessUnlock,
   readIslandWriteAccessStatus,
 } from '../apps/vscode/src/islandWriteAccessClient';
@@ -28,16 +27,19 @@ afterEach(async () => {
 });
 
 test('write-access discovery depends only on system privilege and ownership tools', async () => {
+  const chmodPath = await writeExecutable('chmod');
   const chownPath = await writeExecutable('chown');
   const pkexecPath = await writeExecutable('pkexec');
 
   await expect(
     readIslandWriteAccessStatus({
+      chmodPath,
       chownPath,
       pkexecPath,
     })
   ).resolves.toEqual({
     available: true,
+    chmodPath,
     chownPath,
     pkexecPath,
   });
@@ -46,6 +48,7 @@ test('write-access discovery depends only on system privilege and ownership tool
 test('write-access discovery reports missing system tools without requiring Tyrian broker install', async () => {
   await expect(
     readIslandWriteAccessStatus({
+      chmodPath: await writeExecutable('chmod'),
       chownPath: await writeExecutable('chown'),
       pkexecPath: path.join(testRoot, 'missing-pkexec'),
     })
@@ -56,6 +59,7 @@ test('write-access discovery reports missing system tools without requiring Tyri
 
   await expect(
     readIslandWriteAccessStatus({
+      chmodPath: await writeExecutable('chmod-2'),
       chownPath: path.join(testRoot, 'missing-chown'),
       pkexecPath: await writeExecutable('pkexec-2'),
     })
@@ -63,97 +67,63 @@ test('write-access discovery reports missing system tools without requiring Tyri
     available: false,
     reason: 'System ownership tool is unavailable: chown was not found.',
   });
-});
 
-test('standalone write-access unlock uses one pkexec ownership prompt', () => {
-  const writeAccess = {
-    available: true,
-    chownPath: '/usr/bin/chown',
-    pkexecPath: '/usr/bin/pkexec',
-  } as const;
-
-  expect(
-    buildIslandWriteAccessUnlockCommands({
-      appRoot: '/usr/share/code/resources/app',
-      callerGid: 1000,
-      callerUid: 1000,
-      writeAccess,
+  await expect(
+    readIslandWriteAccessStatus({
+      chmodPath: path.join(testRoot, 'missing-chmod'),
+      chownPath: await writeExecutable('chown-3'),
+      pkexecPath: await writeExecutable('pkexec-3'),
     })
-  ).toEqual([
-    [
-      '/usr/bin/pkexec',
-      '/usr/bin/chown',
-      '1000:1000',
-      '/usr/share/code/resources/app/out/vs/code/electron-browser/workbench',
-      '/usr/share/code/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
-      '/usr/share/code/resources/app/product.json',
-    ],
-  ]);
+  ).resolves.toEqual({
+    available: false,
+    reason: 'System mode tool is unavailable: chmod was not found.',
+  });
 });
 
-test('standalone write-access unlock applies chmod locally after ownership unlock', async () => {
-  const localRoot = await fs.mkdtemp(
-    path.join(os.tmpdir(), 'tyrian-night-write-access-unlock-test-')
-  );
+test('standalone write-access unlock rejects caller-owned app roots before privilege prompt', async () => {
+  const appRoot = await createAppRoot('unlock-insecure-app-root');
+  const paths = buildIslandPatchPaths(appRoot);
+  const html = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const pkexecPath = await writePkexecRecorder('pkexec-insecure-unlock.log');
 
-  try {
-    const appRoot = await createAppRoot('unlock-local-chmod', localRoot);
-    const paths = buildIslandPatchPaths(appRoot);
-    const pkexecPath = await writePkexecRecorder('pkexec-unlock.log', localRoot);
-    const html = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-
-    await fs.chmod(paths.workbenchDirPath, 0o500);
-    await fs.chmod(paths.workbenchHtmlPath, 0o400);
-    await fs.chmod(paths.productJsonPath, 0o400);
-
-    await expect(
-      runIslandWriteAccessUnlock({
-        appRoot,
-        callerGid: typeof process.getgid === 'function' ? process.getgid() : 1000,
-        callerUid: typeof process.getuid === 'function' ? process.getuid() : 1000,
-        expectedProductWorkbenchChecksum: sha256Base64(html),
-        expectedWorkbenchChecksum: sha256Base64(html),
-        writeAccess: {
-          available: true,
-          chownPath: '/usr/bin/chown',
-          pkexecPath,
-        },
-      })
-    ).resolves.toMatchObject({
-      action: 'unlock',
-      changed: true,
-    });
-
-    expect((await fs.stat(paths.workbenchDirPath)).mode & 0o777).toBe(0o700);
-    expect((await fs.stat(paths.workbenchHtmlPath)).mode & 0o777).toBe(0o600);
-    expect((await fs.stat(paths.productJsonPath)).mode & 0o777).toBe(0o600);
-  } finally {
-    await fs.rm(localRoot, { force: true, recursive: true });
-  }
-});
-
-test('package-access reset uses one pkexec ownership prompt', () => {
-  const writeAccess = {
-    available: true,
-    chownPath: '/usr/bin/chown',
-    pkexecPath: '/usr/bin/pkexec',
-  } as const;
-
-  expect(
-    buildIslandPackageAccessRestoreCommands({
-      appRoot: '/usr/share/code/resources/app',
-      writeAccess,
+  await expect(
+    runIslandWriteAccessUnlock({
+      appRoot,
+      callerGid: typeof process.getgid === 'function' ? process.getgid() : 1000,
+      callerUid: typeof process.getuid === 'function' ? process.getuid() : 1000,
+      expectedProductWorkbenchChecksum: sha256Base64(html),
+      expectedWorkbenchChecksum: sha256Base64(html),
+      writeAccess: {
+        available: true,
+        chmodPath: '/usr/bin/chmod',
+        chownPath: '/usr/bin/chown',
+        pkexecPath,
+      },
     })
-  ).toEqual([
-    [
-      '/usr/bin/pkexec',
-      '/usr/bin/chown',
-      'root:root',
-      '/usr/share/code/resources/app/out/vs/code/electron-browser/workbench',
-      '/usr/share/code/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
-      '/usr/share/code/resources/app/product.json',
-    ],
-  ]);
+  ).rejects.toThrow('Tyrian rejected write-access change: VS Code app root');
+  await expect(fs.stat(`${pkexecPath}.calls`)).rejects.toThrow();
+});
+
+test('package-access reset rejects caller-owned app roots before privilege prompt', async () => {
+  const appRoot = await createAppRoot('restore-access-insecure-app-root');
+  const paths = buildIslandPatchPaths(appRoot);
+  const html = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const pkexecPath = await writePkexecRecorder('pkexec-insecure-restore.log');
+
+  await expect(
+    runIslandPackageAccessRestore({
+      appRoot,
+      expectedProductWorkbenchChecksum: sha256Base64(html),
+      expectedWorkbenchChecksum: sha256Base64(html),
+      writeAccess: {
+        available: true,
+        chmodPath: '/usr/bin/chmod',
+        chownPath: '/usr/bin/chown',
+        pkexecPath,
+      },
+    })
+  ).rejects.toThrow('Tyrian rejected write-access change: VS Code app root');
+  await expect(fs.stat(`${pkexecPath}.calls`)).rejects.toThrow();
 });
 
 async function createAppRoot(name: string, root = testRoot): Promise<string> {

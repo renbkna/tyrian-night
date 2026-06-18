@@ -19,20 +19,16 @@ import {
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
 import type { IslandShellStatus } from './islandShell.js';
-import {
-  LATER_ACTION,
-  OPEN_DOCTOR_ACTION,
-  RESET_FILE_ACCESS_ACTION,
-  TRUST_DOCS_ACTION,
-  buildWriteAccessActions,
-  shouldOfferPackageAccessReset,
-} from './islandExtensionPolicy.js';
 import type {
   IslandUiApplySupervisionResult as IslandApplyResult,
   IslandUiRestoreSupervisionResult as IslandRestoreResult,
   IslandUiSupervisorStatus as IslandSupervisorStatus,
 } from './islandSupervisor.js';
 
+const OPEN_DOCTOR_ACTION = 'Open Doctor';
+const RESET_FILE_ACCESS_ACTION = 'Reset File Access';
+const TRUST_DOCS_ACTION = 'Why This Is Needed';
+const LATER_ACTION = 'Later';
 const ISLAND_UI_TRUST_DOCS_URL = 'https://github.com/renbkna/tyrian-night#island-ui';
 const ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
 const ISLAND_UI_UNLOCKED_APP_ROOTS_KEY = 'tyrianNight.unlockedAppRoots';
@@ -50,6 +46,12 @@ function isTyrianTheme(theme: string | undefined): theme is string {
 
 function getCssFileForTheme(theme: string): string {
   return getIslandCssFileForTheme(theme) ?? getIslandCssFileForTheme(DEFAULT_TYRIAN_THEME_LABEL)!;
+}
+
+function buildWriteAccessActions(primaryAction: string | undefined): string[] {
+  return primaryAction
+    ? [primaryAction, TRUST_DOCS_ACTION, OPEN_DOCTOR_ACTION, LATER_ACTION]
+    : [TRUST_DOCS_ACTION, OPEN_DOCTOR_ACTION, LATER_ACTION];
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -514,7 +516,7 @@ async function restoreIslandUi(options: {
 
   if (!result.changed) {
     if (options.interactive) {
-      await maybePromptToRestoreIslandPackageAccess({ restoreChanged: false });
+      await maybePromptToRestoreIslandPackageAccess();
     }
 
     if (options.notifyWhenUnchanged) {
@@ -524,7 +526,7 @@ async function restoreIslandUi(options: {
   }
 
   if (options.interactive) {
-    await maybePromptToRestoreIslandPackageAccess({ restoreChanged: true });
+    await maybePromptToRestoreIslandPackageAccess();
   }
 
   await promptForReload(options.reloadMessage);
@@ -687,13 +689,7 @@ async function unlockIslandWriteAccess(status: IslandShellStatus): Promise<void>
   await rememberUnlockedAppRoot(vscode.env.appRoot);
 }
 
-async function maybePromptToRestoreIslandPackageAccess(options: {
-  restoreChanged: boolean;
-}): Promise<void> {
-  if (!options.restoreChanged) {
-    return;
-  }
-
+async function maybePromptToRestoreIslandPackageAccess(): Promise<void> {
   if (!isUnlockedAppRootRemembered(vscode.env.appRoot)) {
     return;
   }
@@ -707,11 +703,11 @@ async function maybePromptToRestoreIslandPackageAccess(options: {
   const currentStatus = await readCurrentIslandSupervisorStatus();
 
   if (
-    !shouldOfferPackageAccessReset(
-      currentStatus,
-      writeAccess.available,
-      options.restoreChanged,
-      isUnlockedAppRootRemembered(vscode.env.appRoot)
+    !(
+      writeAccess.available &&
+      currentStatus?.workbenchChecksum !== undefined &&
+      currentStatus.productWorkbenchChecksum !== undefined &&
+      currentStatus.writeAccess?.writable === true
     )
   ) {
     return;
