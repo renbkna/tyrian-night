@@ -37,6 +37,9 @@ const GHOSTTY_ANSI_KEYS = [
   'terminal.ansiBrightWhite',
 ];
 
+const DEFAULT_DARK_TERMINAL_THEME_SLUG = 'tyrian-nocturne';
+const DEFAULT_LIGHT_TERMINAL_THEME_SLUG = 'tyrian-dawn';
+
 /**
  * @param {string} [repoRoot]
  * @returns {GeneratedAsset[]}
@@ -46,6 +49,7 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
     source,
     theme: /** @type {VscodeTheme} */ (readSourceTheme(source, repoRoot)),
   }));
+  const defaultDarkTheme = defaultTerminalSourceTheme(sourceThemes).theme;
 
   return [
     ...sourceThemes.flatMap(({ source, theme }) => [
@@ -60,11 +64,11 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
     ]),
     {
       path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig({ theme: sourceThemes[0].theme }),
+      content: buildGhosttyConfig({ theme: defaultDarkTheme }),
     },
     {
       path: 'terminal/ghostty/ghostty.css',
-      content: buildGhosttyGtkCss(sourceThemes[0].theme),
+      content: buildGhosttyGtkCss(defaultDarkTheme),
     },
     {
       path: 'terminal/fish/config.example.fish',
@@ -76,7 +80,7 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
     },
     {
       path: 'terminal/fastfetch/tyrian-night.jsonc',
-      content: buildFastfetchConfig(sourceThemes[0].theme),
+      content: buildFastfetchConfig(defaultDarkTheme),
     },
     {
       path: 'terminal/starship/tyrian-night.toml',
@@ -210,9 +214,10 @@ function buildFishTheme(theme) {
  * @returns {string}
  */
 export function buildGhosttyConfig(options = {}) {
-  const theme = options.theme ?? /** @type {VscodeTheme} */ (readSourceTheme(SOURCE_THEMES[0]));
+  const theme =
+    options.theme ?? /** @type {VscodeTheme} */ (readSourceTheme(defaultTerminalSource()));
   const lines = [
-    'theme = dark:tyrian-night,light:tyrian-dawn',
+    `theme = dark:${DEFAULT_DARK_TERMINAL_THEME_SLUG},light:${DEFAULT_LIGHT_TERMINAL_THEME_SLUG}`,
     'background-opacity = 0.82',
     'background-blur = true',
     'font-family = Monaspace Neon',
@@ -257,7 +262,7 @@ export function buildFishConfig(options = {}) {
   return [
     'if status is-interactive',
     `    set -gx TYRIAN_NIGHT_ROOT "${fishEscape(tyrianRoot)}"`,
-    '    source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-night.fish',
+    `    source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/${DEFAULT_DARK_TERMINAL_THEME_SLUG}.fish`,
     '    set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml',
     '',
     '    starship init fish | source',
@@ -446,7 +451,7 @@ function buildStarshipConfig(sourceThemes) {
   return [
     '"$schema" = "https://starship.rs/config-schema.json"',
     '',
-    `palette = "${SOURCE_THEMES[0].paletteName}"`,
+    `palette = "${defaultTerminalSourceTheme(sourceThemes).source.paletteName}"`,
     '',
     'format = """',
     '[](fg:surface)\\',
@@ -533,6 +538,35 @@ function buildStarshipConfig(sourceThemes) {
     '',
     ...sourceThemes.flatMap(({ source, theme }) => buildStarshipPalette(source.paletteName, theme)),
   ].join('\n');
+}
+
+/**
+ * @returns {import('./themeSources.mjs').ThemeSource}
+ */
+function defaultTerminalSource() {
+  const source = SOURCE_THEMES.find(({ slug }) => slug === DEFAULT_DARK_TERMINAL_THEME_SLUG);
+
+  if (!source) {
+    throw new Error(`Missing default terminal theme source: ${DEFAULT_DARK_TERMINAL_THEME_SLUG}`);
+  }
+
+  return source;
+}
+
+/**
+ * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }>} sourceThemes
+ * @returns {{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }}
+ */
+function defaultTerminalSourceTheme(sourceThemes) {
+  const sourceTheme = sourceThemes.find(
+    ({ source }) => source.slug === DEFAULT_DARK_TERMINAL_THEME_SLUG
+  );
+
+  if (!sourceTheme) {
+    throw new Error(`Missing default terminal theme source: ${DEFAULT_DARK_TERMINAL_THEME_SLUG}`);
+  }
+
+  return sourceTheme;
 }
 
 /**

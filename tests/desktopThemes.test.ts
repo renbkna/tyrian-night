@@ -83,12 +83,34 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
     expect(lookAndFeelMetadata.KPackageStructure).toBe('Plasma/LookAndFeel');
     expect(lookAndFeelMetadata.KPlugin.Id).toBe(schemeId);
     expect(lookAndFeelDefaults).toContain(`ColorScheme=${schemeId}`);
+    expect(lookAndFeelDefaults).toContain('widgetStyle=Union');
     expect(lookAndFeelDefaults).toContain(`name=${schemeId}`);
     expect(
       `${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}\n${JSON.stringify(
         lookAndFeelMetadata
       )}\n${lookAndFeelDefaults}`
     ).not.toContain('Monochrome');
+  }
+});
+
+test('Union CSS styles derive application surfaces from Tyrian sources', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const schemeId = pascalSlug(source.slug);
+    const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
+
+    expect(unionStyle).toContain(
+      `--tyrian-background: ${opaqueHex(theme.colors['editor.background']).toLowerCase()}`
+    );
+    expect(unionStyle).toContain(
+      `--tyrian-accent: ${opaqueHex(theme.colors['activityBar.activeBorder']).toLowerCase()}`
+    );
+    expect(unionStyle).toContain('applicationwindow,');
+    expect(unionStyle).toContain('button:hovered,');
+    expect(unionStyle).toContain('itemdelegate:highlight,');
+    expect(unionStyle).toContain('tabbutton:checked');
+    expect(unionStyle).not.toContain('Breeze');
+    expect(unionStyle).not.toContain('custom-color("kcolorscheme"');
   }
 });
 

@@ -5,7 +5,7 @@ set -g fish_color_quote 39A96B
 set -g fish_color_redirection 4A7DFF
 set -g fish_color_end 8652FF
 set -g fish_color_error E05270 --bold
-set -g fish_color_param C764FF
+set -g fish_color_param BE7DD0
 set -g fish_color_valid_path 39A96B --underline
 set -g fish_color_option D8893A
 set -g fish_color_comment 8E82B0

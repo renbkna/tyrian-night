@@ -21,23 +21,23 @@
   <rect id="hover-bottomright" x="39" y="19" width="2" height="2" fill="#29233A" opacity=".38"/>
   <rect id="hover-bottomleft" x="28" y="19" width="2" height="2" fill="#29233A" opacity=".38"/>
   <rect id="pressed-center" x="10" y="30" width="9" height="9" fill="#1D172B" opacity=".74"/>
-  <rect id="pressed-top" x="10" y="28" width="9" height="2" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-right" x="19" y="30" width="2" height="9" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-bottom" x="10" y="39" width="9" height="2" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-left" x="8" y="30" width="2" height="9" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-topleft" x="8" y="28" width="2" height="2" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-topright" x="19" y="28" width="2" height="2" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-bottomright" x="19" y="39" width="2" height="2" fill="#A66CFF" opacity=".50"/>
-  <rect id="pressed-bottomleft" x="8" y="39" width="2" height="2" fill="#A66CFF" opacity=".50"/>
+  <rect id="pressed-top" x="10" y="28" width="9" height="2" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-right" x="19" y="30" width="2" height="9" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-bottom" x="10" y="39" width="9" height="2" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-left" x="8" y="30" width="2" height="9" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-topleft" x="8" y="28" width="2" height="2" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-topright" x="19" y="28" width="2" height="2" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-bottomright" x="19" y="39" width="2" height="2" fill="#965EF0" opacity=".50"/>
+  <rect id="pressed-bottomleft" x="8" y="39" width="2" height="2" fill="#965EF0" opacity=".50"/>
   <rect id="section-center" x="30" y="30" width="9" height="9" fill="#2A203B" opacity=".82"/>
-  <rect id="section-top" x="30" y="28" width="9" height="2" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-right" x="39" y="30" width="2" height="9" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-bottom" x="30" y="39" width="9" height="2" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-left" x="28" y="30" width="2" height="9" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-topleft" x="28" y="28" width="2" height="2" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-topright" x="39" y="28" width="2" height="2" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-bottomright" x="39" y="39" width="2" height="2" fill="#A66CFF" opacity=".62"/>
-  <rect id="section-bottomleft" x="28" y="39" width="2" height="2" fill="#A66CFF" opacity=".62"/>
+  <rect id="section-top" x="30" y="28" width="9" height="2" fill="#965EF0" opacity=".62"/>
+  <rect id="section-right" x="39" y="30" width="2" height="9" fill="#965EF0" opacity=".62"/>
+  <rect id="section-bottom" x="30" y="39" width="9" height="2" fill="#965EF0" opacity=".62"/>
+  <rect id="section-left" x="28" y="30" width="2" height="9" fill="#965EF0" opacity=".62"/>
+  <rect id="section-topleft" x="28" y="28" width="2" height="2" fill="#965EF0" opacity=".62"/>
+  <rect id="section-topright" x="39" y="28" width="2" height="2" fill="#965EF0" opacity=".62"/>
+  <rect id="section-bottomright" x="39" y="39" width="2" height="2" fill="#965EF0" opacity=".62"/>
+  <rect id="section-bottomleft" x="28" y="39" width="2" height="2" fill="#965EF0" opacity=".62"/>
  </g>
  <g fill="#ff00ff">
   <rect id="hint-tile-center" width="5" height="5"/>

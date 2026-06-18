@@ -17,7 +17,7 @@
   <path id="bottomright" d="M68 68h8c0 4.4-3.6 8-8 8z" opacity=".94"/>
   <path id="bottomleft" d="M18 68v8c-4.4 0-8-3.6-8-8z" opacity=".94"/>
  </g>
- <g fill="#A66CFF">
+ <g fill="#965EF0">
   <rect x="18" y="10" width="50" height="1" opacity=".48"/>
   <rect x="10" y="18" width="1" height="50" opacity=".22"/>
   <rect x="75" y="18" width="1" height="50" opacity=".22"/>

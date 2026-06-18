@@ -215,6 +215,7 @@ export function buildDesktopThemeAssets(repoRoot = process.cwd()) {
       ...buildPlasmaDesktopThemePackageAssets(kdeFileName, theme.name, packageVersion),
       ...buildPlasmaWidgetSkinAssets(kdeFileName, palette),
       ...buildPlasmaLookAndFeelPackageAssets(kdeFileName, theme.name, packageVersion),
+      ...buildUnionCssStylePackageAssets(kdeFileName, theme.name, palette),
       {
         path: `desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`,
         content: buildCaelestiaSchemeText(caelestiaColours),
@@ -555,7 +556,7 @@ function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersio
 function buildLookAndFeelDefaults(schemeId) {
   return [
     '[kdeglobals][KDE]',
-    'widgetStyle=Breeze',
+    'widgetStyle=Union',
     '',
     '[kdeglobals][General]',
     `ColorScheme=${schemeId}`,
@@ -584,6 +585,227 @@ function buildLookAndFeelDefaults(schemeId) {
     'cursorTheme=Bibata-Modern-Classic',
     '',
   ].join('\n');
+}
+
+/**
+ * @param {string} schemeId
+ * @param {string} schemeName
+ * @param {DesktopPalette} palette
+ * @returns {GeneratedAsset[]}
+ */
+function buildUnionCssStylePackageAssets(schemeId, schemeName, palette) {
+  return [
+    {
+      path: `desktop/kde/union/css/styles/${schemeId}/style.css`,
+      content: buildUnionCssStyle(schemeName, palette),
+    },
+  ];
+}
+
+/**
+ * @param {string} schemeName
+ * @param {DesktopPalette} palette
+ * @returns {string}
+ */
+function buildUnionCssStyle(schemeName, palette) {
+  return `/*
+ * ${schemeName} Union CSS style.
+ * Generated from source/themes by scripts/desktopThemes.mjs.
+ */
+
+:root {
+  --tyrian-background: ${palette.background.toLowerCase()};
+  --tyrian-foreground: ${palette.foreground.toLowerCase()};
+  --tyrian-surface-low: ${palette.surfaceLow.toLowerCase()};
+  --tyrian-surface: ${palette.surface.toLowerCase()};
+  --tyrian-surface-high: ${palette.surfaceHigh.toLowerCase()};
+  --tyrian-surface-highest: ${palette.surfaceHighest.toLowerCase()};
+  --tyrian-border: ${palette.border.toLowerCase()};
+  --tyrian-muted: ${palette.muted.toLowerCase()};
+  --tyrian-accent: ${palette.accent.toLowerCase()};
+  --tyrian-accent-hover: ${palette.accentHover.toLowerCase()};
+  --tyrian-selection: ${palette.selection.toLowerCase()};
+  --tyrian-positive: ${palette.positive.toLowerCase()};
+  --tyrian-neutral: ${palette.neutral.toLowerCase()};
+  --tyrian-negative: ${palette.negative.toLowerCase()};
+  --tyrian-corner-radius: 5px;
+  --tyrian-small-spacing: 4px;
+  --tyrian-medium-spacing: 6px;
+  --tyrian-large-spacing: 8px;
+}
+
+* {
+  color: var(--tyrian-foreground);
+  icon-color: var(--tyrian-foreground);
+  icon-size: 16px;
+}
+
+applicationwindow,
+window,
+dialog {
+  background-color: var(--tyrian-background);
+  color: var(--tyrian-foreground);
+}
+
+popup,
+menu,
+tooltip {
+  padding: var(--tyrian-large-spacing);
+  background-color: var(--tyrian-surface-low);
+  border: 1px solid var(--tyrian-border);
+  border-radius: var(--tyrian-corner-radius);
+  box-shadow: 0px 2px 24px 0px rgba(0, 0, 0, 0.28);
+}
+
+button,
+toolbutton,
+combobox,
+roundbutton,
+delaybutton {
+  width: 32px;
+  height: 32px;
+  padding: var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-surface-low);
+  border: 1px solid var(--tyrian-border);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+button:hovered,
+toolbutton:hovered,
+combobox:hovered,
+roundbutton:hovered,
+delaybutton:hovered {
+  background-color: var(--tyrian-surface);
+  border-color: var(--tyrian-accent-hover);
+}
+
+button:pressed,
+button:checked,
+toolbutton:pressed,
+toolbutton:checked,
+combobox:pressed,
+roundbutton:pressed,
+roundbutton:checked,
+delaybutton:pressed {
+  background-color: var(--tyrian-selection);
+  border-color: var(--tyrian-accent);
+}
+
+button:visual-focus,
+toolbutton:visual-focus,
+combobox:visual-focus,
+textfield:visual-focus,
+textarea:visual-focus {
+  outline: 2px solid var(--tyrian-accent);
+}
+
+toolbar,
+applicationheader {
+  background-color: var(--tyrian-surface-low);
+  border-bottom: 1px solid var(--tyrian-border);
+}
+
+textfield,
+textarea,
+spinbox {
+  width: 200px;
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background-color: var(--tyrian-background);
+  border: 1px solid var(--tyrian-border);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+textfield:hovered,
+textarea:hovered,
+spinbox:hovered {
+  border-color: var(--tyrian-accent-hover);
+}
+
+itemdelegate,
+checkdelegate,
+menuitem {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background: none;
+  color: var(--tyrian-foreground);
+}
+
+itemdelegate:hovered,
+checkdelegate:hovered,
+menuitem:hovered {
+  background-color: var(--tyrian-surface);
+}
+
+itemdelegate:highlight,
+itemdelegate:checked,
+checkdelegate:highlight,
+checkdelegate:checked,
+menuitem:highlight,
+menuitem:checked {
+  background-color: var(--tyrian-selection);
+  border: 1px solid var(--tyrian-accent);
+}
+
+checkbox > indicator,
+radiobutton > indicator,
+switch > indicator {
+  width: 18px;
+  height: 18px;
+  background-color: var(--tyrian-surface-high);
+  border: 1px solid var(--tyrian-border);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+checkbox:checked > indicator,
+radiobutton:checked > indicator,
+switch:checked > indicator {
+  background-color: var(--tyrian-accent);
+  border-color: var(--tyrian-accent-hover);
+}
+
+progressbar,
+slider {
+  height: 20px;
+  background-color: var(--tyrian-surface-low);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+progressbar > fill,
+slider > fill {
+  background-color: var(--tyrian-accent);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+tabbutton {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background-color: var(--tyrian-surface);
+  border: 1px solid var(--tyrian-border);
+  color: var(--tyrian-foreground);
+}
+
+tabbutton:checked {
+  background-color: var(--tyrian-background);
+  border-top: 3px solid var(--tyrian-accent);
+}
+
+text.positive {
+  color: var(--tyrian-positive);
+}
+
+text.neutral {
+  color: var(--tyrian-neutral);
+}
+
+text.negative {
+  color: var(--tyrian-negative);
+}
+`;
 }
 
 /**

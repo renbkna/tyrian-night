@@ -25,7 +25,7 @@ These theme assets are set by Tyrian's look-and-feel defaults but are typically 
 environment or your distro package set. Install or confirm they are available before layout restore for
 best visual parity:
 
-- `widgetStyle=Breeze` (KDE default plasma widget style)
+- `widgetStyle=Union` (Plasma 6.7+ Union application style; install your distro's `union` package)
 - KDE decoration theme: `Breeze`
 - Icons: `Papirus-Dark`
 - Cursors: `Bibata-Modern-Classic`

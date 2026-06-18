@@ -1,11 +1,11 @@
 set -g fish_color_normal 2A2433
-set -g fish_color_command A13E70
+set -g fish_color_command A44854
 set -g fish_color_keyword 6F35B8
 set -g fish_color_quote 2B7A4F
 set -g fish_color_redirection 235EAA
 set -g fish_color_end 6F35B8
 set -g fish_color_error B63A3A --bold
-set -g fish_color_param 86519D
+set -g fish_color_param 70386C
 set -g fish_color_valid_path 2B7A4F --underline
 set -g fish_color_option 8A5D00
 set -g fish_color_comment 646B82

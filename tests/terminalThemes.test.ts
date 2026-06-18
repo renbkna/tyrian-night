@@ -45,8 +45,8 @@ test('Ghostty themes derive terminal colors from the VS Code theme sources', () 
   }
 });
 
-test('Ghostty GTK chrome CSS derives titlebar colors from Tyrian Night', () => {
-  const theme = readSourceTheme<VscodeTheme>(SOURCE_THEMES[0]);
+test('Ghostty GTK chrome CSS derives titlebar colors from Tyrian Nocturne', () => {
+  const theme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
   const css = requiredAsset('terminal/ghostty/ghostty.css');
 
   expect(css).toContain(`background: ${theme.colors['terminal.background'].toLowerCase()};`);
@@ -78,7 +78,7 @@ test('fish themes derive shell syntax colors without owning terminal window colo
 test('Starship prompt uses named Tyrian palettes backed by the VS Code theme sources', () => {
   const starshipConfig = requiredAsset('terminal/starship/tyrian-night.toml');
 
-  expect(starshipConfig).toContain('palette = "tyrian_night"');
+  expect(starshipConfig).toContain('palette = "tyrian_nocturne"');
   expect(starshipConfig).toContain('CachyOS = "󰣇"');
   expect(starshipConfig).toContain('style = "bg:surface fg:command"');
   expect(starshipConfig).toContain('style = "bg:surface fg:language"');
@@ -102,8 +102,8 @@ test('Starship prompt uses named Tyrian palettes backed by the VS Code theme sou
   }
 });
 
-test('Fastfetch startup config uses the Tyrian palette with the Chafa logo asset', () => {
-  const theme = readSourceTheme<VscodeTheme>(SOURCE_THEMES[0]);
+test('Fastfetch startup config uses the default Tyrian terminal palette with the Chafa logo asset', () => {
+  const theme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
   const fastfetchConfig = JSON.parse(requiredAsset('terminal/fastfetch/tyrian-night.jsonc'));
 
   expect(fs.existsSync(FASTFETCH_IMAGE_ASSET_PATH)).toBe(true);
@@ -144,10 +144,10 @@ test('Fastfetch startup config uses the Tyrian palette with the Chafa logo asset
 });
 
 test('example configs point each terminal layer at the right owner', () => {
-  const nightTheme = readSourceTheme<VscodeTheme>(SOURCE_THEMES[0]);
+  const nocturneTheme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
 
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'theme = dark:tyrian-night,light:tyrian-dawn'
+    'theme = dark:tyrian-nocturne,light:tyrian-dawn'
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.82');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
@@ -164,10 +164,10 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-theme = ghostty');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-vsync = true');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    `window-titlebar-background = ${nightTheme.colors['terminal.background']}`
+    `window-titlebar-background = ${nocturneTheme.colors['terminal.background']}`
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    `window-titlebar-foreground = ${nightTheme.colors['terminal.foreground']}`
+    `window-titlebar-foreground = ${nocturneTheme.colors['terminal.foreground']}`
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar = true');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar-style = tabs');
@@ -183,7 +183,7 @@ test('example configs point each terminal layer at the right owner', () => {
     'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
   );
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-night.fish'
+    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-nocturne.fish'
   );
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
     'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'
@@ -222,6 +222,16 @@ function requiredAsset(assetPath: string): string {
   }
 
   return content;
+}
+
+function requiredThemeSource(slug: string) {
+  const source = SOURCE_THEMES.find((candidate) => candidate.slug === slug);
+
+  if (!source) {
+    throw new Error(`Missing theme source '${slug}'`);
+  }
+
+  return source;
 }
 
 function fishHex(color: string | undefined): string {

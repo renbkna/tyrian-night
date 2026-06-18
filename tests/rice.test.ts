@@ -338,6 +338,7 @@ test('style-only rice install does not require layout snapshots', () => {
       'kwriteconfig6',
       'kwriteconfig6',
       'kwriteconfig6',
+      'kwriteconfig6',
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
     ]);
@@ -372,6 +373,7 @@ test('full rice install honors injected home and command runner for style and la
       'kwriteconfig6',
       'kwriteconfig6',
       'kwriteconfig6',
+      'kwriteconfig6',
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
       'qdbus6',
@@ -398,6 +400,10 @@ test('full rice install honors injected home and command runner for style and la
       {
         command: 'kwriteconfig6',
         args: ['--file', kdeglobals, '--group', 'General', '--key', 'ColorScheme', 'TyrianNight'],
+      },
+      {
+        command: 'kwriteconfig6',
+        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Union'],
       },
       {
         command: 'kwriteconfig6',

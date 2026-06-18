@@ -12,7 +12,7 @@ starship init fish | source
 To switch palette, change the top-level value:
 
 ```toml
-palette = "tyrian_abyss"
+palette = "tyrian_nocturne"
 ```
 
 The prompt uses Nerd Font symbols, matching the Ghostty example font.

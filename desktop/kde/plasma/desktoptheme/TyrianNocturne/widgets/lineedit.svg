@@ -11,14 +11,14 @@
   <rect id="base-bottomright" x="69" y="31" width="3" height="3" fill="#29233A" opacity=".55"/>
   <rect id="base-bottomleft" x="12" y="31" width="3" height="3" fill="#29233A" opacity=".55"/>
   <rect id="focus-center" x="15" y="50" width="54" height="16" fill="#151320" opacity=".96"/>
-  <rect id="focus-top" x="15" y="47" width="54" height="3" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-right" x="69" y="50" width="3" height="16" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-bottom" x="15" y="66" width="54" height="3" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-left" x="12" y="50" width="3" height="16" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-topleft" x="12" y="47" width="3" height="3" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-topright" x="69" y="47" width="3" height="3" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-bottomright" x="69" y="66" width="3" height="3" fill="#A66CFF" opacity=".86"/>
-  <rect id="focus-bottomleft" x="12" y="66" width="3" height="3" fill="#A66CFF" opacity=".86"/>
+  <rect id="focus-top" x="15" y="47" width="54" height="3" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-right" x="69" y="50" width="3" height="16" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-bottom" x="15" y="66" width="54" height="3" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-left" x="12" y="50" width="3" height="16" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-topleft" x="12" y="47" width="3" height="3" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-topright" x="69" y="47" width="3" height="3" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-bottomright" x="69" y="66" width="3" height="3" fill="#965EF0" opacity=".86"/>
+  <rect id="focus-bottomleft" x="12" y="66" width="3" height="3" fill="#965EF0" opacity=".86"/>
   <rect id="hover-center" x="15" y="85" width="54" height="16" fill="#151320" opacity=".92"/>
   <rect id="hover-top" x="15" y="82" width="54" height="3" fill="#382A52" opacity=".62"/>
   <rect id="hover-right" x="69" y="85" width="3" height="16" fill="#382A52" opacity=".62"/>

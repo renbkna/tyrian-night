@@ -20,6 +20,7 @@ import { SOURCE_THEMES } from './themeSources.mjs';
 const repoRoot = process.cwd();
 const home = os.homedir();
 const ghosttyThemeSlugs = SOURCE_THEMES.map((source) => source.slug);
+const UNION_SYSTEM_DEFAULTS_ROOT = '/usr/share/union/css/defaults';
 
 /**
  * @typedef {'copy' | 'link'} InstallMode
@@ -44,7 +45,7 @@ const ghosttyThemeSlugs = SOURCE_THEMES.map((source) => source.slug);
  */
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; unionDefaultsRoot?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
  * @returns {LiveInstallPlan}
  */
 export function buildLiveInstallPlan(options = {}) {
@@ -55,7 +56,7 @@ export function buildLiveInstallPlan(options = {}) {
   const sourceRoot = mode === 'link' ? root : installRoot;
   const livePaths = buildLivePaths(userHome);
   const legacyPaths = buildLegacyPaths(userHome);
-  const sourcePaths = buildSourcePaths(sourceRoot);
+  const sourcePaths = buildSourcePaths(sourceRoot, options.unionDefaultsRoot);
 
   return {
     mode,
@@ -92,7 +93,7 @@ export function buildLiveInstallPlan(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; unionDefaultsRoot?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
  * @returns {void}
  */
 export function installLiveTyrian(options = {}) {
@@ -136,9 +137,12 @@ function buildLivePaths(userHome) {
     kdeglobals: path.join(userHome, '.config/kdeglobals'),
     plasmarc: path.join(userHome, '.config/plasmarc'),
     screenLockerConfig: path.join(userHome, '.config/kscreenlockerrc'),
+    unionEnvironment: path.join(userHome, '.config/environment.d/tyrian-union.conf'),
     kdeTyrianScheme: path.join(userHome, '.local/share/color-schemes/TyrianNight.colors'),
     plasmaTyrianTheme: path.join(userHome, '.local/share/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrian: path.join(userHome, '.local/share/plasma/look-and-feel/TyrianNight'),
+    unionDefaults: path.join(userHome, '.local/share/union/css/defaults'),
+    unionTyrianStyle: path.join(userHome, '.local/share/union/css/styles/TyrianNight'),
     caelestiaSchemeState: path.join(userHome, '.local/state/caelestia/scheme.json'),
     caelestiaSequences: path.join(userHome, '.local/state/caelestia/sequences.txt'),
     hyprCurrentScheme: path.join(userHome, '.config/hypr/scheme/current.conf'),
@@ -163,7 +167,7 @@ function buildLegacyPaths(userHome) {
  * @param {string} sourceRoot
  * @returns {Record<string, string>}
  */
-function buildSourcePaths(sourceRoot) {
+function buildSourcePaths(sourceRoot, unionDefaultsRoot = UNION_SYSTEM_DEFAULTS_ROOT) {
   return {
     ghosttyCss: path.join(sourceRoot, 'terminal/ghostty/ghostty.css'),
     fishGreeting: path.join(sourceRoot, 'terminal/fish/functions/fish_greeting.fish'),
@@ -174,6 +178,8 @@ function buildSourcePaths(sourceRoot) {
     kdeTyrianScheme: path.join(sourceRoot, 'desktop/kde/color-schemes/TyrianNight.colors'),
     plasmaTyrianThemeRoot: path.join(sourceRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrianRoot: path.join(sourceRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
+    unionDefaultsRoot,
+    unionTyrianStyleRoot: path.join(sourceRoot, 'desktop/kde/union/css/styles/TyrianNight'),
     caelestiaSchemeState: path.join(sourceRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
     hyprCurrentScheme: path.join(sourceRoot, 'desktop/caelestia/hypr/tyrian-night.conf'),
   };
@@ -196,9 +202,12 @@ function buildTouchedPaths(livePaths, legacyPaths) {
     livePaths.kdeglobals,
     livePaths.plasmarc,
     livePaths.screenLockerConfig,
+    livePaths.unionEnvironment,
     livePaths.kdeTyrianScheme,
     livePaths.plasmaTyrianTheme,
     livePaths.lookAndFeelTyrian,
+    livePaths.unionDefaults,
+    livePaths.unionTyrianStyle,
     livePaths.caelestiaSchemeState,
     livePaths.caelestiaSequences,
     livePaths.hyprCurrentScheme,
@@ -222,6 +231,8 @@ function validateInstallSources(plan) {
     path.join(plan.repoRoot, 'desktop/kde/color-schemes/TyrianNight.colors'),
     path.join(plan.repoRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     path.join(plan.repoRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
+    plan.sourcePaths.unionDefaultsRoot,
+    path.join(plan.repoRoot, 'desktop/kde/union/css/styles/TyrianNight'),
     path.join(plan.repoRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
     path.join(plan.repoRoot, 'desktop/caelestia/hypr/tyrian-night.conf'),
   ];
@@ -231,7 +242,7 @@ function validateInstallSources(plan) {
       continue;
     }
 
-    throw new Error(`Missing Tyrian install source: ${path.relative(plan.repoRoot, sourcePath)}`);
+    throw new Error(`Missing Tyrian install source: ${installSourceLabel(plan, sourcePath)}`);
   }
 }
 
@@ -307,7 +318,10 @@ function installDesktopLayer(plan) {
   installManagedPath(plan, plan.sourcePaths.kdeTyrianScheme, plan.livePaths.kdeTyrianScheme);
   installPlasmaDesktopTheme(plan);
   installLookAndFeelPackage(plan);
+  installUnionDefaults(plan);
+  installUnionStyle(plan);
   writeKdePackageKeys(plan);
+  writeUnionEnvironment(plan);
   patchScreenLockerConfig(plan);
   installManagedPath(
     plan,
@@ -388,6 +402,22 @@ function installLookAndFeelPackage(plan) {
  * @param {LiveInstallPlan} plan
  * @returns {void}
  */
+function installUnionDefaults(plan) {
+  installManagedPath(plan, plan.sourcePaths.unionDefaultsRoot, plan.livePaths.unionDefaults);
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @returns {void}
+ */
+function installUnionStyle(plan) {
+  installManagedPath(plan, plan.sourcePaths.unionTyrianStyleRoot, plan.livePaths.unionTyrianStyle);
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @returns {void}
+ */
 function writeKdePackageKeys(plan) {
   operation(plan, 'set live KDE package keys to TyrianNight', () => {
     plan.runCommand('kwriteconfig6', [
@@ -410,6 +440,15 @@ function writeKdePackageKeys(plan) {
     ]);
     plan.runCommand('kwriteconfig6', [
       '--file',
+      plan.livePaths.kdeglobals,
+      '--group',
+      'KDE',
+      '--key',
+      'widgetStyle',
+      'Union',
+    ]);
+    plan.runCommand('kwriteconfig6', [
+      '--file',
       plan.livePaths.plasmarc,
       '--group',
       'Theme',
@@ -418,6 +457,18 @@ function writeKdePackageKeys(plan) {
       'TyrianNight',
     ]);
   });
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @returns {void}
+ */
+function writeUnionEnvironment(plan) {
+  writeFile(
+    plan,
+    plan.livePaths.unionEnvironment,
+    ['UNION_STYLE_NAME=TyrianNight', 'QT_QUICK_CONTROLS_STYLE=org.kde.union', ''].join('\n')
+  );
 }
 
 /**
@@ -620,6 +671,21 @@ function exists(filePath) {
   } catch {
     return false;
   }
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {string} sourcePath
+ * @returns {string}
+ */
+function installSourceLabel(plan, sourcePath) {
+  const relativeSourcePath = path.relative(plan.repoRoot, sourcePath);
+
+  if (!relativeSourcePath.startsWith('..') && !path.isAbsolute(relativeSourcePath)) {
+    return relativeSourcePath;
+  }
+
+  return sourcePath;
 }
 
 /**

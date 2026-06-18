@@ -1,4 +1,4 @@
-theme = dark:tyrian-night,light:tyrian-dawn
+theme = dark:tyrian-nocturne,light:tyrian-dawn
 background-opacity = 0.82
 background-blur = true
 font-family = Monaspace Neon
@@ -12,8 +12,8 @@ cursor-style-blink = true
 window-decoration = client
 window-theme = ghostty
 window-vsync = true
-window-titlebar-background = #0C0C0C
-window-titlebar-foreground = #D0C8E0
+window-titlebar-background = #0A0910
+window-titlebar-foreground = #D8D2E8
 gtk-titlebar = true
 gtk-titlebar-style = tabs
 window-show-tab-bar = auto
