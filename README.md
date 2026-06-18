@@ -48,8 +48,8 @@ The source repo includes a [VS Code companion settings example](https://github.c
 | Types (Deep Cobalt) | `#5A78C0` | 4.55:1 | AA |
 | Functions (Soft Crimson) | `#BA5E6B` | 4.57:1 | AA |
 | Strings (Emerald) | `#489060` | 5.06:1 | AA |
-| Numbers (Sovereign Gold) | `#C09040` | 6.80:1 | AA |
-| Parameters (Orchid Pink) | `#B068A0` | 4.97:1 | AA |
+| Data Literals (Cool Mauve) | `#B58CBA` | 6.92:1 | AA |
+| Parameters (Cool Mauve) | `#B58CBA` | 6.92:1 | AA |
 
 UI chrome elements (line numbers, breadcrumbs) use lower contrast (~2.8:1) to reduce visual noise.
 `Tyrian Nocturne` is the free redesign built around the active line as the real reading background.

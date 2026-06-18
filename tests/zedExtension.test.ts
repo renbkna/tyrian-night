@@ -333,6 +333,14 @@ test('Zed theme keeps the core palette and syntax colors tied to the VS Code sou
         vscodeTheme.colors['editor.findMatchBackground']
     );
     expect(theme.style.players[0]?.cursor).toBe(vscodeTheme.colors['editorCursor.foreground']);
+    expect(theme.style.accents[0]).toBe(vscodeTheme.colors.focusBorder);
+    expect(theme.style['pane.focused_border']).toBe(vscodeTheme.colors.focusBorder);
+    expect(theme.style['panel.focused_border']).toBe(vscodeTheme.colors.focusBorder);
+    expect(theme.style.predictive).toBe(vscodeTheme.colors['editorGhostText.foreground']);
+    expect(theme.style['predictive.background']).toBe(
+      vscodeTheme.colors['editorGhostText.background']
+    );
+    expect(theme.style['predictive.border']).toBe(vscodeTheme.colors['editorGhostText.border']);
     expect(theme.style['editor.document_highlight.bracket_background']).not.toBe(
       vscodeTheme.colors['editorBracketHighlight.foreground1']
     );
@@ -346,22 +354,48 @@ test('Zed theme keeps the core palette and syntax colors tied to the VS Code sou
     expect(theme.style.syntax.function.color).toBe(
       vscodeTheme.semanticTokenColors.function.foreground
     );
+    expect(theme.style.syntax.constructor.color).toBe(
+      vscodeTheme.semanticTokenColors.constructor.foreground
+    );
     expect(theme.style.syntax['function.builtin']?.color).toBe(
       vscodeTheme.semanticTokenColors['function.defaultLibrary'].foreground
     );
+    expect(theme.style.syntax.hint?.color).toBe(vscodeTheme.colors['editorInlayHint.foreground']);
+    expect(theme.style.syntax.hint?.font_style).toBe('italic');
     expect(theme.style.syntax['markup.quote']?.color).toBe(
       tokenSettings(vscodeTheme, 'markup.quote').foreground
     );
     expect(theme.style.syntax['markup.quote']?.font_style).toBe('italic');
     expect(theme.style.syntax.predictive?.color).toBe(
-      tokenSettings(vscodeTheme, 'comment.block.documentation').foreground
+      vscodeTheme.colors['editorGhostText.foreground']
     );
-    expect(theme.style.syntax.predictive?.font_style).toBe('italic');
+    expect(theme.style.syntax.predictive?.font_style).toBeUndefined();
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(
       tokenSettings(vscodeTheme, 'invalid.deprecated').foreground
     );
     expect(theme.style.syntax.parameter.color).toBe(
       vscodeTheme.semanticTokenColors.parameter.foreground
+    );
+    expect(theme.style.syntax.boolean.color).toBe(
+      tokenSettings(vscodeTheme, 'constant.language').foreground
+    );
+    expect(theme.style.syntax['constant.builtin']?.color).toBe(
+      tokenSettings(vscodeTheme, 'constant.language').foreground
+    );
+    expect(theme.style.syntax.constant.color).toBe(
+      vscodeTheme.semanticTokenColors['variable.readonly'].foreground
+    );
+    expect(theme.style.syntax.number.color).toBe(
+      tokenSettings(vscodeTheme, 'constant.numeric').foreground
+    );
+    expect(theme.style.syntax['variable.special']?.color).toBe(
+      tokenSettings(vscodeTheme, 'variable.language').foreground
+    );
+    expect(theme.style.syntax.operator.color).toBe(
+      vscodeTheme.semanticTokenColors.operator.foreground
+    );
+    expect(theme.style.syntax['selector.pseudo']?.color).toBe(
+      tokenSettings(vscodeTheme, 'keyword').foreground
     );
     expect(theme.style.syntax['property.readonly']?.color).toBe(
       vscodeTheme.semanticTokenColors['property.readonly'].foreground
@@ -406,7 +440,7 @@ test('Zed example settings match the repo companion settings contract', () => {
   expect(settings.ui_font_family).toBe('.ZedSans');
   expect(settings.ui_font_size).toBe(16);
   expect(settings.ui_font_weight).toBe(400);
-  expect(settings.semantic_tokens).toBe('off');
+  expect(settings.semantic_tokens).toBe('combined');
   expect(settings.colorize_brackets).toBe(true);
   expect(settings.soft_wrap).toBe('bounded');
   expect(settings.tab_size).toBe(4);

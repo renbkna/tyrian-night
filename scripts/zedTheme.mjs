@@ -67,7 +67,7 @@ function buildZedTheme(vscodeTheme, appearance) {
     appearance,
     style: {
       accents: [
-        semantic.namespace.foreground,
+        colors.focusBorder,
         semantic.type.foreground,
         semantic.function.foreground,
         tokenColor(vscodeTheme, 'string'),
@@ -150,10 +150,10 @@ function buildZedTheme(vscodeTheme, appearance) {
       modified: colors['editorGutter.modifiedBackground'],
       'modified.background': colors['merge.currentContentBackground'],
       'modified.border': colors['editorGutter.modifiedBackground'],
-      'pane.focused_border': semantic.namespace.foreground,
+      'pane.focused_border': colors.focusBorder,
       'pane_group.border': colors['tab.border'],
       'panel.background': colors['panel.background'],
-      'panel.focused_border': semantic.namespace.foreground,
+      'panel.focused_border': colors.focusBorder,
       'panel.indent_guide': colors['editorIndentGuide.background1'],
       'panel.indent_guide_active': colors['editorIndentGuide.activeBackground1'],
       'panel.indent_guide_hover': colors['editorIndentGuide.activeBackground1'],
@@ -164,9 +164,9 @@ function buildZedTheme(vscodeTheme, appearance) {
           selection: colors['editor.selectionBackground'],
         },
       ],
-      predictive: colors['editorInlayHint.foreground'],
-      'predictive.background': colors['editorInlayHint.background'],
-      'predictive.border': colors['editorInlayHint.typeForeground'],
+      predictive: colors['editorGhostText.foreground'],
+      'predictive.background': colors['editorGhostText.background'],
+      'predictive.border': colors['editorGhostText.border'],
       renamed: semantic.type.foreground,
       'renamed.background': colors['merge.currentContentBackground'],
       'renamed.border': semantic.type.foreground,
@@ -249,13 +249,16 @@ function buildZedTheme(vscodeTheme, appearance) {
  * @returns {Record<string, unknown>}
  */
 function buildSyntax(vscodeTheme) {
+  const colors = vscodeTheme.colors;
   const semantic = vscodeTheme.semanticTokenColors;
   const comment = tokenSettings(vscodeTheme, 'comment');
   const docComment = tokenSettings(vscodeTheme, 'comment.block.documentation');
   const constant = tokenSettings(vscodeTheme, 'constant.numeric');
+  const languageConstant = tokenSettings(vscodeTheme, 'constant.language');
   const functionStyle = semantic.function;
   const heading = tokenSettings(vscodeTheme, 'markup.heading');
   const keyword = tokenSettings(vscodeTheme, 'keyword');
+  const languageVariable = tokenSettings(vscodeTheme, 'variable.language');
   const link = tokenSettings(vscodeTheme, 'markup.underline.link');
   const punctuation = tokenSettings(vscodeTheme, 'punctuation');
   const string = tokenSettings(vscodeTheme, 'string');
@@ -266,14 +269,14 @@ function buildSyntax(vscodeTheme) {
 
   return {
     attribute: highlight(semantic.parameter),
-    boolean: highlight(semantic['variable.readonly']),
+    boolean: highlight(languageConstant),
     class: highlight(semantic.class),
     comment: highlight(comment),
     'comment.doc': highlight(docComment),
     'comment.documentation': highlight(docComment),
     constant: highlight(semantic['variable.readonly']),
-    'constant.builtin': highlight(semantic['variable.defaultLibrary']),
-    constructor: highlight(semantic.type),
+    'constant.builtin': highlight(languageConstant),
+    constructor: highlight(semantic['constructor']),
     decorator: highlight(semantic.decorator),
     embedded: highlight(string),
     emphasis: highlight(tokenSettings(vscodeTheme, 'markup.italic')),
@@ -285,7 +288,7 @@ function buildSyntax(vscodeTheme) {
     function: highlight(functionStyle),
     'function.builtin': highlight(semantic['function.defaultLibrary']),
     'function.method': highlight(semantic.method),
-    hint: highlight(semantic.function),
+    hint: highlight({ foreground: colors['editorInlayHint.foreground'], fontStyle: 'italic' }),
     'invalid.deprecated': highlight(tokenSettings(vscodeTheme, 'invalid.deprecated')),
     keyword: highlight(keyword),
     label: highlight(semantic.decorator),
@@ -298,10 +301,10 @@ function buildSyntax(vscodeTheme) {
     module: highlight(semantic.namespace),
     namespace: highlight(semantic.namespace),
     number: highlight(constant),
-    operator: highlight(keyword),
+    operator: highlight(semantic.operator),
     parameter: highlight(semantic.parameter),
     preproc: highlight(semantic.macro),
-    predictive: highlight(docComment),
+    predictive: highlight({ foreground: colors['editorGhostText.foreground'] }),
     primary: highlight(variable),
     property: highlight(semantic.property),
     'property.css': highlight(cssProperty),
@@ -315,7 +318,7 @@ function buildSyntax(vscodeTheme) {
     'punctuation.special': highlight(semantic.decorator),
     regexp: highlight(semantic.regexp),
     selector: highlight(cssSelector),
-    'selector.pseudo': highlight(semantic.parameter),
+    'selector.pseudo': highlight(keyword),
     string: highlight(string),
     'string.escape': highlight(tokenSettings(vscodeTheme, 'constant.character.escape')),
     'string.regex': highlight(tokenSettings(vscodeTheme, 'string.regexp')),
@@ -337,7 +340,7 @@ function buildSyntax(vscodeTheme) {
     'variable.builtin': highlight(semantic['variable.defaultLibrary']),
     'variable.parameter': highlight(semantic.parameter),
     'variable.readonly': highlight(semantic['variable.readonly']),
-    'variable.special': highlight(semantic['variable.defaultLibrary']),
+    'variable.special': highlight(languageVariable),
     variant: highlight(semantic.enumMember),
     'diff.plus': highlight({ foreground: vscodeTheme.colors['editorGutter.addedBackground'] }),
     'diff.minus': highlight({ foreground: vscodeTheme.colors['editorGutter.deletedBackground'] }),

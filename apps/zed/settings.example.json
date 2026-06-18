@@ -9,7 +9,7 @@
     "light": "Colored Zed Icons Theme Dark",
     "dark": "Colored Zed Icons Theme Dark"
   },
-  "semantic_tokens": "off",
+  "semantic_tokens": "combined",
   "colorize_brackets": true,
   "current_line_highlight": "line",
   "show_whitespaces": "selection",

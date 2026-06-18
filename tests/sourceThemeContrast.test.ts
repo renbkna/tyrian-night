@@ -2,6 +2,7 @@ import fs from 'node:fs';
 
 import { expect, test } from 'bun:test';
 
+import { compareColors } from '../scripts/colorScience.mjs';
 import { isTransparentHex, opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
@@ -54,6 +55,9 @@ const REQUIRED_WORKBENCH_COLOR_KEYS = [
   'editor.findMatchHighlightForeground',
   'editor.hoverHighlightBackground',
   'editor.rangeHighlightBackground',
+  'editorGhostText.foreground',
+  'editorGhostText.background',
+  'editorGhostText.border',
   'editorWhitespace.foreground',
   'editorWidget.foreground',
   'sideBarTitle.foreground',
@@ -104,10 +108,12 @@ test('source themes expose one shared VS Code color and semantic surface', () =>
   const themes = SOURCE_THEMES.map((source) => readSourceTheme<VscodeTheme>(source));
   const colorKeys = Object.keys(themes[0]!.colors).sort();
   const semanticKeys = Object.keys(themes[0]!.semanticTokenColors).sort();
+  const tokenScopeSignature = tokenScopeSurface(themes[0]!);
 
   for (const theme of themes) {
     expect(Object.keys(theme.colors).sort()).toEqual(colorKeys);
     expect(Object.keys(theme.semanticTokenColors).sort()).toEqual(semanticKeys);
+    expect(tokenScopeSurface(theme)).toEqual(tokenScopeSignature);
 
     for (const colorKey of REQUIRED_WORKBENCH_COLOR_KEYS) {
       expect(theme.colors[colorKey]).toBeDefined();
@@ -208,6 +214,71 @@ test('source themes color JSON property names as attributes instead of callables
   }
 });
 
+test('source themes color language variables as italic data-shaped receivers', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const languageVariable = tokenSettings(theme, 'variable.language');
+    const languageVariableColor = languageVariable.foreground;
+    const parameterColor = theme.semanticTokenColors.parameter.foreground;
+    const constantColor = theme.semanticTokenColors['variable.readonly'].foreground;
+    const keywordColor = theme.semanticTokenColors.keyword.foreground;
+    const typeColor = theme.semanticTokenColors.type.foreground;
+
+    expect(languageVariableColor).toBe(parameterColor);
+    expect(languageVariableColor).toBe(constantColor);
+    expect(languageVariable.fontStyle).toBe('italic');
+    expect(languageVariableColor).not.toBe(keywordColor);
+    expect(languageVariableColor).not.toBe(typeColor);
+    expect(oklabDelta(languageVariableColor, keywordColor)).toBeGreaterThanOrEqual(6);
+    expect(oklabDelta(languageVariableColor, typeColor)).toBeGreaterThanOrEqual(6);
+  }
+});
+
+test('source themes keep inlay hints muted instead of syntax-colored', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const hintColor = theme.colors['editorInlayHint.foreground'];
+
+    expect(theme.colors['editorInlayHint.typeForeground']).toBe(hintColor);
+    expect(theme.colors['editorInlayHint.parameterForeground']).toBe(hintColor);
+  }
+});
+
+test('source themes split language sentinels from runtime data', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const dataColor = theme.semanticTokenColors.parameter.foreground;
+    const sentinelColor = tokenColor(theme, 'constant.language');
+    const keywordColor = theme.semanticTokenColors.keyword.foreground;
+    const typeColor = theme.semanticTokenColors.type.foreground;
+
+    expect(theme.semanticTokenColors['variable.defaultLibrary'].foreground).toBe(dataColor);
+    expect(theme.semanticTokenColors['variable.readonly'].foreground).toBe(dataColor);
+    expect(theme.semanticTokenColors.number.foreground).toBe(dataColor);
+    expect(tokenColor(theme, 'constant.numeric')).toBe(dataColor);
+    expect(sentinelColor).not.toBe(dataColor);
+    expect(sentinelColor).not.toBe(keywordColor);
+    expect(sentinelColor).not.toBe(typeColor);
+    expect(oklabDelta(sentinelColor, dataColor)).toBeGreaterThanOrEqual(3.5);
+  }
+});
+
+test('source themes keep type-shaped symbols and namespaces on the type lane', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const typeColor = theme.semanticTokenColors.type.foreground;
+
+    expect(theme.semanticTokenColors.constructor.foreground).toBe(typeColor);
+    expect(theme.semanticTokenColors.namespace.foreground).toBe(typeColor);
+    expect(theme.semanticTokenColors.typeParameter.foreground).toBe(typeColor);
+    expect(theme.colors['symbolIcon.constructorForeground']).toBe(typeColor);
+    expect(theme.colors['symbolIcon.namespaceForeground']).toBe(typeColor);
+    expect(theme.colors['symbolIcon.typeParameterForeground']).toBe(typeColor);
+    expect(tokenColor(theme, 'meta.type.annotation')).toBe(typeColor);
+    expect(tokenColor(theme, 'entity.name.type')).toBe(typeColor);
+  }
+});
+
 test('README advertises the default Night palette from the Night source theme', () => {
   const readme = fs.readFileSync('README.md', 'utf8');
   const nightSource = SOURCE_THEMES.find((source) => source.slug === 'tyrian-night');
@@ -237,15 +308,30 @@ test('README advertises the default Night palette from the Night source theme', 
 });
 
 function tokenColor(theme: VscodeTheme, scope: string): string {
+  return tokenSettings(theme, scope).foreground!;
+}
+
+function tokenSettings(theme: VscodeTheme, scope: string): HighlightSettings {
   for (const token of theme.tokenColors) {
     const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
 
-    if (scopes.includes(scope) && token.settings.foreground) {
-      return token.settings.foreground;
+    if (scopes.includes(scope)) {
+      return token.settings;
     }
   }
 
   throw new Error(`Missing token scope '${scope}' in ${theme.name}`);
+}
+
+function tokenScopeSurface(theme: VscodeTheme): Array<{ scope: string[]; fontStyle?: string }> {
+  return theme.tokenColors.map((token) => ({
+    scope: scopeList(token.scope),
+    fontStyle: token.settings.fontStyle,
+  }));
+}
+
+function oklabDelta(leftColor: string, rightColor: string): number {
+  return compareColors({ left: leftColor, right: rightColor }).oklabDelta;
 }
 
 function isItalic(settings: HighlightSettings): boolean {
@@ -260,6 +346,10 @@ function isAllowedItalicScope(scope: string | string[]): boolean {
   return scopeList(scope).some(
     (entry) =>
       entry.startsWith('comment') ||
+      entry.startsWith('meta.type') ||
+      entry.startsWith('meta.annotation') ||
+      entry === 'entity.name.type.annotation' ||
+      entry === 'variable.language' ||
       entry === 'punctuation.definition.comment' ||
       entry === 'string.quoted.docstring' ||
       entry === 'markup.italic' ||

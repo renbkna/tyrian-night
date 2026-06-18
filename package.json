@@ -83,6 +83,7 @@
     "check:island-css": "node scripts/islandCss.mjs --check",
     "build:terminal-themes": "node scripts/terminalThemes.mjs",
     "check:terminal-themes": "node scripts/terminalThemes.mjs --check",
+    "color:audit": "node scripts/themeColorAudit.mjs",
     "build:desktop-themes": "node scripts/desktopThemes.mjs",
     "check:desktop-themes": "node scripts/desktopThemes.mjs --check",
     "install:island-broker": "node scripts/installIslandBroker.mjs",
@@ -104,6 +105,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
+    "@material/material-color-utilities": "0.4.0",
     "@types/node": "^22.19.17",
     "@types/vscode": "^1.118.0",
     "@vscode/vsce": "^3.9.1",
