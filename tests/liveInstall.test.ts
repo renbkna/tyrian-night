@@ -50,6 +50,7 @@ test('live installer defaults to a repo-independent materialized install root', 
   expect(plan.livePaths.screenLockerConfig).toBe(`${FIXTURE_HOME}/.config/kscreenlockerrc`);
   expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.config/kscreenlockerrc`);
   expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`);
+  expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.local/share/union`);
   expect(plan.touchedPaths).not.toContain(`${FIXTURE_HOME}/.local/share/union/css/defaults`);
   expect(plan.touchedPaths).not.toContain(
     `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`
@@ -88,6 +89,13 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
       ].join('\n')
     );
     fs.writeFileSync(ghosttyConfig, 'font-size = 99\n');
+    fs.mkdirSync(path.join(home, '.local/share/union/css/styles/TyrianNight'), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(home, '.local/share/union/css/styles/TyrianNight/style.css'),
+      '/* stale Tyrian Union runtime */\n'
+    );
 
     installLiveTyrian({
       repoRoot: process.cwd(),

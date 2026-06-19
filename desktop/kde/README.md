@@ -38,8 +38,11 @@ user-session Union overrides when `systemctl` and
 `dbus-update-activation-environment` are available. To test Union manually,
 install your distro's `union` package, copy or symlink
 `/usr/share/union/css/defaults` into `~/.local/share/union/css/defaults`, copy
-or symlink `desktop/kde/union/css/styles/TyrianNight` into
-`~/.local/share/union/css/styles/TyrianNight`, then opt into Union from a test
+or symlink the packaged Union base style directories
+`/usr/share/union/css/styles/breeze`, `/usr/share/union/css/styles/breeze-mobile`,
+and `/usr/share/union/css/styles/breeze-rtl` into `~/.local/share/union/css/styles/`,
+then copy or symlink `desktop/kde/union/css/styles/TyrianNight` into
+`~/.local/share/union/css/styles/TyrianNight` and opt into Union from a test
 session.
 
 For a local runtime smoke test, use:

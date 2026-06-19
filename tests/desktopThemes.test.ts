@@ -47,6 +47,19 @@ test('desktop theme assets match the generated VS Code-derived outputs', () => {
   }
 });
 
+test('KDE manual Union setup includes packaged base styles', () => {
+  const kdeReadme = fs.readFileSync('desktop/kde/README.md', 'utf8');
+
+  for (const path of [
+    '/usr/share/union/css/styles/breeze',
+    '/usr/share/union/css/styles/breeze-mobile',
+    '/usr/share/union/css/styles/breeze-rtl',
+    'desktop/kde/union/css/styles/TyrianNight',
+  ]) {
+    expect(kdeReadme).toContain(path);
+  }
+});
+
 test('KDE color schemes derive backgrounds and accents from Tyrian sources', () => {
   for (const source of SOURCE_THEMES) {
     const theme = readSourceTheme<VscodeTheme>(source);

@@ -146,6 +146,7 @@ function buildLivePaths(userHome) {
     kdeTyrianScheme: path.join(userHome, '.local/share/color-schemes/TyrianNight.colors'),
     plasmaTyrianTheme: path.join(userHome, '.local/share/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrian: path.join(userHome, '.local/share/plasma/look-and-feel/TyrianNight'),
+    unionRuntimeRoot: path.join(userHome, '.local/share/union'),
     caelestiaSchemeState: path.join(userHome, '.local/state/caelestia/scheme.json'),
     caelestiaSequences: path.join(userHome, '.local/state/caelestia/sequences.txt'),
     hyprCurrentScheme: path.join(userHome, '.config/hypr/scheme/current.conf'),
@@ -207,6 +208,7 @@ function buildTouchedPaths(livePaths, legacyPaths) {
     livePaths.kdeTyrianScheme,
     livePaths.plasmaTyrianTheme,
     livePaths.lookAndFeelTyrian,
+    livePaths.unionRuntimeRoot,
     livePaths.caelestiaSchemeState,
     livePaths.caelestiaSequences,
     livePaths.hyprCurrentScheme,
@@ -300,6 +302,51 @@ function cleanupLegacyPaths(plan) {
       fs.rmSync(legacyPath, { recursive: true, force: true });
     });
   }
+
+  cleanupLegacyUnionRuntime(plan);
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @returns {void}
+ */
+function cleanupLegacyUnionRuntime(plan) {
+  if (!isTyrianOnlyUnionRuntimeRoot(plan.livePaths.unionRuntimeRoot)) {
+    return;
+  }
+
+  operation(
+    plan.apply,
+    `remove stale Tyrian Union runtime root ${plan.livePaths.unionRuntimeRoot}`,
+    () => {
+      fs.rmSync(plan.livePaths.unionRuntimeRoot, { recursive: true, force: true });
+    }
+  );
+}
+
+/**
+ * @param {string} unionRuntimeRoot
+ * @returns {boolean}
+ */
+function isTyrianOnlyUnionRuntimeRoot(unionRuntimeRoot) {
+  const styleRoot = path.join(unionRuntimeRoot, 'css/styles');
+
+  if (!exists(styleRoot)) {
+    return false;
+  }
+
+  const styleNames = fs.readdirSync(styleRoot);
+  const hasTyrianStyle = styleNames.some((styleName) => styleName.startsWith('Tyrian'));
+
+  if (!hasTyrianStyle) {
+    return false;
+  }
+
+  return styleNames.every(
+    (styleName) =>
+      ['breeze', 'breeze-mobile', 'breeze-rtl'].includes(styleName) ||
+      styleName.startsWith('Tyrian')
+  );
 }
 
 /**
