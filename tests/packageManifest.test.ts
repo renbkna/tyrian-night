@@ -89,6 +89,9 @@ test('VS Code package includes only VS Code runtime and marketplace assets', () 
   expect(ignoredFiles).toContain('terminal/**');
   expect(ignoredFiles).toContain('desktop/**');
   expect(ignoredFiles).toContain('rice/**');
+  expect(ignoredFiles).toContain('source/themeCatalog.json');
+  expect(ignoredFiles).toContain('source/islandBrokerInstallContract.json');
+  expect(ignoredFiles).toContain('source/union-css/**');
   expect(ignoredFiles).toContain('assets/tyrian-fetch.webp');
   expect(ignoredFiles).toContain('assets/tyrian.png');
   expect(ignoredFiles).toContain('assets/wallpaper-tyrian.png');

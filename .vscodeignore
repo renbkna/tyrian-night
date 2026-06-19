@@ -18,6 +18,9 @@ apps/zed/**
 terminal/**
 desktop/**
 rice/**
+source/themeCatalog.json
+source/islandBrokerInstallContract.json
+source/union-css/**
 assets/tyrian-fetch.webp
 assets/tyrian.png
 assets/wallpaper-tyrian.png
