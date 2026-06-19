@@ -1,0 +1,51 @@
+tabbutton {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background-color: var(--tyrian-control-hover-bg);
+  border: 1px solid var(--tyrian-border-color);
+  color: var(--tyrian-foreground);
+}
+
+tabbutton:checked {
+  background-color: var(--tyrian-window-bg);
+  border-top: 3px solid var(--tyrian-focus-ring);
+}
+
+tabbutton:hovered,
+tabbutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+tabbutton:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+}
+
+tabbutton[direction="top"] {
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
+}
+
+tabbutton[direction="bottom"] {
+  border-top-left-radius: 0px;
+  border-top-right-radius: 0px;
+}
+
+tabbar {
+  spacing: 0px;
+}
+
+tabbar[tab-position="top"],
+tabbar[tab-position="bottom"] {
+  background-color: var(--tyrian-panel-bg);
+}
+
+tabbarhighlight.itemview-highlight {
+  background-color: var(--tyrian-fill-bg);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+tabbutton.itemview-highlight {
+  background-color: transparent;
+}

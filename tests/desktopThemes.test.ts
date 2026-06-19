@@ -5,6 +5,7 @@ import { expect, test } from 'bun:test';
 import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildDesktopThemeAssets } from '../scripts/desktopThemes.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import { flattenCssFile } from '../scripts/union/flattenCss.mjs';
 
 type HighlightSettings = {
   foreground?: string;
@@ -17,6 +18,28 @@ type VscodeTheme = {
 };
 
 const assets = new Map(buildDesktopThemeAssets().map((asset) => [asset.path, asset.content]));
+const UNION_STATIC_TEMPLATE = flattenCssFile('source/union-css/index.css').replace(
+  /\/\*[\s\S]*?\*\/\n\n:root \{\n\s*\/\* TYRIAN_GENERATED_TOKENS \*\/\n\}\n\n/u,
+  ''
+);
+const UNION_TOKEN_CONTRACT = [
+  '--tyrian-background:',
+  '--tyrian-foreground:',
+  '--tyrian-accent:',
+  '--tyrian-control-bg: var(--tyrian-surface-low);',
+  '--tyrian-row-selected-bg: var(--tyrian-selection);',
+  '--tyrian-indicator-checked-bg: var(--tyrian-accent);',
+  '--tyrian-focus-ring: var(--tyrian-accent);',
+  '--tyrian-corner-radius: 5px;',
+  '--tyrian-scrollbar-size:',
+];
+const UNION_FORBIDDEN_CONTRACT = [
+  '@import',
+  '../breeze',
+  'custom-color("kcolorscheme"',
+  'kcolorscheme',
+  'Breeze',
+];
 
 test('desktop theme assets match the generated VS Code-derived outputs', () => {
   for (const [assetPath, content] of assets) {
@@ -83,7 +106,7 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
     expect(lookAndFeelMetadata.KPackageStructure).toBe('Plasma/LookAndFeel');
     expect(lookAndFeelMetadata.KPlugin.Id).toBe(schemeId);
     expect(lookAndFeelDefaults).toContain(`ColorScheme=${schemeId}`);
-    expect(lookAndFeelDefaults).toContain('widgetStyle=Union');
+    expect(lookAndFeelDefaults).toContain('widgetStyle=Breeze');
     expect(lookAndFeelDefaults).toContain(`name=${schemeId}`);
     expect(
       `${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}\n${JSON.stringify(
@@ -93,24 +116,38 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
   }
 });
 
-test('Union CSS styles derive application surfaces from Tyrian sources', () => {
+test('Union CSS styles combine generated Tyrian tokens with the editable rice template', () => {
   for (const source of SOURCE_THEMES) {
     const theme = readSourceTheme<VscodeTheme>(source);
     const schemeId = pascalSlug(source.slug);
     const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
 
+    expect(unionStyle).toStartWith(
+      `/*
+ * ${theme.name} Union CSS style.
+ * Static rice controls live in source/union-css/index.css and parts/.
+ * Palette and shape tokens are generated from source/themes by scripts/desktopThemes.mjs.
+ */
+
+:root {
+`
+    );
     expect(unionStyle).toContain(
       `--tyrian-background: ${opaqueHex(theme.colors['editor.background']).toLowerCase()}`
     );
     expect(unionStyle).toContain(
       `--tyrian-accent: ${opaqueHex(theme.colors['activityBar.activeBorder']).toLowerCase()}`
     );
-    expect(unionStyle).toContain('applicationwindow,');
-    expect(unionStyle).toContain('button:hovered,');
-    expect(unionStyle).toContain('itemdelegate:highlight,');
-    expect(unionStyle).toContain('tabbutton:checked');
-    expect(unionStyle).not.toContain('Breeze');
-    expect(unionStyle).not.toContain('custom-color("kcolorscheme"');
+
+    for (const token of UNION_TOKEN_CONTRACT) {
+      expect(unionStyle).toContain(token);
+    }
+
+    for (const forbidden of UNION_FORBIDDEN_CONTRACT) {
+      expect(unionStyle).not.toContain(forbidden);
+    }
+
+    expect(unionStyle.endsWith(UNION_STATIC_TEMPLATE)).toBe(true);
   }
 });
 

@@ -12,6 +12,14 @@ import {
   buildTyrianBackupRoot,
 } from './portableAssets.mjs';
 import { TYRIAN_REQUIRED_COMMANDS, checkRequiredCommands, hasCommand } from './commandChecks.mjs';
+import {
+  backupHomePath,
+  exists,
+  installManagedPathRaw,
+  operation,
+  writeBinaryFileRaw,
+  writeTextFileRaw,
+} from './installOps.mjs';
 import { installLiveTyrian } from './installLiveTyrian.mjs';
 
 const repoRoot = process.cwd();
@@ -293,18 +301,18 @@ export function installPlasmaLayout(options = {}) {
     };
   });
 
-  operation(`${apply ? 'stop' : 'would stop'} Plasma shell before restoring layout`, apply, () => {
+  operation(apply, `${apply ? 'stop' : 'would stop'} Plasma shell before restoring layout`, () => {
     stopPlasmaShell(runCommand);
   });
 
   for (const { installedContent, targetPath } of installEntries) {
-    operation(`${apply ? 'restore' : 'would restore'} ${targetPath}`, apply, () => {
+    operation(apply, `${apply ? 'restore' : 'would restore'} ${targetPath}`, () => {
       backupPath(targetPath, backupRoot, userHome);
-      writeTextFileRaw(targetPath, installedContent);
+      writeTextFileRaw(targetPath, installedContent, { finalNewline: true });
     });
   }
 
-  operation(`${apply ? 'start' : 'would start'} Plasma shell`, apply, () => {
+  operation(apply, `${apply ? 'start' : 'would start'} Plasma shell`, () => {
     startPlasmaShell(runCommand);
   });
 
@@ -312,13 +320,13 @@ export function installPlasmaLayout(options = {}) {
     installEntries.find(({ file }) => file.portableWallpaper)?.installedContent ?? ''
   );
 
-  operation(`${apply ? 'restore' : 'would restore'} Plasma panel runtime state`, apply, () => {
+  operation(apply, `${apply ? 'restore' : 'would restore'} Plasma panel runtime state`, () => {
     restorePlasmaPanelState(panelStateById, primaryTarget.screen, runCommand);
   });
 
   const wallpaperPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
-  operation(`${apply ? 'apply' : 'would apply'} Plasma wallpaper ${wallpaperPath}`, apply, () => {
+  operation(apply, `${apply ? 'apply' : 'would apply'} Plasma wallpaper ${wallpaperPath}`, () => {
     applyPlasmaWallpaper(wallpaperPath, runCommand);
   });
 }
@@ -889,13 +897,19 @@ function parseOptionalNumber(value) {
  * @returns {unknown}
  */
 function parseJsonFromQdbusOutput(output) {
-  const jsonStart = output.indexOf('[');
+  const jsonStarts = Array.from(output.matchAll(/\{|\[/gu), (match) => match.index).filter(
+    (index) => index !== undefined
+  );
 
-  if (jsonStart === -1) {
-    return undefined;
+  for (let index = jsonStarts.length - 1; index >= 0; index -= 1) {
+    try {
+      return JSON.parse(output.slice(jsonStarts[index]).trim());
+    } catch {
+      // Keep scanning: qdbus can prepend warnings that contain bracketed text.
+    }
   }
 
-  return JSON.parse(output.slice(jsonStart));
+  return undefined;
 }
 
 /**
@@ -955,9 +969,8 @@ function materializeRiceLayoutAssets(root, runtimeRoot, apply) {
   const sourcePath = path.join(root, RICE_WALLPAPER_PATH);
   const targetPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
-  operation(`${apply ? 'copy' : 'would copy'} ${sourcePath} -> ${targetPath}`, apply, () => {
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    fs.copyFileSync(sourcePath, targetPath);
+  operation(apply, `${apply ? 'copy' : 'would copy'} ${sourcePath} -> ${targetPath}`, () => {
+    installManagedPathRaw('copy', sourcePath, targetPath);
   });
 }
 
@@ -1189,24 +1202,11 @@ function assertRiceManifest(manifest) {
  * @returns {void}
  */
 function backupPath(targetPath, backupRoot, userHome) {
-  if (!exists(targetPath)) {
-    return;
+  const backupPathTarget = backupHomePath(targetPath, backupRoot, userHome);
+
+  if (backupPathTarget) {
+    console.log(`backup: ${targetPath} -> ${backupPathTarget}`);
   }
-
-  const relativePath = path.relative(userHome, targetPath);
-
-  if (relativePath.startsWith('..')) {
-    return;
-  }
-
-  const backupPathTarget = path.join(backupRoot, 'home', relativePath);
-  fs.mkdirSync(path.dirname(backupPathTarget), { recursive: true });
-  fs.cpSync(targetPath, backupPathTarget, {
-    recursive: true,
-    preserveTimestamps: true,
-    verbatimSymlinks: true,
-  });
-  console.log(`backup: ${targetPath} -> ${backupPathTarget}`);
 }
 
 /**
@@ -1240,20 +1240,6 @@ function startPlasmaShell(runCommand) {
 }
 
 /**
- * @param {string} message
- * @param {boolean} apply
- * @param {() => void} action
- * @returns {void}
- */
-function operation(message, apply, action) {
-  console.log(`${apply ? 'apply' : 'dry-run'}: ${message}`);
-
-  if (apply) {
-    action();
-  }
-}
-
-/**
  * @param {string} filePath
  * @param {string} content
  * @param {string} message
@@ -1261,17 +1247,7 @@ function operation(message, apply, action) {
  */
 function writeTextFile(filePath, content, message) {
   console.log(message);
-  writeTextFileRaw(filePath, content);
-}
-
-/**
- * @param {string} filePath
- * @param {string} content
- * @returns {void}
- */
-function writeTextFileRaw(filePath, content) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content.endsWith('\n') ? content : `${content}\n`, 'utf8');
+  writeTextFileRaw(filePath, content, { finalNewline: true });
 }
 
 /**
@@ -1282,21 +1258,7 @@ function writeTextFileRaw(filePath, content) {
  */
 function writeBinaryFile(filePath, content, message) {
   console.log(message);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content);
-}
-
-/**
- * @param {string} filePath
- * @returns {boolean}
- */
-function exists(filePath) {
-  try {
-    fs.lstatSync(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+  writeBinaryFileRaw(filePath, content);
 }
 
 /**

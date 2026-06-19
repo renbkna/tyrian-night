@@ -1,0 +1,20 @@
+/*
+ * {{schemeName}} Union CSS style.
+ * Static rice controls live in source/union-css/index.css and parts/.
+ * Palette and shape tokens are generated from source/themes by scripts/desktopThemes.mjs.
+ */
+
+:root {
+  /* TYRIAN_GENERATED_TOKENS */
+}
+
+@import "./parts/00-base.css";
+@import "./parts/30-controls.css";
+@import "./parts/40-fields.css";
+@import "./parts/50-checkables-delegates.css";
+@import "./parts/70-menus-popups.css";
+@import "./parts/80-containers-navigation.css";
+@import "./parts/90-sliders-progress-scrollbars.css";
+@import "./parts/95-tabs.css";
+@import "./parts/100-kirigami.css";
+@import "./parts/110-views-calendar-overrides.css";

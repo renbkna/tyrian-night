@@ -1,0 +1,48 @@
+* {
+  color: var(--tyrian-foreground);
+  icon-color: var(--tyrian-foreground);
+  icon-size: var(--tyrian-icon-small);
+  layout-alignment: item start center 0;
+  icon-alignment: content start center 0;
+  text-alignment: content start center 1;
+}
+
+action,
+actiongroup,
+control,
+abstractbutton {
+  color: var(--tyrian-foreground);
+  icon-color: var(--tyrian-foreground);
+}
+
+applicationwindow,
+window,
+page,
+pane,
+container,
+stackview,
+swipeview,
+dialog,
+drawer,
+overlaydrawer {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-foreground);
+}
+
+label {
+  color: var(--tyrian-foreground);
+}
+
+label:disabled {
+  color: var(--tyrian-disabled-fg);
+}
+
+popup,
+menu,
+tooltip {
+  padding: var(--tyrian-large-spacing);
+  background-color: var(--tyrian-panel-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+  box-shadow: var(--tyrian-shadow-elevation);
+}

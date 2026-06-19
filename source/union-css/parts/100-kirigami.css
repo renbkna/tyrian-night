@@ -1,0 +1,165 @@
+applicationheader {
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+}
+
+applicationheader[colorset="window"] {
+  background-color: var(--tyrian-window-bg);
+}
+
+card {
+  background-color: var(--tyrian-panel-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+  box-shadow: 0px 2px var(--tyrian-grid-unit) 0px rgba(0, 0, 0, 0.1);
+  color: var(--tyrian-foreground);
+}
+
+card:hovered {
+  background-color: var(--tyrian-panel-raised-bg);
+}
+
+card:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+chip {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-medium-spacing);
+  spacing: var(--tyrian-small-spacing);
+  layout-alignment: content fill fill 0;
+  text-alignment: content fill center 0;
+  icon-alignment: content start center 0;
+  background-color: var(--tyrian-control-hover-bg);
+  border-radius: var(--tyrian-corner-radius);
+  border: 1px solid var(--tyrian-border-color);
+  color: var(--tyrian-foreground);
+}
+
+chip > .indicator {
+  width: var(--tyrian-small-element);
+  height: var(--tyrian-small-element);
+  icon-name: "edit-delete-remove";
+  layout-alignment: item end center 0;
+}
+
+chip.closable > .indicator {
+  opacity: 1;
+}
+
+chip.interactive {
+  border-color: var(--tyrian-border-hover);
+}
+
+chip:hovered,
+chip:pressed {
+  border-color: var(--tyrian-focus-ring);
+}
+
+heading {
+  color: var(--tyrian-foreground);
+}
+
+heading.primary,
+heading.primary.level-1,
+heading.primary.level-2,
+heading.primary.level-3,
+heading.primary.level-4 {
+  font-weight: 600;
+}
+
+heading.level-1,
+heading.primary.level-1 {
+  font-size: 20px;
+}
+
+heading.level-2,
+heading.primary.level-2 {
+  font-size: 18px;
+}
+
+heading.level-3,
+heading.primary.level-3 {
+  font-size: 17px;
+}
+
+heading.level-4,
+heading.primary.level-4 {
+  font-size: 16px;
+}
+
+heading.secondary {
+  color: var(--tyrian-muted);
+}
+
+inlinemessage {
+  padding: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-row-selected-bg);
+  border: 1px solid var(--tyrian-focus-ring);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+inlinemessage[type="positive"] {
+  background-color: var(--tyrian-positive-bg);
+  border-color: var(--tyrian-positive);
+}
+
+inlinemessage[type="warning"] {
+  background-color: var(--tyrian-neutral-bg);
+  border-color: var(--tyrian-neutral);
+}
+
+inlinemessage[type="error"] {
+  background-color: var(--tyrian-negative-bg);
+  border-color: var(--tyrian-negative);
+}
+
+inlinemessage[position="header"],
+inlinemessage[position="footer"] {
+  border-radius: 0px;
+  border-left: none;
+  border-right: none;
+}
+
+navigationtabbar {
+  height: 64px;
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-window-bg);
+}
+
+navigationtabbar.header {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+navigationtabbar.footer {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+navigationtabbutton {
+  inset: var(--tyrian-minimal-spacing);
+  padding: var(--tyrian-small-spacing);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+  icon-size: var(--tyrian-icon-small-medium);
+  text-alignment-horizontal: center;
+  icon-alignment-horizontal: center;
+}
+
+navigationtabbutton:hovered,
+navigationtabbutton:pressed,
+navigationtabbutton:checked {
+  background-color: var(--tyrian-control-active-bg);
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+navigationtabbutton:disabled {
+  color: var(--tyrian-disabled-fg);
+}
+
+overlaydrawer itemdelegate {
+  width: var(--tyrian-icon-medium);
+  height: var(--tyrian-icon-medium);
+}

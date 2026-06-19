@@ -140,6 +140,7 @@ These assets are generated from `source/themes/` so the Tyrian palette remains t
 Tyrian also owns desktop rice outputs:
 
 - `desktop/kde/` contains generated KDE color schemes, Tyrian Plasma desktop-theme and look-and-feel packages, and opt-in Union CSS application-style packages.
+- `source/union-css/` contains the editable modular Union CSS rice source; the generator injects Tyrian palette tokens and flattens it.
 - `desktop/caelestia/` contains generated Caelestia scheme, state, and Hyprland color files.
 
 These files keep Tyrian as the palette and rice source of truth while KDE and Caelestia only provide the runtime that loads the installed files.
@@ -171,7 +172,7 @@ node scripts/installLiveTyrian.mjs --apply --link
 The rice entrypoint installs the complete Tyrian setup:
 
 - `terminal/ghostty/`, `terminal/fish/`, `terminal/starship/`, and `terminal/fastfetch/`
-- KDE color scheme, Plasma desktop-theme skin, Union app style package, launcher/taskbar surfaces, lock-screen wallpaper, and Caelestia color state
+- KDE color scheme, Plasma desktop-theme skin, launcher/taskbar surfaces, lock-screen wallpaper, and Caelestia color state
 - Plasma panel/widget layout from `rice/plasma-layout/`
 
 The captured Plasma layout expects the widgets listed in

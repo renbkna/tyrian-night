@@ -1,0 +1,132 @@
+progressbar,
+slider,
+rangeslider,
+dial {
+  height: 20px;
+  background-color: var(--tyrian-track-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+busyindicator {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  icon-name: "view-refresh";
+  icon-color: var(--tyrian-fill-bg);
+}
+
+progressbar > track,
+slider > fill,
+rangeslider > fill {
+  background-color: var(--tyrian-fill-bg);
+  border: 1px solid var(--tyrian-border-hover);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+progressbar.indeterminate > track {
+  background-color: var(--tyrian-neutral);
+}
+
+slider > handle,
+rangeslider > handle,
+dial > handle,
+scrollbar > handle,
+scrollindicator > handle,
+selectionrectanglehandle {
+  width: var(--tyrian-scrollbar-size);
+  height: var(--tyrian-scrollbar-size);
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-pill-radius);
+}
+
+scrollindicator {
+  width: 10px;
+  height: 10px;
+  padding: var(--tyrian-minimal-spacing);
+}
+
+scrollindicator[orientation="horizontal"] {
+  height: 10px;
+}
+
+scrollindicator[orientation="vertical"] {
+  width: 10px;
+}
+
+slider:visual-focus > handle,
+rangeslider > handle:active-focus,
+selectionrectanglehandle:visual-focus {
+  border-color: var(--tyrian-focus-ring);
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+slider:pressed > handle,
+rangeslider > handle:pressed,
+scrollbar > handle:pressed,
+scrollbar > handle:hovered,
+scrollindicator > handle:pressed,
+scrollindicator > handle:hovered {
+  background-color: var(--tyrian-fill-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+slider.horizontal,
+rangeslider.horizontal {
+  width: var(--tyrian-field-width);
+  height: var(--tyrian-medium-spacing);
+}
+
+slider.vertical,
+rangeslider.vertical {
+  width: var(--tyrian-medium-spacing);
+  height: var(--tyrian-field-width);
+}
+
+slider > tickmark,
+rangeslider > tickmark {
+  background-color: var(--tyrian-border-color);
+}
+
+slider > tickmark.active,
+rangeslider > tickmark.active {
+  background-color: var(--tyrian-fill-bg);
+}
+
+rangeslider > handle.first {
+  border-color: var(--tyrian-border-hover);
+}
+
+rangeslider > handle.second {
+  border-color: var(--tyrian-focus-ring);
+}
+
+scrollbar {
+  width: var(--tyrian-scrollbar-size);
+  height: var(--tyrian-scrollbar-size);
+  padding: var(--tyrian-medium-spacing);
+}
+
+scrollbar.horizontal {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+scrollbar.vertical {
+  border-left: 1px solid var(--tyrian-border-color);
+}
+
+scrollbar.noninteractive {
+  width: 10px;
+  height: 10px;
+}
+
+dial:hovered,
+dial:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+slider.changed > fill,
+slider.changed > tickmark.active {
+  background-color: var(--tyrian-neutral);
+}

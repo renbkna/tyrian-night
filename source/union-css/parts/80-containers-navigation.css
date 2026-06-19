@@ -1,0 +1,111 @@
+applicationwindow.inactive,
+.inactive applicationwindow,
+.inactive page,
+.inactive toolbar {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-muted);
+}
+
+toolbar.header,
+applicationheader.with-separator {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+toolbar.footer {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+drawer.modal,
+overlaydrawer.modal {
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-window-bg);
+}
+
+drawer[edge="left"],
+overlaydrawer[edge="left"] {
+  border-right: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="right"],
+overlaydrawer[edge="right"] {
+  border-left: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="top"],
+overlaydrawer[edge="top"] {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="bottom"],
+overlaydrawer[edge="bottom"] {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+swipeview.horizontal {
+  layout-alignment: content fill fill 0;
+}
+
+swipeview.vertical {
+  layout-alignment: content fill fill 0;
+}
+
+scrollview.vertical-scroll {
+  padding-right: var(--tyrian-scrollbar-size);
+}
+
+scrollview.horizontal-scroll {
+  padding-bottom: var(--tyrian-scrollbar-size);
+}
+
+scrollview.framed-background {
+  background-color: var(--tyrian-panel-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+splitview handle {
+  width: 1px;
+  height: 1px;
+  background-color: var(--tyrian-border-color);
+}
+
+splitview.horizontal handle {
+  margin-left: var(--tyrian-medium-spacing);
+  margin-right: var(--tyrian-medium-spacing);
+}
+
+splitview.vertical handle {
+  margin-top: var(--tyrian-medium-spacing);
+  margin-bottom: var(--tyrian-medium-spacing);
+}
+
+pageindicator {
+  spacing: var(--tyrian-small-spacing);
+}
+
+pageindicatordelegate {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tyrian-pill-radius);
+  background-color: var(--tyrian-muted);
+}
+
+pageindicatordelegate:pressed {
+  background-color: var(--tyrian-border-hover);
+}
+
+pageindicatordelegate.current {
+  background-color: var(--tyrian-fill-bg);
+}
+
+frame,
+groupbox {
+  padding: var(--tyrian-small-spacing);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+groupbox {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-foreground);
+}

@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { isLightHex, opaqueHex, parseHexColor } from './colorUtils.mjs';
 import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
+import { flattenCssFile } from './union/flattenCss.mjs';
+import { lintUnionCss } from './union/lintUnionCss.mjs';
 
 /**
  * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
@@ -215,7 +217,7 @@ export function buildDesktopThemeAssets(repoRoot = process.cwd()) {
       ...buildPlasmaDesktopThemePackageAssets(kdeFileName, theme.name, packageVersion),
       ...buildPlasmaWidgetSkinAssets(kdeFileName, palette),
       ...buildPlasmaLookAndFeelPackageAssets(kdeFileName, theme.name, packageVersion),
-      ...buildUnionCssStylePackageAssets(kdeFileName, theme.name, palette),
+      ...buildUnionCssStylePackageAssets(repoRoot, kdeFileName, theme.name, palette),
       {
         path: `desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`,
         content: buildCaelestiaSchemeText(caelestiaColours),
@@ -556,7 +558,7 @@ function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersio
 function buildLookAndFeelDefaults(schemeId) {
   return [
     '[kdeglobals][KDE]',
-    'widgetStyle=Union',
+    'widgetStyle=Breeze',
     '',
     '[kdeglobals][General]',
     `ColorScheme=${schemeId}`,
@@ -588,224 +590,129 @@ function buildLookAndFeelDefaults(schemeId) {
 }
 
 /**
+ * @param {string} repoRoot
  * @param {string} schemeId
  * @param {string} schemeName
  * @param {DesktopPalette} palette
  * @returns {GeneratedAsset[]}
  */
-function buildUnionCssStylePackageAssets(schemeId, schemeName, palette) {
+function buildUnionCssStylePackageAssets(repoRoot, schemeId, schemeName, palette) {
   return [
     {
       path: `desktop/kde/union/css/styles/${schemeId}/style.css`,
-      content: buildUnionCssStyle(schemeName, palette),
+      content: buildUnionCssStyle(repoRoot, schemeName, palette),
     },
   ];
 }
 
 /**
+ * @param {string} repoRoot
  * @param {string} schemeName
  * @param {DesktopPalette} palette
  * @returns {string}
  */
-function buildUnionCssStyle(schemeName, palette) {
-  return `/*
- * ${schemeName} Union CSS style.
- * Generated from source/themes by scripts/desktopThemes.mjs.
+function buildUnionCssStyle(repoRoot, schemeName, palette) {
+  return readUnionCssTemplate(repoRoot)
+    .replaceAll('{{schemeName}}', schemeName)
+    .replaceAll('  /* TYRIAN_GENERATED_TOKENS */', buildUnionCssTokens(palette));
+}
+
+/**
+ * @param {string} repoRoot
+ * @returns {string}
  */
+function readUnionCssTemplate(repoRoot) {
+  const css = flattenCssFile(path.join(repoRoot, 'source/union-css/index.css'));
+  const issues = lintUnionCss(css, { generated: true }).filter(
+    (issue) => issue.severity === 'error'
+  );
 
-:root {
-  --tyrian-background: ${palette.background.toLowerCase()};
-  --tyrian-foreground: ${palette.foreground.toLowerCase()};
-  --tyrian-surface-low: ${palette.surfaceLow.toLowerCase()};
-  --tyrian-surface: ${palette.surface.toLowerCase()};
-  --tyrian-surface-high: ${palette.surfaceHigh.toLowerCase()};
-  --tyrian-surface-highest: ${palette.surfaceHighest.toLowerCase()};
-  --tyrian-border: ${palette.border.toLowerCase()};
-  --tyrian-muted: ${palette.muted.toLowerCase()};
-  --tyrian-accent: ${palette.accent.toLowerCase()};
-  --tyrian-accent-hover: ${palette.accentHover.toLowerCase()};
-  --tyrian-selection: ${palette.selection.toLowerCase()};
-  --tyrian-positive: ${palette.positive.toLowerCase()};
-  --tyrian-neutral: ${palette.neutral.toLowerCase()};
-  --tyrian-negative: ${palette.negative.toLowerCase()};
-  --tyrian-corner-radius: 5px;
-  --tyrian-small-spacing: 4px;
-  --tyrian-medium-spacing: 6px;
-  --tyrian-large-spacing: 8px;
+  if (issues.length > 0) {
+    throw new Error(
+      ['Union CSS source failed generation lint:', ...issues.map(formatUnionCssIssue)].join('\n')
+    );
+  }
+
+  return css;
 }
 
-* {
-  color: var(--tyrian-foreground);
-  icon-color: var(--tyrian-foreground);
-  icon-size: 16px;
+/**
+ * @param {{ message: string; line?: number }} issue
+ * @returns {string}
+ */
+function formatUnionCssIssue(issue) {
+  const location = issue.line === undefined ? '' : `:${issue.line}`;
+
+  return `- ${issue.message}${location}`;
 }
 
-applicationwindow,
-window,
-dialog {
-  background-color: var(--tyrian-background);
-  color: var(--tyrian-foreground);
-}
-
-popup,
-menu,
-tooltip {
-  padding: var(--tyrian-large-spacing);
-  background-color: var(--tyrian-surface-low);
-  border: 1px solid var(--tyrian-border);
-  border-radius: var(--tyrian-corner-radius);
-  box-shadow: 0px 2px 24px 0px rgba(0, 0, 0, 0.28);
-}
-
-button,
-toolbutton,
-combobox,
-roundbutton,
-delaybutton {
-  width: 32px;
-  height: 32px;
-  padding: var(--tyrian-large-spacing);
-  spacing: var(--tyrian-small-spacing);
-  background-color: var(--tyrian-surface-low);
-  border: 1px solid var(--tyrian-border);
-  border-radius: var(--tyrian-corner-radius);
-  color: var(--tyrian-foreground);
-}
-
-button:hovered,
-toolbutton:hovered,
-combobox:hovered,
-roundbutton:hovered,
-delaybutton:hovered {
-  background-color: var(--tyrian-surface);
-  border-color: var(--tyrian-accent-hover);
-}
-
-button:pressed,
-button:checked,
-toolbutton:pressed,
-toolbutton:checked,
-combobox:pressed,
-roundbutton:pressed,
-roundbutton:checked,
-delaybutton:pressed {
-  background-color: var(--tyrian-selection);
-  border-color: var(--tyrian-accent);
-}
-
-button:visual-focus,
-toolbutton:visual-focus,
-combobox:visual-focus,
-textfield:visual-focus,
-textarea:visual-focus {
-  outline: 2px solid var(--tyrian-accent);
-}
-
-toolbar,
-applicationheader {
-  background-color: var(--tyrian-surface-low);
-  border-bottom: 1px solid var(--tyrian-border);
-}
-
-textfield,
-textarea,
-spinbox {
-  width: 200px;
-  height: 32px;
-  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
-  background-color: var(--tyrian-background);
-  border: 1px solid var(--tyrian-border);
-  border-radius: var(--tyrian-corner-radius);
-  color: var(--tyrian-foreground);
-}
-
-textfield:hovered,
-textarea:hovered,
-spinbox:hovered {
-  border-color: var(--tyrian-accent-hover);
-}
-
-itemdelegate,
-checkdelegate,
-menuitem {
-  height: 32px;
-  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
-  spacing: var(--tyrian-small-spacing);
-  background: none;
-  color: var(--tyrian-foreground);
-}
-
-itemdelegate:hovered,
-checkdelegate:hovered,
-menuitem:hovered {
-  background-color: var(--tyrian-surface);
-}
-
-itemdelegate:highlight,
-itemdelegate:checked,
-checkdelegate:highlight,
-checkdelegate:checked,
-menuitem:highlight,
-menuitem:checked {
-  background-color: var(--tyrian-selection);
-  border: 1px solid var(--tyrian-accent);
-}
-
-checkbox > indicator,
-radiobutton > indicator,
-switch > indicator {
-  width: 18px;
-  height: 18px;
-  background-color: var(--tyrian-surface-high);
-  border: 1px solid var(--tyrian-border);
-  border-radius: var(--tyrian-corner-radius);
-}
-
-checkbox:checked > indicator,
-radiobutton:checked > indicator,
-switch:checked > indicator {
-  background-color: var(--tyrian-accent);
-  border-color: var(--tyrian-accent-hover);
-}
-
-progressbar,
-slider {
-  height: 20px;
-  background-color: var(--tyrian-surface-low);
-  border-radius: var(--tyrian-corner-radius);
-}
-
-progressbar > fill,
-slider > fill {
-  background-color: var(--tyrian-accent);
-  border-radius: var(--tyrian-corner-radius);
-}
-
-tabbutton {
-  height: 32px;
-  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
-  background-color: var(--tyrian-surface);
-  border: 1px solid var(--tyrian-border);
-  color: var(--tyrian-foreground);
-}
-
-tabbutton:checked {
-  background-color: var(--tyrian-background);
-  border-top: 3px solid var(--tyrian-accent);
-}
-
-text.positive {
-  color: var(--tyrian-positive);
-}
-
-text.neutral {
-  color: var(--tyrian-neutral);
-}
-
-text.negative {
-  color: var(--tyrian-negative);
-}
-`;
+/**
+ * @param {DesktopPalette} palette
+ * @returns {string}
+ */
+function buildUnionCssTokens(palette) {
+  return [
+    ['--tyrian-background', palette.background],
+    ['--tyrian-foreground', palette.foreground],
+    ['--tyrian-surface-low', palette.surfaceLow],
+    ['--tyrian-surface', palette.surface],
+    ['--tyrian-surface-high', palette.surfaceHigh],
+    ['--tyrian-surface-highest', palette.surfaceHighest],
+    ['--tyrian-border', palette.border],
+    ['--tyrian-muted', palette.muted],
+    ['--tyrian-accent', palette.accent],
+    ['--tyrian-accent-hover', palette.accentHover],
+    ['--tyrian-selection', palette.selection],
+    ['--tyrian-selection-text', palette.foreground],
+    ['--tyrian-positive', palette.positive],
+    ['--tyrian-neutral', palette.neutral],
+    ['--tyrian-negative', palette.negative],
+    ['--tyrian-positive-bg', palette.positive.toLowerCase() + '22'],
+    ['--tyrian-neutral-bg', palette.neutral.toLowerCase() + '22'],
+    ['--tyrian-negative-bg', palette.negative.toLowerCase() + '22'],
+    ['--tyrian-disabled-fg', palette.muted],
+    ['--tyrian-disabled-bg', palette.surfaceLow],
+    ['--tyrian-hover', palette.selection.toLowerCase() + 'aa'],
+    ['--tyrian-window-bg', 'var(--tyrian-background)'],
+    ['--tyrian-panel-bg', 'var(--tyrian-surface-low)'],
+    ['--tyrian-panel-raised-bg', 'var(--tyrian-surface)'],
+    ['--tyrian-control-bg', 'var(--tyrian-surface-low)'],
+    ['--tyrian-control-hover-bg', 'var(--tyrian-surface)'],
+    ['--tyrian-control-active-bg', 'var(--tyrian-selection)'],
+    ['--tyrian-control-disabled-bg', 'var(--tyrian-disabled-bg)'],
+    ['--tyrian-field-bg', 'var(--tyrian-background)'],
+    ['--tyrian-row-hover-bg', 'var(--tyrian-surface)'],
+    ['--tyrian-row-selected-bg', 'var(--tyrian-selection)'],
+    ['--tyrian-indicator-bg', 'var(--tyrian-surface-high)'],
+    ['--tyrian-indicator-checked-bg', 'var(--tyrian-accent)'],
+    ['--tyrian-track-bg', 'var(--tyrian-surface-low)'],
+    ['--tyrian-fill-bg', 'var(--tyrian-accent)'],
+    ['--tyrian-border-color', 'var(--tyrian-border)'],
+    ['--tyrian-border-hover', 'var(--tyrian-accent-hover)'],
+    ['--tyrian-focus-ring', 'var(--tyrian-accent)'],
+    ['--tyrian-overlay-modal-bg', 'rgba(0, 0, 0, 0.35)'],
+    ['--tyrian-overlay-modeless-bg', 'rgba(0, 0, 0, 0.18)'],
+    ['--tyrian-shadow-elevation', '0px 2px 24px 0px rgba(0, 0, 0, 0.28)'],
+    ['--tyrian-corner-radius', '5px'],
+    ['--tyrian-pill-radius', '999px'],
+    ['--tyrian-minimal-spacing', '2px'],
+    ['--tyrian-small-spacing', '4px'],
+    ['--tyrian-medium-spacing', '6px'],
+    ['--tyrian-large-spacing', '8px'],
+    ['--tyrian-grid-unit', '18px'],
+    ['--tyrian-icon-small', '16px'],
+    ['--tyrian-icon-small-medium', '22px'],
+    ['--tyrian-icon-medium', '32px'],
+    ['--tyrian-icon-large', '48px'],
+    ['--tyrian-small-element', '16px'],
+    ['--tyrian-medium-element', '24px'],
+    ['--tyrian-large-element', '32px'],
+    ['--tyrian-scrollbar-size', '20px'],
+    ['--tyrian-menu-width', '150px'],
+    ['--tyrian-field-width', '200px'],
+  ]
+    .map(([name, value]) => '  ' + name + ': ' + value.toLowerCase() + ';')
+    .join('\n');
 }
 
 /**

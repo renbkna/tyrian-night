@@ -1,0 +1,155 @@
+treeviewdelegate,
+tableviewdelegate {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  border-radius: 0px;
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-window-bg);
+}
+
+treeviewdelegate.alternating-colors,
+tableviewdelegate.alternating-colors {
+  background-color: var(--tyrian-panel-bg);
+}
+
+treeviewdelegate:hovered,
+treeviewdelegate:active-focus,
+tableviewdelegate:hovered,
+tableviewdelegate:active-focus {
+  border: 1px solid var(--tyrian-focus-ring);
+  background-color: transparent;
+}
+
+treeviewdelegate:visual-focus,
+tableviewdelegate:visual-focus {
+  outline: 1px solid var(--tyrian-focus-ring);
+}
+
+treeviewdelegate:highlighted,
+treeviewdelegate.selected,
+tableviewdelegate:highlighted,
+tableviewdelegate.selected {
+  color: var(--tyrian-selection-text);
+  background-color: var(--tyrian-fill-bg);
+  border: 1px solid var(--tyrian-border-hover);
+}
+
+treeviewdelegate.selected > label,
+tableviewdelegate.selected > label {
+  color: var(--tyrian-selection-text);
+}
+
+treeviewdelegate.editing,
+tableviewdelegate.editing {
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+treeviewdelegate > indentation {
+  width: var(--tyrian-medium-element);
+  layout-alignment: item start center 0;
+}
+
+treeviewdelegate > indicator {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-icon-small);
+  icon-name: "arrow-right-symbolic";
+}
+
+treeviewdelegate.expanded > indicator {
+  icon-name: "arrow-down-symbolic";
+}
+
+treeviewdelegate > radiobutton,
+treeviewdelegate > checkbox {
+  text-wrap-mode: no-wrap;
+}
+
+horizontalheaderview,
+verticalheaderview,
+headerview {
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+}
+
+horizontalheaderviewdelegate,
+verticalheaderviewdelegate,
+headerviewdelegate {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+  border-bottom: 1px solid var(--tyrian-border-color);
+  border-right: 1px solid var(--tyrian-border-color);
+}
+
+horizontalheaderviewdelegate.sort-ascending,
+verticalheaderviewdelegate.sort-ascending,
+headerviewdelegate.sort-ascending {
+  icon-name: "arrow-up";
+}
+
+horizontalheaderviewdelegate.sort-descending,
+verticalheaderviewdelegate.sort-descending,
+headerviewdelegate.sort-descending {
+  icon-name: "arrow-down";
+}
+
+selectionrectangle {
+  color: var(--tyrian-focus-ring);
+  border: 1px solid var(--tyrian-focus-ring);
+  border-radius: var(--tyrian-corner-radius);
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+selectionrectangle:disabled,
+selectionrectanglehandle:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+calendar,
+monthgrid,
+dayofweekrow,
+weeknumbercolumn {
+  background-color: var(--tyrian-background);
+  border: 1px solid var(--tyrian-border);
+}
+
+monthgrid > label,
+dayofweekrow > label,
+weeknumbercolumn > label {
+  outline: 1px solid var(--tyrian-border);
+  text-alignment-horizontal: center;
+  text-alignment-vertical: center;
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-surface-low);
+}
+
+monthgrid label {
+  color: var(--tyrian-muted);
+}
+
+monthgrid label.current-month {
+  color: var(--tyrian-foreground);
+}
+
+monthgrid label.today {
+  background-color: var(--tyrian-accent);
+  color: var(--tyrian-selection-text);
+}
+
+text.positive {
+  color: var(--tyrian-positive);
+}
+
+text.neutral {
+  color: var(--tyrian-neutral);
+}
+
+text.negative {
+  color: var(--tyrian-negative);
+}

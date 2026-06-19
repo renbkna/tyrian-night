@@ -46,23 +46,19 @@ test('live installer defaults to a repo-independent materialized install root', 
     `${installRoot}/terminal/starship/tyrian-night.toml`
   );
   expect(plan.sourcePaths.wallpaper).toBe(`${installRoot}/${WALLPAPER_ASSET_PATH}`);
+  expect(JSON.stringify(plan.sourcePaths)).not.toContain('union');
   expect(plan.livePaths.screenLockerConfig).toBe(`${FIXTURE_HOME}/.config/kscreenlockerrc`);
-  expect(plan.livePaths.unionEnvironment).toBe(
-    `${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`
-  );
-  expect(plan.livePaths.unionTyrianStyle).toBe(
-    `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`
-  );
-  expect(plan.livePaths.unionDefaults).toBe(`${FIXTURE_HOME}/.local/share/union/css/defaults`);
-  expect(plan.sourcePaths.unionDefaultsRoot).toBe('/usr/share/union/css/defaults');
   expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.config/kscreenlockerrc`);
   expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`);
-  expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.local/share/union/css/defaults`);
-  expect(plan.touchedPaths).toContain(`${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`);
+  expect(plan.touchedPaths).not.toContain(`${FIXTURE_HOME}/.local/share/union/css/defaults`);
+  expect(plan.touchedPaths).not.toContain(
+    `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`
+  );
   expect(plan.legacyPaths).toEqual([
     `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/sewerslvt.gif`,
     `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-logo.png`,
     `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-fetch.webp`,
+    `${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`,
   ]);
   expect(JSON.stringify(plan.sourcePaths)).not.toContain('/repo/tyrian-night');
   expect(plan.backupRoot).not.toContain('/repo/tyrian-night');
@@ -111,8 +107,6 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
     const unionEnvironment = path.join(home, '.config/environment.d/tyrian-union.conf');
     const tyrianDesktopTheme = path.join(home, '.local/share/plasma/desktoptheme/TyrianNight');
     const tyrianLookAndFeel = path.join(home, '.local/share/plasma/look-and-feel/TyrianNight');
-    const unionDefaults = path.join(home, '.local/share/union/css/defaults');
-    const tyrianUnionStyle = path.join(home, '.local/share/union/css/styles/TyrianNight');
 
     expect(fs.existsSync(path.join(home, '.local/share/plasma/desktoptheme/Monochrome'))).toBe(
       false
@@ -120,13 +114,8 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
     expect(fs.existsSync(path.join(tyrianDesktopTheme, 'metadata.json'))).toBe(true);
     expect(fs.existsSync(path.join(tyrianDesktopTheme, 'dialogs/background.svg'))).toBe(true);
     expect(fs.existsSync(path.join(tyrianLookAndFeel, 'contents/defaults'))).toBe(true);
-    expect(fs.existsSync(path.join(unionDefaults, 'default.css'))).toBe(true);
-    expect(fs.existsSync(path.join(unionDefaults, 'extra-properties.css'))).toBe(true);
-    expect(fs.existsSync(path.join(unionDefaults, 'generated-properties.css'))).toBe(true);
-    expect(fs.existsSync(path.join(tyrianUnionStyle, 'style.css'))).toBe(true);
-    expect(fs.readFileSync(unionEnvironment, 'utf8')).toBe(
-      ['UNION_STYLE_NAME=TyrianNight', 'QT_QUICK_CONTROLS_STYLE=org.kde.union', ''].join('\n')
-    );
+    expect(fs.existsSync(path.join(home, '.local/share/union'))).toBe(false);
+    expect(fs.existsSync(unionEnvironment)).toBe(false);
     expect(fs.readFileSync(fishConfig, 'utf8')).toBe(buildFishConfig({ tyrianRoot: installRoot }));
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe(
       buildGhosttyConfig({ gtkCustomCss: ghosttyCss })
@@ -138,6 +127,8 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
       'kwriteconfig6',
       'kwriteconfig6',
       'kwriteconfig6',
+      'systemctl',
+      'dbus-update-activation-environment',
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
     ]);
@@ -160,13 +151,21 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
       },
       {
         command: 'kwriteconfig6',
-        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Union'],
+        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Breeze'],
       },
       {
         command: 'kwriteconfig6',
         args: ['--file', plasmarc, '--group', 'Theme', '--key', 'name', 'TyrianNight'],
       },
     ]);
+    expect(commandCalls).toContainEqual({
+      command: 'systemctl',
+      args: ['--user', 'set-environment', 'QT_QUICK_CONTROLS_STYLE=', 'UNION_STYLE_NAME='],
+    });
+    expect(commandCalls).toContainEqual({
+      command: 'dbus-update-activation-environment',
+      args: ['--systemd', 'QT_QUICK_CONTROLS_STYLE=', 'UNION_STYLE_NAME='],
+    });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -185,9 +184,7 @@ test('live installer link mode is explicit and repo-dependent', () => {
   expect(plan.sourcePaths.fastfetchConfig).toBe(
     '/repo/tyrian-night/terminal/fastfetch/tyrian-night.jsonc'
   );
-  expect(plan.sourcePaths.unionTyrianStyleRoot).toBe(
-    '/repo/tyrian-night/desktop/kde/union/css/styles/TyrianNight'
-  );
+  expect(JSON.stringify(plan.sourcePaths)).not.toContain('union');
   expect(plan.materializedRoots).toContainEqual({
     source: '/repo/tyrian-night/assets/tyrian-fetch.webp',
     target: `${FIXTURE_HOME}/${FASTFETCH_IMAGE_HOME_PATH}`,

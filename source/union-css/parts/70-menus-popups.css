@@ -1,0 +1,130 @@
+menu {
+  padding: var(--tyrian-small-spacing);
+  margin: var(--tyrian-scrollbar-size);
+}
+
+menuitem {
+  width: var(--tyrian-menu-width);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+menuitem:hovered,
+menuitem.with-submenu:highlighted {
+  background-color: var(--tyrian-hover);
+  border: 1px solid var(--tyrian-accent);
+}
+
+menuitem:pressed {
+  background-color: var(--tyrian-accent);
+  color: var(--tyrian-selection-text);
+}
+
+menuitem > indicator,
+menuitem > arrow {
+  width: var(--tyrian-icon-small);
+  height: var(--tyrian-icon-small);
+}
+
+menuitem > arrow {
+  icon-name: "arrow-right-symbolic";
+  layout-alignment: content end center 0;
+}
+
+menuitem > shortcuttext {
+  spacing: 40px;
+  color: var(--tyrian-muted);
+}
+
+popup.combobox {
+  padding: 0px;
+  background-color: var(--tyrian-panel-bg);
+}
+
+popup.combobox itemdelegate:highlighted,
+popup.combobox itemdelegate:highlight,
+popup.combobox menuitem:highlighted {
+  background-color: var(--tyrian-row-selected-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+overlay.modal,
+overlay.drawer.modal {
+  background-color: var(--tyrian-overlay-modal-bg);
+}
+
+overlay.modeless,
+overlay.drawer.modeless {
+  background-color: var(--tyrian-overlay-modeless-bg);
+}
+
+menuseparator {
+  inset: 0px var(--tyrian-small-spacing);
+  width: var(--tyrian-large-element);
+  height: 1px;
+  background-color: var(--tyrian-border-color);
+}
+
+menubar,
+menubaritem {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+menubaritem:hovered,
+menubaritem:pressed,
+menubaritem:highlighted {
+  background-color: var(--tyrian-hover);
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+dialog {
+  spacing: var(--tyrian-small-spacing);
+  padding: var(--tyrian-large-spacing);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+  box-shadow: 0px 2px 32px 0px rgba(0, 0, 0, 0.3);
+}
+
+dialog .header {
+  font-size: 20px;
+  padding: var(--tyrian-large-spacing);
+}
+
+header {
+  color: var(--tyrian-foreground);
+}
+
+dialogbuttonbox {
+  spacing: var(--tyrian-medium-spacing);
+  padding: var(--tyrian-large-spacing);
+}
+
+dialogbuttonbox[position="header"] {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+dialogbuttonbox[position="footer"] {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+dialogbuttonbox button[role="destructive"],
+dialogbuttonbox button[role="reject"],
+dialogbuttonbox button[role="no"] {
+  border-color: var(--tyrian-negative);
+}
+
+tooltip {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-large-spacing);
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-panel-raised-bg);
+  border-radius: var(--tyrian-corner-radius);
+  border: 1px solid var(--tyrian-border-color);
+}

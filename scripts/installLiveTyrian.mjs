@@ -14,13 +14,19 @@ import {
   buildTyrianBackupRoot,
 } from './portableAssets.mjs';
 import { TYRIAN_REQUIRED_COMMANDS, checkRequiredCommands, hasCommand } from './commandChecks.mjs';
+import {
+  backupHomePath,
+  exists,
+  installManagedPathRaw as installManagedPathWithMode,
+  operation,
+  writeTextFileRaw,
+} from './installOps.mjs';
 import { buildFishConfig, buildGhosttyConfig } from './terminalThemes.mjs';
 import { SOURCE_THEMES } from './themeSources.mjs';
 
 const repoRoot = process.cwd();
 const home = os.homedir();
 const ghosttyThemeSlugs = SOURCE_THEMES.map((source) => source.slug);
-const UNION_SYSTEM_DEFAULTS_ROOT = '/usr/share/union/css/defaults';
 
 /**
  * @typedef {'copy' | 'link'} InstallMode
@@ -45,7 +51,7 @@ const UNION_SYSTEM_DEFAULTS_ROOT = '/usr/share/union/css/defaults';
  */
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; unionDefaultsRoot?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
  * @returns {LiveInstallPlan}
  */
 export function buildLiveInstallPlan(options = {}) {
@@ -56,7 +62,7 @@ export function buildLiveInstallPlan(options = {}) {
   const sourceRoot = mode === 'link' ? root : installRoot;
   const livePaths = buildLivePaths(userHome);
   const legacyPaths = buildLegacyPaths(userHome);
-  const sourcePaths = buildSourcePaths(sourceRoot, options.unionDefaultsRoot);
+  const sourcePaths = buildSourcePaths(sourceRoot);
 
   return {
     mode,
@@ -93,7 +99,7 @@ export function buildLiveInstallPlan(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; unionDefaultsRoot?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
  * @returns {void}
  */
 export function installLiveTyrian(options = {}) {
@@ -137,12 +143,9 @@ function buildLivePaths(userHome) {
     kdeglobals: path.join(userHome, '.config/kdeglobals'),
     plasmarc: path.join(userHome, '.config/plasmarc'),
     screenLockerConfig: path.join(userHome, '.config/kscreenlockerrc'),
-    unionEnvironment: path.join(userHome, '.config/environment.d/tyrian-union.conf'),
     kdeTyrianScheme: path.join(userHome, '.local/share/color-schemes/TyrianNight.colors'),
     plasmaTyrianTheme: path.join(userHome, '.local/share/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrian: path.join(userHome, '.local/share/plasma/look-and-feel/TyrianNight'),
-    unionDefaults: path.join(userHome, '.local/share/union/css/defaults'),
-    unionTyrianStyle: path.join(userHome, '.local/share/union/css/styles/TyrianNight'),
     caelestiaSchemeState: path.join(userHome, '.local/state/caelestia/scheme.json'),
     caelestiaSequences: path.join(userHome, '.local/state/caelestia/sequences.txt'),
     hyprCurrentScheme: path.join(userHome, '.config/hypr/scheme/current.conf'),
@@ -160,6 +163,7 @@ function buildLegacyPaths(userHome) {
     path.join(fastfetchRoot, 'sewerslvt.gif'),
     path.join(fastfetchRoot, 'tyrian-logo.png'),
     path.join(fastfetchRoot, 'tyrian-fetch.webp'),
+    path.join(userHome, '.config/environment.d/tyrian-union.conf'),
   ];
 }
 
@@ -167,7 +171,7 @@ function buildLegacyPaths(userHome) {
  * @param {string} sourceRoot
  * @returns {Record<string, string>}
  */
-function buildSourcePaths(sourceRoot, unionDefaultsRoot = UNION_SYSTEM_DEFAULTS_ROOT) {
+function buildSourcePaths(sourceRoot) {
   return {
     ghosttyCss: path.join(sourceRoot, 'terminal/ghostty/ghostty.css'),
     fishGreeting: path.join(sourceRoot, 'terminal/fish/functions/fish_greeting.fish'),
@@ -178,8 +182,6 @@ function buildSourcePaths(sourceRoot, unionDefaultsRoot = UNION_SYSTEM_DEFAULTS_
     kdeTyrianScheme: path.join(sourceRoot, 'desktop/kde/color-schemes/TyrianNight.colors'),
     plasmaTyrianThemeRoot: path.join(sourceRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrianRoot: path.join(sourceRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
-    unionDefaultsRoot,
-    unionTyrianStyleRoot: path.join(sourceRoot, 'desktop/kde/union/css/styles/TyrianNight'),
     caelestiaSchemeState: path.join(sourceRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
     hyprCurrentScheme: path.join(sourceRoot, 'desktop/caelestia/hypr/tyrian-night.conf'),
   };
@@ -202,12 +204,9 @@ function buildTouchedPaths(livePaths, legacyPaths) {
     livePaths.kdeglobals,
     livePaths.plasmarc,
     livePaths.screenLockerConfig,
-    livePaths.unionEnvironment,
     livePaths.kdeTyrianScheme,
     livePaths.plasmaTyrianTheme,
     livePaths.lookAndFeelTyrian,
-    livePaths.unionDefaults,
-    livePaths.unionTyrianStyle,
     livePaths.caelestiaSchemeState,
     livePaths.caelestiaSequences,
     livePaths.hyprCurrentScheme,
@@ -231,8 +230,6 @@ function validateInstallSources(plan) {
     path.join(plan.repoRoot, 'desktop/kde/color-schemes/TyrianNight.colors'),
     path.join(plan.repoRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     path.join(plan.repoRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
-    plan.sourcePaths.unionDefaultsRoot,
-    path.join(plan.repoRoot, 'desktop/kde/union/css/styles/TyrianNight'),
     path.join(plan.repoRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
     path.join(plan.repoRoot, 'desktop/caelestia/hypr/tyrian-night.conf'),
   ];
@@ -252,16 +249,11 @@ function validateInstallSources(plan) {
  */
 function materializeSourceRoot(plan) {
   if (plan.mode === 'copy') {
-    operation(plan, `copy Tyrian install source to ${plan.installRoot}`, () => {
+    operation(plan.apply, `copy Tyrian install source to ${plan.installRoot}`, () => {
       fs.rmSync(plan.installRoot, { recursive: true, force: true });
 
       for (const root of plan.materializedRoots) {
-        fs.mkdirSync(path.dirname(root.target), { recursive: true });
-        fs.cpSync(root.source, root.target, {
-          recursive: true,
-          preserveTimestamps: true,
-          verbatimSymlinks: true,
-        });
+        installManagedPathWithMode('copy', root.source, root.target);
       }
     });
     return;
@@ -304,7 +296,7 @@ function installTerminalLayer(plan) {
  */
 function cleanupLegacyPaths(plan) {
   for (const legacyPath of plan.legacyPaths) {
-    operation(plan, `remove stale legacy path ${legacyPath}`, () => {
+    operation(plan.apply, `remove stale legacy path ${legacyPath}`, () => {
       fs.rmSync(legacyPath, { recursive: true, force: true });
     });
   }
@@ -318,10 +310,8 @@ function installDesktopLayer(plan) {
   installManagedPath(plan, plan.sourcePaths.kdeTyrianScheme, plan.livePaths.kdeTyrianScheme);
   installPlasmaDesktopTheme(plan);
   installLookAndFeelPackage(plan);
-  installUnionDefaults(plan);
-  installUnionStyle(plan);
   writeKdePackageKeys(plan);
-  writeUnionEnvironment(plan);
+  clearUnionRuntimeEnvironment(plan);
   patchScreenLockerConfig(plan);
   installManagedPath(
     plan,
@@ -347,7 +337,7 @@ function installDesktopLayer(plan) {
 function installManagedPath(plan, sourcePath, targetPath) {
   const verb = plan.mode === 'link' ? 'link' : 'copy';
 
-  operation(plan, `${verb} ${sourcePath} -> ${targetPath}`, () => {
+  operation(plan.apply, `${verb} ${sourcePath} -> ${targetPath}`, () => {
     installManagedPathRaw(plan, sourcePath, targetPath);
   });
 }
@@ -359,19 +349,7 @@ function installManagedPath(plan, sourcePath, targetPath) {
  * @returns {void}
  */
 function installManagedPathRaw(plan, sourcePath, targetPath) {
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.rmSync(targetPath, { recursive: true, force: true });
-
-  if (plan.mode === 'link') {
-    fs.symlinkSync(sourcePath, targetPath);
-    return;
-  }
-
-  fs.cpSync(sourcePath, targetPath, {
-    recursive: true,
-    preserveTimestamps: true,
-    verbatimSymlinks: true,
-  });
+  installManagedPathWithMode(plan.mode, sourcePath, targetPath);
 }
 
 /**
@@ -402,73 +380,73 @@ function installLookAndFeelPackage(plan) {
  * @param {LiveInstallPlan} plan
  * @returns {void}
  */
-function installUnionDefaults(plan) {
-  installManagedPath(plan, plan.sourcePaths.unionDefaultsRoot, plan.livePaths.unionDefaults);
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @returns {void}
- */
-function installUnionStyle(plan) {
-  installManagedPath(plan, plan.sourcePaths.unionTyrianStyleRoot, plan.livePaths.unionTyrianStyle);
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @returns {void}
- */
 function writeKdePackageKeys(plan) {
-  operation(plan, 'set live KDE package keys to TyrianNight', () => {
-    plan.runCommand('kwriteconfig6', [
-      '--file',
-      plan.livePaths.kdeglobals,
-      '--group',
-      'KDE',
-      '--key',
-      'LookAndFeelPackage',
-      'TyrianNight',
-    ]);
-    plan.runCommand('kwriteconfig6', [
-      '--file',
-      plan.livePaths.kdeglobals,
-      '--group',
-      'General',
-      '--key',
-      'ColorScheme',
-      'TyrianNight',
-    ]);
-    plan.runCommand('kwriteconfig6', [
-      '--file',
-      plan.livePaths.kdeglobals,
-      '--group',
-      'KDE',
-      '--key',
-      'widgetStyle',
-      'Union',
-    ]);
-    plan.runCommand('kwriteconfig6', [
-      '--file',
-      plan.livePaths.plasmarc,
-      '--group',
-      'Theme',
-      '--key',
-      'name',
-      'TyrianNight',
-    ]);
-  });
+  operation(
+    plan.apply,
+    'set live KDE package keys to TyrianNight with Breeze application style',
+    () => {
+      plan.runCommand('kwriteconfig6', [
+        '--file',
+        plan.livePaths.kdeglobals,
+        '--group',
+        'KDE',
+        '--key',
+        'LookAndFeelPackage',
+        'TyrianNight',
+      ]);
+      plan.runCommand('kwriteconfig6', [
+        '--file',
+        plan.livePaths.kdeglobals,
+        '--group',
+        'General',
+        '--key',
+        'ColorScheme',
+        'TyrianNight',
+      ]);
+      plan.runCommand('kwriteconfig6', [
+        '--file',
+        plan.livePaths.kdeglobals,
+        '--group',
+        'KDE',
+        '--key',
+        'widgetStyle',
+        'Breeze',
+      ]);
+      plan.runCommand('kwriteconfig6', [
+        '--file',
+        plan.livePaths.plasmarc,
+        '--group',
+        'Theme',
+        '--key',
+        'name',
+        'TyrianNight',
+      ]);
+    }
+  );
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @returns {void}
  */
-function writeUnionEnvironment(plan) {
-  writeFile(
-    plan,
-    plan.livePaths.unionEnvironment,
-    ['UNION_STYLE_NAME=TyrianNight', 'QT_QUICK_CONTROLS_STYLE=org.kde.union', ''].join('\n')
-  );
+function clearUnionRuntimeEnvironment(plan) {
+  operation(plan.apply, 'clear stale Union runtime environment overrides', () => {
+    const clearedVariables = ['QT_QUICK_CONTROLS_STYLE=', 'UNION_STYLE_NAME='];
+
+    if (plan.hasCommand('systemctl')) {
+      plan.runCommand('systemctl', ['--user', 'set-environment', ...clearedVariables]);
+    } else {
+      console.warn('systemctl not found; current user-manager Union environment was not cleared.');
+    }
+
+    if (plan.hasCommand('dbus-update-activation-environment')) {
+      plan.runCommand('dbus-update-activation-environment', ['--systemd', ...clearedVariables]);
+    } else {
+      console.warn(
+        'dbus-update-activation-environment not found; current D-Bus Union environment was not cleared.'
+      );
+    }
+  });
 }
 
 /**
@@ -538,7 +516,7 @@ function patchIniSectionContent(sectionContent, values) {
  * @returns {void}
  */
 function writeFile(plan, filePath, content) {
-  operation(plan, `write ${filePath}`, () => {
+  operation(plan.apply, `write ${filePath}`, () => {
     writeFileRaw(filePath, content);
   });
 }
@@ -549,8 +527,7 @@ function writeFile(plan, filePath, content) {
  * @returns {void}
  */
 function writeFileRaw(filePath, content) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeTextFileRaw(filePath, content);
 }
 
 /**
@@ -601,7 +578,7 @@ function hexToAnsi(color, ...indexes) {
  * @returns {void}
  */
 function runPlasmaApply(plan) {
-  operation(plan, 'apply KDE color scheme TyrianNight', () => {
+  operation(plan.apply, 'apply KDE color scheme TyrianNight', () => {
     try {
       plan.runCommand('plasma-apply-colorscheme', ['TyrianNight'], { stdio: 'inherit' });
       plan.runCommand('plasma-apply-desktoptheme', ['TyrianNight'], { stdio: 'inherit' });
@@ -618,58 +595,11 @@ function runPlasmaApply(plan) {
  */
 function backupExistingPaths(plan) {
   for (const sourcePath of plan.touchedPaths) {
-    if (!exists(sourcePath)) {
-      continue;
+    const backupPath = backupHomePath(sourcePath, plan.backupRoot, plan.home);
+
+    if (backupPath) {
+      console.log(`backup: ${sourcePath} -> ${backupPath}`);
     }
-
-    const relativePath = path.relative(plan.home, sourcePath);
-
-    if (relativePath.startsWith('..')) {
-      continue;
-    }
-
-    const backupPath = path.join(plan.backupRoot, 'home', relativePath);
-    fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-    const stat = fs.lstatSync(sourcePath);
-
-    if (stat.isSymbolicLink()) {
-      fs.symlinkSync(fs.readlinkSync(sourcePath), backupPath);
-    } else {
-      fs.cpSync(sourcePath, backupPath, {
-        recursive: true,
-        preserveTimestamps: true,
-        verbatimSymlinks: true,
-      });
-    }
-
-    console.log(`backup: ${sourcePath} -> ${backupPath}`);
-  }
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @param {string} message
- * @param {() => void} action
- * @returns {void}
- */
-function operation(plan, message, action) {
-  console.log(`${plan.apply ? 'apply' : 'dry-run'}: ${message}`);
-
-  if (plan.apply) {
-    action();
-  }
-}
-
-/**
- * @param {string} filePath
- * @returns {boolean}
- */
-function exists(filePath) {
-  try {
-    fs.lstatSync(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }
 

@@ -1,0 +1,146 @@
+abstractbutton,
+button,
+toolbutton,
+combobox,
+roundbutton,
+delaybutton {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  layout-alignment: content fill fill 0;
+  text-alignment-horizontal: center;
+  icon-alignment-horizontal: center;
+  background-color: var(--tyrian-control-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+abstractbutton:hovered,
+button:hovered,
+toolbutton:hovered,
+combobox:hovered,
+roundbutton:hovered,
+delaybutton:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+abstractbutton:pressed,
+abstractbutton:checked,
+button:pressed,
+button:checked,
+toolbutton:pressed,
+toolbutton:checked,
+combobox:pressed,
+roundbutton:pressed,
+roundbutton:checked,
+delaybutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+abstractbutton:disabled,
+button:disabled,
+toolbutton:disabled,
+combobox:disabled,
+roundbutton:disabled,
+delaybutton:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+  box-shadow: none;
+}
+
+abstractbutton:visual-focus,
+button:visual-focus,
+toolbutton:visual-focus,
+combobox:visual-focus,
+textfield:visual-focus,
+textarea:visual-focus,
+searchfield:visual-focus,
+spinbox:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+abstractbutton.flat,
+button.flat,
+combobox.flat,
+roundbutton.flat,
+toolbutton {
+  background: none;
+  box-shadow: none;
+}
+
+button.with-icon,
+toolbutton.with-icon,
+roundbutton.with-icon,
+delaybutton.with-icon,
+combobox[display="icon"],
+tabbutton.with-icon {
+  spacing: var(--tyrian-small-spacing);
+}
+
+toolbutton.raised {
+  background-color: var(--tyrian-control-bg);
+  border: 1px solid var(--tyrian-border-color);
+}
+
+roundbutton {
+  border-radius: var(--tyrian-pill-radius);
+}
+
+combobox > indicator,
+abstractbutton.with-menu > indicator,
+button.with-menu > indicator,
+toolbutton.with-menu > indicator {
+  width: var(--tyrian-icon-small);
+  height: var(--tyrian-icon-small);
+  icon-name: "arrow-down-symbolic";
+  icon-color: var(--tyrian-foreground);
+  layout-alignment: content end center 0;
+}
+
+toolseparator {
+  background-color: var(--tyrian-border-color);
+}
+
+toolseparator.horizontal {
+  width: var(--tyrian-large-element);
+  height: 1px;
+  inset: 0px var(--tyrian-small-spacing);
+}
+
+toolseparator.vertical {
+  width: 1px;
+  height: var(--tyrian-large-element);
+  inset: var(--tyrian-small-spacing) 0px;
+}
+
+delaybutton > fill {
+  border-radius: var(--tyrian-corner-radius);
+  border: 1px solid var(--tyrian-focus-ring);
+  background-color: var(--tyrian-fill-bg);
+}
+
+tumbler {
+  width: 60px;
+  height: 200px;
+  background-color: var(--tyrian-panel-bg);
+}
+
+tumbler text {
+  text-alignment-horizontal: center;
+  color: var(--tyrian-muted);
+}
+
+tumbler text:highlighted {
+  color: var(--tyrian-accent);
+}
+
+toolbar,
+applicationheader {
+  background-color: var(--tyrian-panel-bg);
+  border-bottom: 1px solid var(--tyrian-border-color);
+}

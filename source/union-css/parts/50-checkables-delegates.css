@@ -1,0 +1,192 @@
+itemdelegate,
+checkdelegate,
+radiodelegate,
+switchdelegate,
+swipedelegate,
+menuitem {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background: none;
+  color: var(--tyrian-foreground);
+}
+
+itemdelegate:hovered,
+checkdelegate:hovered,
+radiodelegate:hovered,
+switchdelegate:hovered,
+swipedelegate:hovered,
+menuitem:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+itemdelegate.hover-enabled,
+checkdelegate.hover-enabled,
+radiodelegate.hover-enabled,
+switchdelegate.hover-enabled,
+swipedelegate.hover-enabled {
+  border-radius: var(--tyrian-corner-radius);
+}
+
+itemdelegate:highlighted,
+itemdelegate:pressed,
+checkdelegate:highlighted,
+checkdelegate:pressed,
+radiodelegate:highlighted,
+radiodelegate:pressed,
+switchdelegate:highlighted,
+switchdelegate:pressed,
+swipedelegate:highlighted,
+swipedelegate:pressed,
+menuitem:highlighted,
+menuitem:pressed {
+  background-color: var(--tyrian-row-selected-bg);
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+itemdelegate:disabled,
+checkdelegate:disabled,
+radiodelegate:disabled,
+switchdelegate:disabled,
+swipedelegate:disabled,
+menuitem:disabled {
+  color: var(--tyrian-disabled-fg);
+  background: none;
+  border: none;
+}
+
+itemdelegate.alternating-colors,
+checkdelegate.alternating-colors,
+radiodelegate.alternating-colors,
+switchdelegate.alternating-colors,
+swipedelegate.alternating-colors {
+  background-color: var(--tyrian-panel-bg);
+}
+
+itemdelegate.inside-table,
+itemdelegate.inside-list,
+checkdelegate.inside-table,
+checkdelegate.inside-list,
+radiodelegate.inside-table,
+radiodelegate.inside-list,
+switchdelegate.inside-table,
+switchdelegate.inside-list,
+swipedelegate.inside-table,
+swipedelegate.inside-list {
+  border-radius: 0px;
+  inset: 0px;
+}
+
+checkbox > indicator,
+checkdelegate > indicator,
+radiobutton > indicator,
+radiodelegate > indicator,
+menuitem > indicator {
+  width: 18px;
+  height: 18px;
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+checkbox:checked > indicator,
+checkdelegate:checked > indicator,
+radiobutton:checked > indicator,
+radiodelegate:checked > indicator,
+menuitem:checked > indicator {
+  background-color: var(--tyrian-indicator-checked-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+checkbox:visual-focus > indicator,
+checkdelegate:visual-focus > indicator,
+radiobutton:visual-focus > indicator,
+radiodelegate:visual-focus > indicator,
+menuitem:visual-focus > indicator {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+switch > indicator,
+switchdelegate > indicator {
+  width: 36px;
+  height: 12px;
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: 6px;
+}
+
+switch:checked > indicator,
+switchdelegate:checked > indicator {
+  background-color: var(--tyrian-indicator-checked-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+switch:checked > indicator > handle,
+switchdelegate:checked > indicator > handle {
+  background-color: var(--tyrian-selection-text);
+  border-color: var(--tyrian-border-hover);
+}
+
+checkbox:hovered > indicator,
+checkdelegate:hovered > indicator,
+radiobutton:hovered > indicator,
+radiodelegate:hovered > indicator,
+menuitem:hovered > indicator,
+switch:hovered > indicator,
+switchdelegate:hovered > indicator {
+  border-color: var(--tyrian-border-hover);
+}
+
+checkbox:disabled > indicator,
+checkdelegate:disabled > indicator,
+radiobutton:disabled > indicator,
+radiodelegate:disabled > indicator,
+menuitem:disabled > indicator,
+switch:disabled > indicator,
+switchdelegate:disabled > indicator {
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+radiobutton > indicator,
+radiodelegate > indicator,
+menuitem.exclusive > indicator {
+  border-radius: var(--tyrian-pill-radius);
+}
+
+checkbox:checked indicator,
+checkdelegate:checked indicator,
+menuitem:checked indicator {
+  icon-name: "checkmark-symbolic";
+  icon-color: var(--tyrian-selection-text);
+}
+
+radiobutton:checked > indicator,
+radiodelegate:checked > indicator,
+menuitem.exclusive:checked > indicator {
+  icon-name: "radio-symbolic";
+  icon-color: var(--tyrian-selection-text);
+}
+
+switch > indicator > handle,
+switchdelegate > indicator > handle {
+  width: var(--tyrian-grid-unit);
+  height: var(--tyrian-grid-unit);
+  border-radius: var(--tyrian-pill-radius);
+  background-color: var(--tyrian-window-bg);
+  border: 1px solid var(--tyrian-border-color);
+}
+
+switch:visual-focus > indicator > handle,
+switchdelegate:visual-focus > indicator > handle {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+checkbox.changed indicator,
+checkdelegate.changed indicator,
+radiobutton.changed indicator,
+radiodelegate.changed indicator,
+switch.changed indicator {
+  background-color: var(--tyrian-neutral-bg);
+  border: 1px solid var(--tyrian-neutral);
+}

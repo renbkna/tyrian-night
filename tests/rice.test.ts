@@ -339,6 +339,8 @@ test('style-only rice install does not require layout snapshots', () => {
       'kwriteconfig6',
       'kwriteconfig6',
       'kwriteconfig6',
+      'systemctl',
+      'dbus-update-activation-environment',
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
     ]);
@@ -374,6 +376,8 @@ test('full rice install honors injected home and command runner for style and la
       'kwriteconfig6',
       'kwriteconfig6',
       'kwriteconfig6',
+      'systemctl',
+      'dbus-update-activation-environment',
       'plasma-apply-colorscheme',
       'plasma-apply-desktoptheme',
       'qdbus6',
@@ -403,7 +407,7 @@ test('full rice install honors injected home and command runner for style and la
       },
       {
         command: 'kwriteconfig6',
-        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Union'],
+        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Breeze'],
       },
       {
         command: 'kwriteconfig6',
@@ -506,6 +510,33 @@ test('Plasma layout restore maps captured panels to the current primary screen',
       /^\[PlasmaViews\]\[Panel 231\]\[Defaults\]\n[\s\S]*?^length=2560$/mu
     );
     expect(installedShell).not.toContain('[PlasmaViews][Panel 231][Horizontal2048]');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma qdbus JSON parsing ignores bracketed warning prefixes', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+
+  try {
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          const output = mockRiceRuntimeCommand(command, args);
+
+          if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
+            return `[warning] Plasma printed a diagnostic before JSON\n${output}`;
+          }
+
+          return output;
+        },
+      })
+    ).not.toThrow();
+    expect(fs.existsSync(path.join(home, RICE_LAYOUT_FILES[0].homePath))).toBe(true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

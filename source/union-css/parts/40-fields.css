@@ -1,0 +1,114 @@
+textfield,
+textarea,
+spinbox,
+doublespinbox,
+searchfield {
+  width: var(--tyrian-field-width);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background-color: var(--tyrian-field-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
+}
+
+textfield:hovered,
+textarea:hovered,
+spinbox:hovered,
+doublespinbox:hovered,
+searchfield:hovered,
+textfield:active-focus,
+textarea:active-focus,
+spinbox:active-focus,
+doublespinbox:active-focus,
+searchfield:active-focus {
+  border-color: var(--tyrian-border-hover);
+}
+
+textfield:disabled,
+textarea:disabled,
+spinbox:disabled,
+doublespinbox:disabled,
+searchfield:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+textfield > .placeholder,
+textarea > .placeholder,
+spinbox > .placeholder,
+doublespinbox > .placeholder,
+searchfield > .placeholder {
+  color: var(--tyrian-muted);
+}
+
+spinbox {
+  layout-alignment: content fill fill 0;
+  text-alignment: content center fill 0;
+}
+
+spinbox > indicator {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-small-element);
+  color: var(--tyrian-foreground);
+  border-radius: var(--tyrian-corner-radius);
+}
+
+spinbox > indicator:hovered,
+doublespinbox > indicator:hovered,
+spinbox > indicator:pressed {
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+spinbox > indicator:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+spinbox > indicator.decrease {
+  icon-name: "spinbox-decrease";
+}
+
+spinbox > indicator.increase {
+  icon-name: "spinbox-increase";
+}
+
+searchfield {
+  layout-alignment: content fill fill 1;
+  text-alignment: content fill center 0;
+}
+
+searchfield > searchindicator,
+searchfield > clearindicator {
+  width: var(--tyrian-icon-small-medium);
+  height: var(--tyrian-icon-small-medium);
+}
+
+searchfield > searchindicator {
+  icon-name: "search";
+  layout-alignment: content start fill 0;
+}
+
+searchfield > clearindicator {
+  icon-name: "edit-clear";
+  layout-alignment: content end fill 2;
+}
+
+textfield.changed,
+textarea.changed,
+spinbox.changed,
+searchfield.changed {
+  background-color: var(--tyrian-neutral-bg);
+  border: 1px solid var(--tyrian-neutral);
+}
+
+combobox.editable,
+spinbox.editable,
+doublespinbox.editable,
+spinbox.doublespinbox {
+  background-color: var(--tyrian-field-bg);
+}
+
+spinbox.constrained {
+  border-color: var(--tyrian-neutral);
+}
