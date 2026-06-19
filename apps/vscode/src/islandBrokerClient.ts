@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,6 +9,7 @@ import {
   ISLAND_BROKER_PKEXEC_PATH,
 } from './generated/islandBrokerInstallContract.js';
 import { getSecureSystemPathIssue } from './islandPathSecurity.js';
+import { runIslandJsonProcess } from './islandProcess.js';
 import { buildCallerOwnershipArgs } from './islandProcessIdentity.js';
 
 export type IslandBrokerStatus =
@@ -138,49 +138,12 @@ export async function runIslandBrokerRestore(options: {
 }
 
 async function runBrokerCommand<T>(command: string[]): Promise<T> {
-  const [executable, ...args] = command;
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error((stderr || stdout).trim() || 'Tyrian Night broker failed.'));
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(stdout) as T);
-      } catch (error) {
-        reject(
-          new Error(
-            `Tyrian Night broker returned invalid output: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-        );
-      }
-    });
+  return runIslandJsonProcess<T>(command, {
+    fallbackMessage: 'Tyrian Night broker failed.',
+    invalidOutputMessage: (error) =>
+      `Tyrian Night broker returned invalid output: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
   });
 }
 

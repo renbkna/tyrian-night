@@ -11,13 +11,11 @@ import {
   readIslandUiSupervisorStatuses,
   restoreIslandUiSupervised,
 } from '../apps/vscode/src/islandSupervisor';
-
-const WORKBENCH_DIR = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
-const WORKBENCH_HTML = path.join(WORKBENCH_DIR, 'workbench.html');
-const PRODUCT_JSON = 'product.json';
-const WORKBENCH_CHECKSUM_KEY = 'vs/code/electron-browser/workbench/workbench.html';
-const WORKBENCH_CSS_LINK =
-  '<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">';
+import {
+  WORKBENCH_CHECKSUM_KEY,
+  WORKBENCH_CSS_LINK,
+  buildIslandPatchPaths,
+} from '../apps/vscode/src/islandPatchContract';
 
 let previousHome: string | undefined;
 let registryHome: string;
@@ -65,9 +63,11 @@ test('supervised apply returns already-current after the shell is current', asyn
 test('supervised apply converts a read-only app root into permission-required', async () => {
   const appRoot = await createAppRoot('readonly-apply');
   const cssSource = await writeCssSource('theme.css');
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
-  const workbenchPath = path.join(appRoot, WORKBENCH_HTML);
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const {
+    productJsonPath: productPath,
+    workbenchDirPath: workbenchDir,
+    workbenchHtmlPath: workbenchPath,
+  } = buildIslandPatchPaths(appRoot);
 
   try {
     await fs.chmod(workbenchDir, 0o555);
@@ -97,9 +97,11 @@ test('supervised apply converts a read-only app root into permission-required', 
 
 test('supervisor status recommends write-access repair for clean read-only app roots', async () => {
   const appRoot = await createAppRoot('readonly-status');
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
-  const workbenchPath = path.join(appRoot, WORKBENCH_HTML);
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const {
+    productJsonPath: productPath,
+    workbenchDirPath: workbenchDir,
+    workbenchHtmlPath: workbenchPath,
+  } = buildIslandPatchPaths(appRoot);
 
   try {
     await fs.chmod(workbenchDir, 0o555);
@@ -128,9 +130,11 @@ test('supervised restore maps write failures to permission-required', async () =
   const appRoot = await createAppRoot('readonly-restore');
   const cssSource = await writeCssSource('theme.css');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
-  const workbenchPath = path.join(appRoot, WORKBENCH_HTML);
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const {
+    productJsonPath: productPath,
+    workbenchDirPath: workbenchDir,
+    workbenchHtmlPath: workbenchPath,
+  } = buildIslandPatchPaths(appRoot);
 
   try {
     await fs.chmod(workbenchDir, 0o555);
@@ -153,12 +157,12 @@ test('supervised restore maps write failures to permission-required', async () =
 
 async function createAppRoot(name: string): Promise<string> {
   const appRoot = path.join(testRoot, name);
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
+  const { productJsonPath, workbenchDirPath, workbenchHtmlPath } = buildIslandPatchPaths(appRoot);
   const html = cleanWorkbenchHtml();
 
-  await fs.mkdir(workbenchDir, { recursive: true });
-  await fs.writeFile(path.join(appRoot, WORKBENCH_HTML), html, 'utf8');
-  await fs.writeFile(path.join(appRoot, PRODUCT_JSON), productJson(sha256Base64(html)), 'utf8');
+  await fs.mkdir(workbenchDirPath, { recursive: true });
+  await fs.writeFile(workbenchHtmlPath, html, 'utf8');
+  await fs.writeFile(productJsonPath, productJson(sha256Base64(html)), 'utf8');
 
   return appRoot;
 }

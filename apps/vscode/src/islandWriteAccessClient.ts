@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,6 +9,7 @@ import {
 } from './generated/islandBrokerInstallContract.js';
 import { buildIslandPatchPaths } from './islandPatchContract.js';
 import { getSecureSystemPathIssue, getSecureUnlockTargetIssue } from './islandPathSecurity.js';
+import { runIslandProcess } from './islandProcess.js';
 import { readCallerOwnership, type CallerOwnership } from './islandProcessIdentity.js';
 import { readIslandShellStatus, readIslandShellWriteAccess } from './islandShell.js';
 
@@ -272,38 +272,5 @@ async function runCommandSequence(commands: string[][], fallbackMessage: string)
 }
 
 async function runCommand(command: string[], fallbackMessage: string): Promise<void> {
-  const [executable, ...args] = command;
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error((stderr || stdout).trim() || fallbackMessage));
-        return;
-      }
-
-      resolve();
-    });
-  });
+  await runIslandProcess(command, { fallbackMessage });
 }

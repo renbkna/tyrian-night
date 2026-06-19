@@ -7,6 +7,12 @@ import path from 'node:path';
 
 import { beforeEach, expect, mock, test } from 'bun:test';
 
+import {
+  WORKBENCH_CHECKSUM_KEY,
+  WORKBENCH_CSS_LINK,
+  buildIslandPatchPaths,
+} from '../apps/vscode/src/islandPatchContract';
+
 type CommandHandler = () => unknown | Promise<unknown>;
 
 const ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
@@ -432,18 +438,18 @@ function fakeIslandStatus(
 
 async function createWritableAppRoot(): Promise<string> {
   const appRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-extension-app-root-'));
-  const workbenchDir = path.join(appRoot, 'out/vs/code/electron-browser/workbench');
+  const paths = buildIslandPatchPaths(appRoot);
   const workbenchHtml = cleanWorkbenchHtml();
   const workbenchHash = sha256Base64(workbenchHtml);
 
-  await fs.mkdir(workbenchDir, { recursive: true });
-  await fs.writeFile(path.join(workbenchDir, 'workbench.html'), workbenchHtml, 'utf8');
+  await fs.mkdir(paths.workbenchDirPath, { recursive: true });
+  await fs.writeFile(paths.workbenchHtmlPath, workbenchHtml, 'utf8');
   await fs.writeFile(
-    path.join(appRoot, 'product.json'),
+    paths.productJsonPath,
     JSON.stringify(
       {
         checksums: {
-          'vs/code/electron-browser/workbench/workbench.html': workbenchHash,
+          [WORKBENCH_CHECKSUM_KEY]: workbenchHash,
         },
       },
       null,
@@ -456,18 +462,13 @@ async function createWritableAppRoot(): Promise<string> {
 }
 
 async function readWorkbenchHash(appRoot: string): Promise<string> {
-  return sha256Base64(
-    await fs.readFile(
-      path.join(appRoot, 'out/vs/code/electron-browser/workbench/workbench.html'),
-      'utf8'
-    )
-  );
+  return sha256Base64(await fs.readFile(buildIslandPatchPaths(appRoot).workbenchHtmlPath, 'utf8'));
 }
 
 function cleanWorkbenchHtml(): string {
   return `<html>
 \t<head>
-\t\t<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">
+\t\t${WORKBENCH_CSS_LINK}
 \t</head>
 </html>
 `;

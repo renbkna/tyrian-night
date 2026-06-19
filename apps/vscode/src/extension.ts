@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import * as vscode from 'vscode';
@@ -24,6 +23,7 @@ import type {
   IslandUiRestoreSupervisionResult as IslandRestoreResult,
   IslandUiSupervisorStatus as IslandSupervisorStatus,
 } from './islandSupervisor.js';
+import { runIslandJsonProcess } from './islandProcess.js';
 
 const OPEN_DOCTOR_ACTION = 'Open Doctor';
 const RESET_FILE_ACCESS_ACTION = 'Reset File Access';
@@ -787,49 +787,22 @@ async function readCurrentIslandSupervisorStatus(): Promise<IslandSupervisorStat
 function runIslandCli<T>(argumentsList: string[]): Promise<T> {
   const cliPath = path.join(extContext.extensionPath, 'out', 'islandCli.js');
 
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliPath, ...argumentsList], {
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+  return runIslandJsonProcess<T>([process.execPath, cliPath, ...argumentsList], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    },
+    fallbackMessage: 'Island UI CLI failed without an error message.',
+    invalidOutputMessage: (error) =>
+      `Tyrian Night CLI returned invalid output: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+  }).catch((error) => {
+    if (error instanceof Error) {
+      error.message = normalizeCliError(error.message);
+    }
 
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(normalizeCliError(stderr || stdout)));
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(stdout) as T);
-      } catch (error) {
-        reject(
-          new Error(
-            `Tyrian Night CLI returned invalid output: ${error instanceof Error ? error.message : String(error)}`
-          )
-        );
-      }
-    });
+    throw error;
   });
 }
 

@@ -13,15 +13,17 @@ import {
   restoreAllIslandShells,
   restoreIslandShell,
 } from '../apps/vscode/src/islandShell';
-
-const WORKBENCH_DIR = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
-const WORKBENCH_HTML = path.join(WORKBENCH_DIR, 'workbench.html');
-const PRODUCT_JSON = 'product.json';
-const ISLAND_MANIFEST = path.join(WORKBENCH_DIR, 'tyrian-night.island.json');
-const WORKBENCH_CHECKSUM_KEY = 'vs/code/electron-browser/workbench/workbench.html';
-const WORKBENCH_CSS_LINK =
-  '<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">';
-const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
+import {
+  BACKUP_HTML_FILE_NAME,
+  BACKUP_PRODUCT_FILE_NAME,
+  ISLAND_CSS_FILE_NAME,
+  ISLAND_MANIFEST_FILE_NAME,
+  TYRIAN_MARKER_START,
+  WORKBENCH_CHECKSUM_KEY,
+  WORKBENCH_CSS_LINK,
+  buildIslandPatchPaths,
+  buildManagedRootsRegistryPath,
+} from '../apps/vscode/src/islandPatchContract';
 
 let previousHome: string | undefined;
 let registryHome: string;
@@ -77,12 +79,7 @@ test('status-all reports registered missing roots without mutating the registry'
 });
 
 test('status-all fails loudly when the managed root registry is corrupt', async () => {
-  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
-  await fs.writeFile(
-    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
-    '{ broken registry\n',
-    'utf8'
-  );
+  await writeManagedRootsRegistryContent('{ broken registry\n');
 
   await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
     'Tyrian managed app roots registry is invalid JSON'
@@ -98,12 +95,7 @@ test('status-all fails loudly when the managed root registry contains empty root
 });
 
 test('status-all fails loudly when the managed root registry file is empty', async () => {
-  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
-  await fs.writeFile(
-    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
-    '',
-    'utf8'
-  );
+  await writeManagedRootsRegistryContent('');
 
   await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
     'Tyrian managed app roots registry is invalid JSON'
@@ -111,11 +103,8 @@ test('status-all fails loudly when the managed root registry file is empty', asy
 });
 
 test('status-all fails loudly when the managed root registry contains no roots', async () => {
-  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
-  await fs.writeFile(
-    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
-    JSON.stringify({ version: 1, appRoots: [] }, null, 2).concat('\n'),
-    'utf8'
+  await writeManagedRootsRegistryContent(
+    JSON.stringify({ version: 1, appRoots: [] }, null, 2).concat('\n')
   );
 
   await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
@@ -127,7 +116,7 @@ test('clean roots with semantically correct checksum are not rewritten during re
   const appRoot = await createAppRoot('formatted-clean', {
     productJsonIndent: 2,
   });
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const productPath = buildIslandPatchPaths(appRoot).productJsonPath;
   const before = await fs.readFile(productPath, 'utf8');
 
   const result = await restoreAllIslandShells({
@@ -146,15 +135,16 @@ test('clean roots with semantically correct checksum are not rewritten during re
 
 test('restore-all removes registered clean roots without touching workbench files', async () => {
   const appRoot = await createAppRoot('registered-clean');
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const productPath = buildIslandPatchPaths(appRoot).productJsonPath;
   const before = await fs.readFile(productPath, 'utf8');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: green; }\n', 'utf8');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
   await restoreIslandShell({ appRoot, registryHome });
-  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
+  const registryPath = buildManagedRootsRegistryPath(registryHome);
+  await fs.mkdir(path.dirname(registryPath), { recursive: true });
   await fs.writeFile(
-    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
+    registryPath,
     JSON.stringify({ version: 1, appRoots: [appRoot] }, null, 2).concat('\n'),
     'utf8'
   );
@@ -229,7 +219,7 @@ test('restore strips active Island UI when backup evidence is broken', async () 
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: red; }\n', 'utf8');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
-  await fs.rm(path.join(appRoot, WORKBENCH_DIR, 'tyrian-night.workbench.backup.html'));
+  await fs.rm(buildIslandPatchPaths(appRoot).backupHtmlPath);
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'broken-backup',
@@ -245,14 +235,14 @@ test('restore strips active Island UI when backup evidence is broken', async () 
     managed: false,
     registered: false,
   });
-  await expect(fs.readdir(path.join(appRoot, WORKBENCH_DIR))).resolves.toEqual(['workbench.html']);
+  await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
 
 test('restore repairs checksum when broken sidecars mask the mismatch classification', async () => {
   const appRoot = await createAppRoot('broken-sidecar-checksum', {
     checksumOverride: 'not-the-real-checksum',
   });
-  await fs.writeFile(path.join(appRoot, ISLAND_MANIFEST), '{ broken manifest\n', 'utf8');
+  await fs.writeFile(buildIslandPatchPaths(appRoot).manifestPath, '{ broken manifest\n', 'utf8');
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     active: false,
@@ -269,7 +259,7 @@ test('restore repairs checksum when broken sidecars mask the mismatch classifica
     managed: false,
     registered: false,
   });
-  await expect(fs.readdir(path.join(appRoot, WORKBENCH_DIR))).resolves.toEqual(['workbench.html']);
+  await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
 
 test('status treats a stale Island manifest checksum as self-healable broken state', async () => {
@@ -278,7 +268,7 @@ test('status treats a stale Island manifest checksum as self-healable broken sta
   await fs.writeFile(cssSource, '.monaco-workbench { color: purple; }\n', 'utf8');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
-  const manifestPath = path.join(appRoot, ISLAND_MANIFEST);
+  const manifestPath = buildIslandPatchPaths(appRoot).manifestPath;
   const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Record<string, unknown>;
   manifest.patchedWorkbenchChecksum = 'not-the-current-workbench-checksum';
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2).concat('\n'), 'utf8');
@@ -311,7 +301,7 @@ test('apply writes a v2 manifest receipt that identifies the owned patch surface
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
   const manifest = JSON.parse(
-    await fs.readFile(path.join(appRoot, ISLAND_MANIFEST), 'utf8')
+    await fs.readFile(buildIslandPatchPaths(appRoot).manifestPath, 'utf8')
   ) as Record<string, unknown>;
 
   expect(manifest).toMatchObject({
@@ -320,10 +310,10 @@ test('apply writes a v2 manifest receipt that identifies the owned patch surface
     appRoot,
     patchStrategy: 'stylesheet-link-v1',
     ownedFiles: {
-      stylesheet: 'tyrian-night.island.css',
-      manifest: 'tyrian-night.island.json',
-      workbenchBackup: 'tyrian-night.workbench.backup.html',
-      productBackup: 'tyrian-night.product.backup.json',
+      stylesheet: ISLAND_CSS_FILE_NAME,
+      manifest: ISLAND_MANIFEST_FILE_NAME,
+      workbenchBackup: BACKUP_HTML_FILE_NAME,
+      productBackup: BACKUP_PRODUCT_FILE_NAME,
     },
   });
   expect(manifest).toHaveProperty('upstreamWorkbenchChecksum');
@@ -339,14 +329,16 @@ test('restore validates and uses a complete backup pair before deleting managed 
   await fs.writeFile(cssSource, '.monaco-workbench { color: blue; }\n', 'utf8');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
-  const backupProductPath = path.join(appRoot, WORKBENCH_DIR, 'tyrian-night.product.backup.json');
+  const backupProductPath = buildIslandPatchPaths(appRoot).backupProductJsonPath;
   const backupProduct = await fs.readFile(backupProductPath, 'utf8');
 
   await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
     changed: true,
     active: false,
   });
-  expect(await fs.readFile(path.join(appRoot, PRODUCT_JSON), 'utf8')).toBe(backupProduct);
+  expect(await fs.readFile(buildIslandPatchPaths(appRoot).productJsonPath, 'utf8')).toBe(
+    backupProduct
+  );
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
@@ -358,20 +350,19 @@ test('restore refuses incomplete manifest ownership proof before trusting backup
   const appRoot = await createAppRoot('incomplete-restore-proof');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: blue; }\n', 'utf8');
-  const cleanHtml = await fs.readFile(path.join(appRoot, WORKBENCH_HTML), 'utf8');
+  const cleanHtml = await fs.readFile(buildIslandPatchPaths(appRoot).workbenchHtmlPath, 'utf8');
 
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
-  const backupHtmlPath = path.join(appRoot, WORKBENCH_DIR, 'tyrian-night.workbench.backup.html');
-  const backupProductPath = path.join(appRoot, WORKBENCH_DIR, 'tyrian-night.product.backup.json');
+  const { backupHtmlPath, backupProductJsonPath, manifestPath } = buildIslandPatchPaths(appRoot);
   const untrustedBackupHtml = cleanWorkbenchHtml().replace(
     '</html>',
     '<body>untrusted</body>\n</html>'
   );
   await fs.writeFile(backupHtmlPath, untrustedBackupHtml, 'utf8');
-  await fs.writeFile(backupProductPath, productJson(sha256Base64(untrustedBackupHtml)), 'utf8');
+  await fs.writeFile(backupProductJsonPath, productJson(sha256Base64(untrustedBackupHtml)), 'utf8');
   await fs.writeFile(
-    path.join(appRoot, ISLAND_MANIFEST),
+    manifestPath,
     JSON.stringify({ version: 1, extensionVersion: 'old' }, null, 2).concat('\n'),
     'utf8'
   );
@@ -385,7 +376,9 @@ test('restore refuses incomplete manifest ownership proof before trusting backup
     changed: true,
     active: false,
   });
-  expect(await fs.readFile(path.join(appRoot, WORKBENCH_HTML), 'utf8')).toBe(cleanHtml);
+  expect(await fs.readFile(buildIslandPatchPaths(appRoot).workbenchHtmlPath, 'utf8')).toBe(
+    cleanHtml
+  );
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
@@ -397,9 +390,11 @@ test('apply readiness reports permission-required without mutating a read-only a
   const appRoot = await createAppRoot('readonly-apply-root');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: hotpink; }\n', 'utf8');
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
-  const workbenchPath = path.join(appRoot, WORKBENCH_HTML);
-  const productPath = path.join(appRoot, PRODUCT_JSON);
+  const {
+    productJsonPath: productPath,
+    workbenchDirPath: workbenchDir,
+    workbenchHtmlPath: workbenchPath,
+  } = buildIslandPatchPaths(appRoot);
   const beforeHtml = await fs.readFile(workbenchPath, 'utf8');
   const beforeProduct = await fs.readFile(productPath, 'utf8');
 
@@ -424,7 +419,7 @@ test('apply readiness reports permission-required without mutating a read-only a
     });
     expect(await fs.readFile(workbenchPath, 'utf8')).toBe(beforeHtml);
     expect(await fs.readFile(productPath, 'utf8')).toBe(beforeProduct);
-    await expect(fs.readdir(workbenchDir)).resolves.toEqual(['workbench.html']);
+    await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
   } finally {
     await fs.chmod(workbenchDir, 0o755);
     await fs.chmod(workbenchPath, 0o644);
@@ -474,17 +469,13 @@ async function createAppRoot(
   } = {}
 ): Promise<string> {
   const appRoot = path.join(testRoot, name);
-  const workbenchDir = path.join(appRoot, WORKBENCH_DIR);
+  const { productJsonPath, workbenchDirPath, workbenchHtmlPath } = buildIslandPatchPaths(appRoot);
   const html = cleanWorkbenchHtml();
   const checksum = options.checksumOverride ?? sha256Base64(html);
 
-  await fs.mkdir(workbenchDir, { recursive: true });
-  await fs.writeFile(path.join(appRoot, WORKBENCH_HTML), html, 'utf8');
-  await fs.writeFile(
-    path.join(appRoot, PRODUCT_JSON),
-    productJson(checksum, options.productJsonIndent),
-    'utf8'
-  );
+  await fs.mkdir(workbenchDirPath, { recursive: true });
+  await fs.writeFile(workbenchHtmlPath, html, 'utf8');
+  await fs.writeFile(productJsonPath, productJson(checksum, options.productJsonIndent), 'utf8');
 
   return appRoot;
 }
@@ -515,16 +506,17 @@ function sha256Base64(content: string): string {
 }
 
 async function expectRestoredAppRoot(appRoot: string): Promise<void> {
-  const html = await fs.readFile(path.join(appRoot, WORKBENCH_HTML), 'utf8');
-  const product = await fs.readFile(path.join(appRoot, PRODUCT_JSON), 'utf8');
+  const { productJsonPath, workbenchHtmlPath } = buildIslandPatchPaths(appRoot);
+  const html = await fs.readFile(workbenchHtmlPath, 'utf8');
+  const product = await fs.readFile(productJsonPath, 'utf8');
 
   expect(html).not.toContain(TYRIAN_MARKER_START);
   expect(JSON.parse(product).checksums[WORKBENCH_CHECKSUM_KEY]).toBe(sha256Base64(html));
-  await expect(fs.readdir(path.join(appRoot, WORKBENCH_DIR))).resolves.toEqual(['workbench.html']);
+  await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 }
 
 async function writeManagedRootsRegistry(appRoots: string[]): Promise<string> {
-  const registryPath = path.join(registryHome, '.tyrian-night', 'managed-app-roots.json');
+  const registryPath = buildManagedRootsRegistryPath(registryHome);
 
   await fs.mkdir(path.dirname(registryPath), { recursive: true });
   await fs.writeFile(
@@ -537,10 +529,20 @@ async function writeManagedRootsRegistry(appRoots: string[]): Promise<string> {
 }
 
 async function writeCorruptManagedRootsRegistry(): Promise<void> {
-  await fs.mkdir(path.join(registryHome, '.tyrian-night'), { recursive: true });
-  await fs.writeFile(
-    path.join(registryHome, '.tyrian-night', 'managed-app-roots.json'),
-    '{ broken registry\n',
-    'utf8'
-  );
+  await writeManagedRootsRegistryContent('{ broken registry\n');
+}
+
+async function writeManagedRootsRegistryContent(content: string): Promise<void> {
+  const registryPath = buildManagedRootsRegistryPath(registryHome);
+
+  await fs.mkdir(path.dirname(registryPath), { recursive: true });
+  await fs.writeFile(registryPath, content, 'utf8');
+}
+
+async function expectOnlyWorkbenchHtmlSidecarRemains(appRoot: string): Promise<void> {
+  const paths = buildIslandPatchPaths(appRoot);
+
+  await expect(fs.readdir(paths.workbenchDirPath)).resolves.toEqual([
+    path.basename(paths.workbenchHtmlPath),
+  ]);
 }
