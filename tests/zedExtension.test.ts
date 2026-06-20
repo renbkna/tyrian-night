@@ -410,18 +410,20 @@ test('Zed example settings match the repo companion settings contract', () => {
 
   expect(settings.theme).toEqual({
     mode: 'dark',
-    dark: 'Tyrian Night',
+    dark: 'Tyrian Nocturne',
     light: 'Tyrian Dawn',
   });
   expect(settings.icon_theme).toEqual({
-    mode: 'dark',
+    mode: 'light',
     light: 'Colored Zed Icons Theme Dark',
     dark: 'Colored Zed Icons Theme Dark',
   });
-  expect(settings.buffer_font_family).toBe('Monaspace Neon');
-  expect(settings.buffer_font_size).toBe(15);
+  expect(settings.buffer_font_family).toBe('Monaspace Neon Var');
+  expect(settings.buffer_font_size).toBe(18);
   expect(settings.buffer_font_weight).toBe(450);
   expect(settings.buffer_line_height).toEqual({ custom: 1.45 });
+  expect(settings.disable_ai).toBe(true);
+  expect(settings.text_rendering_mode).toBe('platform_default');
   expect(settings.buffer_font_features).toEqual({
     calt: true,
     liga: true,
@@ -437,7 +439,7 @@ test('Zed example settings match the repo companion settings contract', () => {
     ss09: true,
     ss10: true,
   });
-  expect(settings.ui_font_family).toBe('.ZedSans');
+  expect(settings.ui_font_family).toBe('Inter Variable');
   expect(settings.ui_font_size).toBe(16);
   expect(settings.ui_font_weight).toBe(400);
   expect(settings.semantic_tokens).toBe('combined');
@@ -452,13 +454,13 @@ test('Zed example settings match the repo companion settings contract', () => {
     background_coloring: 'disabled',
   });
   expect(settings.terminal.font_family).toBe('Monaspace Neon');
-  expect(settings.terminal.font_size).toBe(8);
+  expect(settings.terminal.font_size).toBe(12);
   expect(settings.terminal.line_height).toEqual({ custom: 1.2 });
   expect(settings.terminal.cursor_shape).toBe('bar');
   expect(settings.terminal.blinking).toBe('terminal_controlled');
   expect(settings.terminal.minimum_contrast).toBe(0);
   expect(settings.cli_default_open_behavior).toBe('existing_window');
-  expect(settings.diff_view_style).toBe('unified');
+  expect(settings.diff_view_style).toBe('split');
   expect(settings.helix_mode).toBe(false);
   expect(settings.inlay_hints).toEqual({
     enabled: true,
@@ -484,6 +486,7 @@ test('Zed example settings match the repo companion settings contract', () => {
   expect(settings.outline_panel.dock).toBe('left');
   expect(settings.collaboration_panel.dock).toBe('left');
   expect(settings.git_panel.dock).toBe('left');
+  expect(settings.languages.Python.indent_guides.background_coloring).toBe('indent_aware');
   expect(settings.languages.Python.language_servers).toEqual(['ty', 'ruff']);
   expect(settings.languages.TypeScript.language_servers).toEqual(['tsgo', 'biome']);
   expect(settings.languages.TSX.formatter.language_server.name).toBe('biome');
@@ -491,14 +494,17 @@ test('Zed example settings match the repo companion settings contract', () => {
     'source.fixAll.biome': true,
     'source.organizeImports.biome': true,
   });
+  expect(settings.languages.Java.language_servers).toEqual(['jdtls']);
   expect(settings.file_types.tailwindcss).toEqual(['*.css']);
   expect(settings.node.ignore_system_version).toBe(true);
   expect(settings).not.toHaveProperty('agent');
 
   for (const ownedSettingArea of [
     'font family',
+    'text rendering',
     'inlay hints',
     'panels',
+    'AI posture',
     'edit-prediction posture',
     'language servers',
     'formatters',

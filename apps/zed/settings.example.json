@@ -1,17 +1,25 @@
 {
+  "ui_font_weight": 400,
+  "buffer_line_height": {
+    "custom": 1.45
+  },
+  "buffer_font_size": 18,
+  "buffer_font_weight": 450,
+  "buffer_font_family": "Monaspace Neon Var",
+  "disable_ai": true,
+  "text_rendering_mode": "platform_default",
   "theme": {
     "mode": "dark",
     "light": "Tyrian Dawn",
-    "dark": "Tyrian Night"
+    "dark": "Tyrian Nocturne"
   },
   "icon_theme": {
-    "mode": "dark",
+    "mode": "light",
     "light": "Colored Zed Icons Theme Dark",
     "dark": "Colored Zed Icons Theme Dark"
   },
   "semantic_tokens": "combined",
   "colorize_brackets": true,
-  "current_line_highlight": "line",
   "show_whitespaces": "selection",
   "show_wrap_guides": false,
   "sticky_scroll": {
@@ -38,12 +46,6 @@
     "show_other_hints": true,
     "show_background": false
   },
-  "buffer_font_family": "Monaspace Neon",
-  "buffer_font_size": 15,
-  "buffer_font_weight": 450,
-  "buffer_line_height": {
-    "custom": 1.45
-  },
   "buffer_font_features": {
     "calt": true,
     "liga": true,
@@ -59,12 +61,11 @@
     "ss09": true,
     "ss10": true
   },
-  "ui_font_family": ".ZedSans",
+  "ui_font_family": "Inter Variable",
   "ui_font_size": 16,
-  "ui_font_weight": 400,
   "terminal": {
     "font_family": "Monaspace Neon",
-    "font_size": 8,
+    "font_size": 12,
     "line_height": {
       "custom": 1.2
     },
@@ -73,7 +74,7 @@
     "minimum_contrast": 0
   },
   "cli_default_open_behavior": "existing_window",
-  "diff_view_style": "unified",
+  "diff_view_style": "split",
   "helix_mode": false,
   "soft_wrap": "bounded",
   "preferred_line_length": 120,
@@ -116,6 +117,9 @@
   },
   "languages": {
     "Python": {
+      "indent_guides": {
+        "background_coloring": "indent_aware"
+      },
       "language_servers": ["ty", "ruff"]
     },
     "TypeScript": {
@@ -153,6 +157,9 @@
         "source.fixAll.biome": true,
         "source.organizeImports.biome": true
       }
+    },
+    "Java": {
+      "language_servers": ["jdtls"]
     }
   },
   "file_types": {
