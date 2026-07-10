@@ -7,6 +7,7 @@ klipperClearHistoryAskAgain=false
 [PlasmaViews][Panel 149]
 floating=0
 panelVisibility=2
+shell=org.kde.plasma.desktop
 
 [PlasmaViews][Panel 149][Defaults]
 thickness=42
@@ -14,6 +15,7 @@ thickness=42
 [PlasmaViews][Panel 231]
 floating=1
 panelVisibility=2
+shell=org.kde.plasma.desktop
 
 [PlasmaViews][Panel 231][Defaults]
 thickness=30

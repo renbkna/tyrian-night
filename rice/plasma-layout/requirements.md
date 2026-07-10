@@ -6,8 +6,9 @@ widget packages themselves.
 Install these widgets before restoring the layout on a new machine, then apply the listed style
 dependencies so the look and feel matches the Tyrian snapshot closely.
 
-The restore command also uses `qdbus6` from KDE to read the current Plasma activity and apply the
-wallpaper to the current active desktop containments after Plasma shell restarts.
+The restore command uses `qdbus6` to read Plasma state and apply the wallpaper,
+`kscreen-doctor` to identify the primary display, and `systemctl` to stop and restart Plasma while
+the layout files are replaced.
 
 ## Third-Party Widgets
 
@@ -25,7 +26,7 @@ These theme assets are set by Tyrian's look-and-feel defaults but are typically 
 environment or your distro package set. Install or confirm they are available before layout restore for
 best visual parity:
 
-- `widgetStyle=Union` (Plasma 6.7+ Union application style; install your distro's `union` package)
+- Application widget style: `Breeze`
 - KDE decoration theme: `Breeze`
 - Icons: `Papirus-Dark`
 - Cursors: `Bibata-Modern-Classic`

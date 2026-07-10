@@ -1,6 +1,7 @@
 // @ts-check
 
 import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,16 +12,28 @@ import {
   WALLPAPER_ASSET_PATH,
   buildTyrianBackupRoot,
 } from './portableAssets.mjs';
-import { TYRIAN_REQUIRED_COMMANDS, checkRequiredCommands, hasCommand } from './commandChecks.mjs';
+import { checkRequiredCommands, hasCommand } from './commandChecks.mjs';
 import {
-  backupHomePath,
+  admitOwnedPaths,
   exists,
   installManagedPathRaw,
   operation,
+  resolvePathIdentity,
+  syncPathsDurably,
+  withTokenFileLock,
   writeBinaryFileRaw,
   writeTextFileRaw,
 } from './installOps.mjs';
-import { installLiveTyrian } from './installLiveTyrian.mjs';
+import {
+  buildLiveInstallPlan,
+  finishCommittedHomeFilesystemTransaction,
+  installLiveTyrian,
+  prepareLiveInstallRepository,
+  readLiveInstallTransactionTargets,
+  recoverHomeFilesystemTransaction,
+  withHomeFilesystemTransaction,
+  withLiveInstallLock,
+} from './installLiveTyrian.mjs';
 
 const repoRoot = process.cwd();
 const home = os.homedir();
@@ -42,42 +55,64 @@ export const RICE_LAYOUT_FILES = [
     portableWallpaper: false,
   },
 ];
-export const RICE_REQUIRED_COMMANDS = TYRIAN_REQUIRED_COMMANDS;
-export const RICE_LAYOUT_REQUIRED_COMMANDS = ['qdbus6', 'kscreen-doctor'];
+export const RICE_LAYOUT_REQUIRED_COMMANDS = ['qdbus6', 'kscreen-doctor', 'systemctl'];
+const PLASMA_PANEL_ALIGNMENTS = new Set(['left', 'center', 'right']);
+const PLASMA_PANEL_HIDING_MODES = new Set(['none', 'autohide', 'dodgewindows', 'windowsgobelow']);
+const CAPTURE_LOCK_PATH = '.tyrian-rice-capture.lock';
+const CAPTURE_JOURNAL_PATH = '.tyrian-rice-capture-journal.json';
+const CAPTURE_TRANSACTION_PREFIX = '.tyrian-rice-capture-transaction-';
+const PLASMA_SHELL_SERVICE = 'plasma-plasmashell.service';
+const PLASMA_LIFECYCLE_PATH = '.local/state/tyrian-night/plasma-lifecycle.json';
 // Preserve KDE's alias applet IDs: icontasks/minimizeall have X-Plasma-RootPath
 // metadata that resolves to compiled taskmanager/showdesktop roots, and replacing
 // the IDs changes the exact panel mode/look even though Plasma logs mainscript warnings.
 
 /**
  * @typedef {(command: string, args: string[], options?: import('node:child_process').ExecFileSyncOptions) => Buffer | string} CommandRunner
+ * @typedef {{ hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }} PanelRuntimeState
+ * @typedef {{ activityId: string; screen: number; image: string; wallpaperPlugin: string }} WallpaperRuntimeState
+ * @typedef {{
+ *   apply: boolean;
+ *   backupRoot: string;
+ *   home: string;
+ *   installEntries: Array<{
+ *     file: (typeof RICE_LAYOUT_FILES)[number];
+ *     installedContent: string;
+ *     stagedPath: string;
+ *     targetPath: string;
+ *   }>;
+ *   panelStateById: Map<string, PanelRuntimeState>;
+ *   previousPanelStateById: Map<string, PanelRuntimeState>;
+ *   previousWallpaperState: WallpaperRuntimeState[];
+ *   primaryTarget: { screen: number; width: number; height: number; otherScreens: number[] };
+ *   runCommand: CommandRunner;
+ *   wallpaperPath: string;
+ *   testInterruptAfterStop?: boolean;
+ *   testInterruptAfterRuntime?: boolean;
+ *   testInterruptAfterCommit?: boolean;
+ * }} PreparedPlasmaLayoutInstall
  */
-
-/**
- * @param {{ repoRoot?: string; home?: string; withPlasmaLayout?: boolean; link?: boolean }} [options]
- * @returns {{ styleInstaller: string; layoutFiles: typeof RICE_LAYOUT_FILES; wallpaperPath: string; repoWallpaperPath: string; runtimeRoot: string; backupRoot: string }}
- */
-export function buildRiceInstallPlan(options = {}) {
-  const root = options.repoRoot ?? repoRoot;
-  const userHome = options.home ?? home;
-  const runtimeRoot = options.link ? root : path.join(userHome, TYRIAN_INSTALL_HOME);
-  const withPlasmaLayout = options.withPlasmaLayout ?? true;
-
-  return {
-    styleInstaller: path.join(root, 'scripts/installLiveTyrian.mjs'),
-    layoutFiles: withPlasmaLayout ? RICE_LAYOUT_FILES : [],
-    wallpaperPath: path.join(runtimeRoot, RICE_WALLPAPER_PATH),
-    repoWallpaperPath: path.join(root, RICE_WALLPAPER_PATH),
-    runtimeRoot,
-    backupRoot: buildTyrianBackupRoot(userHome, 'rice-layout-apply'),
-  };
-}
 
 /**
  * @param {{ repoRoot?: string; home?: string }} [options]
  * @returns {void}
  */
 export function checkRiceSnapshot(options = {}) {
-  const root = options.repoRoot ?? repoRoot;
+  const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
+  const captureHome = options.home ? resolvePathIdentity(options.home) : undefined;
+
+  withCaptureLock(root, () => {
+    recoverCapturePublication(root);
+    checkRiceSnapshotOwned(root, captureHome);
+  });
+}
+
+/**
+ * @param {string} root
+ * @param {string | undefined} captureHome
+ * @returns {void}
+ */
+function checkRiceSnapshotOwned(root, captureHome) {
   const layoutContents = new Map();
 
   for (const file of RICE_LAYOUT_FILES) {
@@ -87,6 +122,7 @@ export function checkRiceSnapshot(options = {}) {
       throw new Error(`Missing rice layout snapshot: ${file.snapshotPath}`);
     }
 
+    assertRegularSourceFileUnder(root, snapshotPath, file.snapshotPath);
     layoutContents.set(file.snapshotPath, fs.readFileSync(snapshotPath, 'utf8'));
   }
 
@@ -95,6 +131,8 @@ export function checkRiceSnapshot(options = {}) {
   if (!exists(wallpaperPath)) {
     throw new Error(`Missing rice wallpaper asset: ${RICE_WALLPAPER_PATH}`);
   }
+
+  assertRegularSourceFileUnder(root, wallpaperPath, RICE_WALLPAPER_PATH);
 
   const desktopLayout = layoutContents.get(RICE_LAYOUT_FILES[0].snapshotPath);
 
@@ -107,7 +145,7 @@ export function checkRiceSnapshot(options = {}) {
   }
 
   assertPortablePlasmaLayoutSnapshot(desktopLayout);
-  assertNoHomePaths(layoutContents);
+  assertNoHomePaths(layoutContents, captureHome);
 
   const manifestPath = path.join(root, RICE_MANIFEST_PATH);
 
@@ -115,76 +153,551 @@ export function checkRiceSnapshot(options = {}) {
     throw new Error(`Missing rice layout manifest: ${RICE_MANIFEST_PATH}`);
   }
 
+  assertRegularSourceFileUnder(root, manifestPath, RICE_MANIFEST_PATH);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   assertRiceManifest(manifest);
 
   if (!exists(path.join(root, manifest.requirements))) {
     throw new Error(`Missing rice layout requirements: ${manifest.requirements}`);
   }
+
+  assertRegularSourceFileUnder(root, path.join(root, manifest.requirements), manifest.requirements);
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runCommand?: CommandRunner }} [options]
+ * @param {{ repoRoot?: string; home?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptPublicationAfter?: number; testInterruptAfterStop?: boolean; testInterruptAfterRestart?: boolean }} [options]
  * @returns {void}
  */
 export function captureRiceLayout(options = {}) {
-  const root = options.repoRoot ?? repoRoot;
-  const userHome = options.home ?? home;
+  const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
+  const userHome = resolvePathIdentity(options.home ?? home);
   const runCommand = options.runCommand ?? execFileSync;
-  const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
-  const desktopLayout = fs.readFileSync(desktopLayoutPath, 'utf8');
-  const wallpaperSource = findWallpaperSource(desktopLayout);
-  const panelStateById = readLivePanelStateById(runCommand);
+  const commandExists = options.hasCommand ?? (options.runCommand ? () => true : hasCommand);
+  assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Rice capture');
+  checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, true, commandExists, 'Tyrian rice capture');
+  admitOwnedPaths(
+    root,
+    [
+      path.join(root, CAPTURE_LOCK_PATH),
+      path.join(root, CAPTURE_JOURNAL_PATH),
+      path.join(root, RICE_WALLPAPER_PATH),
+      ...RICE_LAYOUT_FILES.map(({ snapshotPath }) => path.join(root, snapshotPath)),
+      path.join(root, RICE_MANIFEST_PATH),
+    ],
+    'Rice capture destination'
+  );
 
-  if (!wallpaperSource) {
-    throw new Error(`Could not find an existing wallpaper Image= path in ${desktopLayoutPath}`);
+  withLiveInstallLock(
+    userHome,
+    () => {
+      recoverRiceHomeState(userHome, runCommand);
+      withCaptureLock(root, () => {
+        recoverCapturePublication(root);
+        captureRiceLayoutOwned(
+          root,
+          userHome,
+          runCommand,
+          options.testInterruptPublicationAfter,
+          options.testInterruptAfterStop,
+          options.testInterruptAfterRestart
+        );
+      });
+    },
+    { allowPlasmaRecovery: true }
+  );
+}
+
+/**
+ * @param {string} root
+ * @param {string} userHome
+ * @param {CommandRunner} runCommand
+ * @param {number | undefined} testInterruptPublicationAfter
+ * @param {boolean | undefined} testInterruptAfterStop
+ * @param {boolean | undefined} testInterruptAfterRestart
+ * @returns {void}
+ */
+function captureRiceLayoutOwned(
+  root,
+  userHome,
+  runCommand,
+  testInterruptPublicationAfter,
+  testInterruptAfterStop,
+  testInterruptAfterRestart
+) {
+  assertPlasmaShellActive(runCommand, 'Rice capture');
+  const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  assertRegularSourceFileUnder(userHome, desktopLayoutPath, desktopLayoutPath);
+  const beforeStopDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
+  const beforeStopPanels = readSnapshotPanelStateById(beforeStopDesktop);
+  const preStopPanelState = readLivePanelStateById(runCommand);
+  const preStopWallpaperState = readLivePlasmaWallpaperState(runCommand);
+  const primaryScreen = readPrimaryPlasmaTarget(runCommand).screen;
+
+  for (const panelId of beforeStopPanels.keys()) {
+    if (!preStopPanelState.has(panelId)) {
+      throw new Error(`Could not capture runtime state for Plasma panel ${panelId}`);
+    }
   }
 
-  const wallpaperContent = fs.readFileSync(wallpaperSource);
-  const capturedLayoutContents = new Map();
+  /** @type {{ wallpaperSource: string; wallpaperContent: Buffer; rawLayoutContents: Map<string, string> } | undefined} */
+  let frozenCapture;
+  /** @type {unknown} */
+  let captureFailure;
+  let stopAttempted = false;
+  let preserveInterruptedLifecycle = false;
+
+  try {
+    beginPlasmaLifecycle(userHome, 'capture', {
+      previousPanelStateById: preStopPanelState,
+      previousWallpaperState: preStopWallpaperState,
+      primaryScreen,
+    });
+    stopAttempted = true;
+    stopPlasmaShell(runCommand);
+
+    if (testInterruptAfterStop) {
+      preserveInterruptedLifecycle = true;
+      throw new SimulatedPlasmaStopInterruption();
+    }
+
+    const frozenDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
+    const frozenPanels = readSnapshotPanelStateById(frozenDesktop);
+
+    if (!sameKeySet(beforeStopPanels, frozenPanels)) {
+      throw new Error('Plasma panel generation changed while the capture was being frozen');
+    }
+
+    const wallpaperSource = findWallpaperSource(frozenDesktop);
+
+    if (!wallpaperSource) {
+      throw new Error(`Could not find an existing wallpaper Image= path in ${desktopLayoutPath}`);
+    }
+
+    assertRegularSourceFile(wallpaperSource, `captured wallpaper ${wallpaperSource}`);
+    const wallpaperContent = fs.readFileSync(wallpaperSource);
+    const rawLayoutContents = new Map();
+
+    for (const file of RICE_LAYOUT_FILES) {
+      const sourcePath = path.join(userHome, file.homePath);
+      assertRegularSourceFileUnder(userHome, sourcePath, sourcePath);
+      rawLayoutContents.set(file.snapshotPath, fs.readFileSync(sourcePath, 'utf8'));
+    }
+
+    frozenCapture = { rawLayoutContents, wallpaperContent, wallpaperSource };
+  } catch (error) {
+    captureFailure = error;
+  } finally {
+    try {
+      if (stopAttempted && !preserveInterruptedLifecycle && !captureFailure) {
+        ensurePlasmaShellActive(runCommand, 'Rice capture recovery');
+      }
+    } catch (restoreError) {
+      captureFailure = captureFailure
+        ? new AggregateError(
+            [captureFailure, restoreError],
+            'Rice capture failed and the Plasma shell lifecycle could not be restored'
+          )
+        : restoreError;
+    }
+  }
+
+  if (captureFailure) {
+    if (
+      !(captureFailure instanceof SimulatedPlasmaStopInterruption) &&
+      exists(path.join(userHome, PLASMA_LIFECYCLE_PATH))
+    ) {
+      try {
+        recoverPlasmaLifecycle(userHome, runCommand, 'none');
+      } catch (recoveryError) {
+        throw new AggregateError(
+          [captureFailure, recoveryError],
+          'Rice capture failed and its persisted Plasma state could not be restored'
+        );
+      }
+    }
+
+    throw captureFailure;
+  }
+
+  if (!frozenCapture) {
+    throw new Error('Rice capture completed without a frozen snapshot');
+  }
+
+  if (testInterruptAfterRestart) {
+    throw new SimulatedCaptureProofInterruption();
+  }
+
+  /** @type {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} */
+  let postStartPanelState;
+
+  try {
+    postStartPanelState = readLivePanelStateById(runCommand);
+    const postStartWallpaperState = readLivePlasmaWallpaperState(runCommand);
+    const panelDrifted = !samePanelRuntimeState(preStopPanelState, postStartPanelState);
+    const wallpaperDrifted = !sameWallpaperRuntimeState(
+      preStopWallpaperState,
+      postStartWallpaperState
+    );
+
+    if (panelDrifted || wallpaperDrifted) {
+      const driftError = new Error(
+        panelDrifted
+          ? 'Plasma panel runtime state changed across the capture shell round-trip'
+          : 'Plasma wallpaper runtime state changed across the capture shell round-trip'
+      );
+
+      restorePlasmaPanelState(preStopPanelState, primaryScreen, runCommand);
+      restorePlasmaWallpaperState(preStopWallpaperState, runCommand);
+      const reconciledState = readLivePanelStateById(runCommand);
+      const reconciledWallpaperState = readLivePlasmaWallpaperState(runCommand);
+
+      if (
+        !samePanelRuntimeState(preStopPanelState, reconciledState) ||
+        !sameWallpaperRuntimeState(preStopWallpaperState, reconciledWallpaperState)
+      ) {
+        throw new Error('Plasma runtime reconciliation did not restore the exact prior state');
+      }
+
+      finishPlasmaLifecycle(userHome);
+      throw driftError;
+    }
+
+    finishPlasmaLifecycle(userHome);
+  } catch (error) {
+    if (exists(path.join(userHome, PLASMA_LIFECYCLE_PATH))) {
+      try {
+        recoverPlasmaLifecycle(userHome, runCommand, 'none');
+      } catch (recoveryError) {
+        throw new AggregateError(
+          [error, recoveryError],
+          'Plasma panel state drifted and persisted reconciliation failed'
+        );
+      }
+    }
+
+    throw error;
+  }
+
+  const layoutContents = new Map();
 
   for (const file of RICE_LAYOUT_FILES) {
-    const sourcePath = path.join(userHome, file.homePath);
-    let content = fs.readFileSync(sourcePath, 'utf8');
+    let content = frozenCapture.rawLayoutContents.get(file.snapshotPath) ?? '';
 
     if (file.portableWallpaper) {
-      content = sanitizePlasmaDesktopLayout(makeWallpaperPortable(content, wallpaperSource));
-      content = applyPanelStateToDesktopLayout(content, panelStateById);
+      content = sanitizePlasmaDesktopLayout(
+        makeWallpaperPortable(content, frozenCapture.wallpaperSource)
+      );
+      content = applyPanelStateToDesktopLayout(content, postStartPanelState);
     } else if (file.snapshotPath === RICE_LAYOUT_FILES[1].snapshotPath) {
       content = sanitizePlasmaShellConfig(content);
     }
 
-    capturedLayoutContents.set(file.snapshotPath, content);
+    layoutContents.set(file.snapshotPath, content);
   }
 
-  validateCapturedRiceSnapshot(capturedLayoutContents);
+  validateCapturedRiceSnapshot(layoutContents, userHome);
 
-  writeBinaryFile(
-    path.join(root, RICE_WALLPAPER_PATH),
-    wallpaperContent,
-    `capture wallpaper ${wallpaperSource}`
-  );
+  const capturedFiles = [
+    {
+      content: frozenCapture.wallpaperContent,
+      message: `capture wallpaper ${frozenCapture.wallpaperSource}`,
+      targetPath: path.join(root, RICE_WALLPAPER_PATH),
+    },
+    ...RICE_LAYOUT_FILES.map((file) => ({
+      content: Buffer.from(
+        `${(layoutContents.get(file.snapshotPath) ?? '').replace(/\n?$/u, '')}\n`,
+        'utf8'
+      ),
+      message: `capture ${path.join(userHome, file.homePath)}`,
+      targetPath: path.join(root, file.snapshotPath),
+    })),
+    {
+      content: Buffer.from(`${JSON.stringify(buildRiceManifest(), null, 2)}\n`, 'utf8'),
+      message: 'write rice layout manifest',
+      targetPath: path.join(root, RICE_MANIFEST_PATH),
+    },
+  ];
 
-  for (const file of RICE_LAYOUT_FILES) {
-    const sourcePath = path.join(userHome, file.homePath);
-    const snapshotPath = path.join(root, file.snapshotPath);
-    const content = capturedLayoutContents.get(file.snapshotPath);
+  publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicationAfter);
+}
 
-    writeTextFile(snapshotPath, content, `capture ${sourcePath}`);
+class SimulatedPlasmaStopInterruption extends Error {
+  constructor() {
+    super('Simulated interruption while the Plasma shell is stopped');
+  }
+}
+
+class SimulatedCaptureProofInterruption extends Error {
+  constructor() {
+    super('Simulated interruption before proving the restarted Plasma state');
+  }
+}
+
+/**
+ * @param {string} userHome
+ * @param {'capture' | 'layout'} owner
+ * @param {{ previousPanelStateById: Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>; previousWallpaperState: WallpaperRuntimeState[]; primaryScreen: number }} previousState
+ * @returns {void}
+ */
+function beginPlasmaLifecycle(userHome, owner, previousState) {
+  const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+
+  if (exists(journalPath)) {
+    throw new Error('A Plasma lifecycle journal is already active');
   }
 
-  writeTextFile(
-    path.join(root, RICE_MANIFEST_PATH),
-    `${JSON.stringify(buildRiceManifest(), null, 2)}\n`,
-    'write rice layout manifest'
-  );
+  writePlasmaLifecycle(userHome, {
+    version: 3,
+    owner,
+    phase: 'prepared',
+    initiallyActive: true,
+    previousPanels: [...previousState.previousPanelStateById].map(([id, state]) => ({
+      id,
+      ...state,
+    })),
+    previousWallpapers: previousState.previousWallpaperState,
+    primaryScreen: previousState.primaryScreen,
+  });
+}
+
+/**
+ * @param {string} userHome
+ * @param {CommandRunner} runCommand
+ * @param {'none' | 'rolledBack' | 'committed'} filesystemOutcome
+ * @returns {void}
+ */
+function recoverPlasmaLifecycle(userHome, runCommand, filesystemOutcome) {
+  const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+
+  if (!exists(journalPath)) {
+    return;
+  }
+
+  const journal = readPlasmaLifecycle(userHome);
+
+  if (
+    filesystemOutcome === 'committed' &&
+    (journal.owner !== 'layout' || journal.phase !== 'runtimeApplied')
+  ) {
+    throw new Error('Committed Plasma lifecycle journal does not record applied runtime state');
+  }
+
+  if (journal.owner === 'layout' && filesystemOutcome === 'rolledBack') {
+    if (isPlasmaShellActive(runCommand)) {
+      stopPlasmaShell(runCommand);
+    }
+  }
+
+  ensurePlasmaShellActive(runCommand, 'Plasma lifecycle recovery');
+
+  if (filesystemOutcome !== 'committed') {
+    const previousPanels = parsePanelStateJson(JSON.stringify(journal.previousPanels));
+    restorePlasmaPanelState(previousPanels, journal.primaryScreen, runCommand);
+    const restoredPanels = readLivePanelStateById(runCommand);
+
+    if (!samePanelRuntimeState(previousPanels, restoredPanels)) {
+      throw new Error('Plasma lifecycle recovery did not restore exact prior panel state');
+    }
+
+    restorePlasmaWallpaperState(journal.previousWallpapers, runCommand);
+    const restoredWallpapers = readLivePlasmaWallpaperState(runCommand);
+
+    if (!sameWallpaperRuntimeState(journal.previousWallpapers, restoredWallpapers)) {
+      throw new Error('Plasma lifecycle recovery did not restore exact prior wallpaper state');
+    }
+  } else {
+    const desiredPanels = parsePanelStateJson(JSON.stringify(journal.desiredPanels));
+    const desiredWallpapers = journal.desiredWallpapers;
+
+    if (!desiredWallpapers) {
+      throw new Error('Committed Plasma lifecycle has no desired wallpaper state');
+    }
+
+    restorePlasmaPanelState(desiredPanels, journal.primaryScreen, runCommand);
+    const restoredPanels = readLivePanelStateById(runCommand);
+
+    if (!samePanelRuntimeState(desiredPanels, restoredPanels)) {
+      throw new Error('Committed Plasma recovery did not restore exact desired panel state');
+    }
+
+    restorePlasmaWallpaperState(desiredWallpapers, runCommand);
+    const restoredWallpapers = readLivePlasmaWallpaperState(runCommand);
+
+    if (!sameWallpaperRuntimeState(desiredWallpapers, restoredWallpapers)) {
+      throw new Error('Committed Plasma recovery did not restore exact desired wallpaper state');
+    }
+  }
+
+  finishPlasmaLifecycle(userHome);
+}
+
+/**
+ * Files are recovered before external shell state. The lifecycle journal is
+ * deliberately not interpreted by the filesystem owner.
+ *
+ * @param {string} userHome
+ * @param {CommandRunner} runCommand
+ * @param {{ testInterruptAfterFilesystem?: boolean }} [options]
+ * @returns {void}
+ */
+function recoverRiceHomeState(userHome, runCommand, options = {}) {
+  const filesystemOutcome = recoverHomeFilesystemTransaction(userHome, {
+    deferCommittedCleanup: true,
+  });
+
+  if (filesystemOutcome === 'committed' && options.testInterruptAfterFilesystem) {
+    throw new SimulatedCommittedHandoffInterruption();
+  }
+
+  recoverPlasmaLifecycle(userHome, runCommand, filesystemOutcome);
+
+  if (filesystemOutcome === 'committed') {
+    finishCommittedHomeFilesystemTransaction(userHome);
+  }
+}
+
+class SimulatedCommittedHandoffInterruption extends Error {
+  constructor() {
+    super('Simulated interruption during the committed filesystem handoff');
+  }
+}
+
+/**
+ * @param {string} userHome
+ * @param {Map<string, PanelRuntimeState>} desiredPanelState
+ * @param {WallpaperRuntimeState[]} desiredWallpaperState
+ * @returns {void}
+ */
+function markPlasmaLifecycleRuntimeApplied(userHome, desiredPanelState, desiredWallpaperState) {
+  const journal = readPlasmaLifecycle(userHome);
+
+  if (journal.owner !== 'layout' || journal.phase !== 'prepared') {
+    throw new Error('Plasma lifecycle journal cannot record runtime application in this phase');
+  }
+
+  writePlasmaLifecycle(userHome, {
+    ...journal,
+    phase: 'runtimeApplied',
+    desiredPanels: [...desiredPanelState].map(([id, state]) => ({ id, ...state })),
+    desiredWallpapers: desiredWallpaperState,
+  });
+}
+
+/**
+ * @param {string} userHome
+ * @param {Record<string, unknown>} journal
+ * @returns {void}
+ */
+function writePlasmaLifecycle(userHome, journal) {
+  const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+  const temporaryPath = `${journalPath}.${randomUUID()}.tmp`;
+
+  try {
+    writeTextFileRaw(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
+    fsyncFile(temporaryPath);
+    fs.renameSync(temporaryPath, journalPath);
+    syncPathsDurably([journalPath]);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+/**
+ * @param {string} userHome
+ * @returns {{ version: 3; owner: 'capture' | 'layout'; phase: 'prepared' | 'runtimeApplied'; initiallyActive: true; previousPanels: unknown[]; previousWallpapers: WallpaperRuntimeState[]; desiredPanels?: unknown[]; desiredWallpapers?: WallpaperRuntimeState[]; primaryScreen: number }}
+ */
+function readPlasmaLifecycle(userHome) {
+  const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+  const stats = fs.lstatSync(journalPath);
+  const journal =
+    stats.isFile() && !stats.isSymbolicLink()
+      ? JSON.parse(fs.readFileSync(journalPath, 'utf8'))
+      : undefined;
+  /** @type {unknown[]} */
+  const previousWallpapers = Array.isArray(journal?.previousWallpapers)
+    ? journal.previousWallpapers
+    : [];
+  const wallpapersValid = previousWallpapers.every((candidate) => {
+    const wallpaper =
+      /** @type {{ activityId?: unknown; screen?: unknown; image?: unknown; wallpaperPlugin?: unknown }} */ (
+        candidate
+      );
+
+    return (
+      typeof wallpaper?.activityId === 'string' &&
+      Number.isSafeInteger(wallpaper.screen) &&
+      Number(wallpaper.screen) >= 0 &&
+      typeof wallpaper.image === 'string' &&
+      wallpaper.image.length > 0 &&
+      typeof wallpaper.wallpaperPlugin === 'string' &&
+      wallpaper.wallpaperPlugin.length > 0
+    );
+  });
+  /** @type {unknown[]} */
+  const desiredWallpapers = Array.isArray(journal?.desiredWallpapers)
+    ? journal.desiredWallpapers
+    : [];
+  const desiredWallpapersValid = desiredWallpapers.every((candidate) => {
+    const wallpaper =
+      /** @type {{ activityId?: unknown; screen?: unknown; image?: unknown; wallpaperPlugin?: unknown }} */ (
+        candidate
+      );
+
+    return (
+      typeof wallpaper?.activityId === 'string' &&
+      Number.isSafeInteger(wallpaper.screen) &&
+      Number(wallpaper.screen) >= 0 &&
+      typeof wallpaper.image === 'string' &&
+      wallpaper.image.length > 0 &&
+      typeof wallpaper.wallpaperPlugin === 'string' &&
+      wallpaper.wallpaperPlugin.length > 0
+    );
+  });
+
+  if (
+    journal?.version !== 3 ||
+    journal.initiallyActive !== true ||
+    !['capture', 'layout'].includes(journal.owner) ||
+    !['prepared', 'runtimeApplied'].includes(journal.phase) ||
+    (journal.owner === 'capture' && journal.phase !== 'prepared') ||
+    !Array.isArray(journal.previousPanels) ||
+    !Array.isArray(journal.previousWallpapers) ||
+    (journal.phase === 'runtimeApplied' &&
+      (!Array.isArray(journal.desiredPanels) ||
+        !Array.isArray(journal.desiredWallpapers) ||
+        !desiredWallpapersValid)) ||
+    !Number.isSafeInteger(journal.primaryScreen) ||
+    journal.primaryScreen < 0 ||
+    !wallpapersValid
+  ) {
+    throw new Error('Plasma lifecycle journal is corrupt');
+  }
+
+  parsePanelStateJson(JSON.stringify(journal.previousPanels));
+
+  if (journal.phase === 'runtimeApplied') {
+    parsePanelStateJson(JSON.stringify(journal.desiredPanels));
+  }
+
+  return /** @type {ReturnType<typeof readPlasmaLifecycle>} */ (journal);
+}
+
+/**
+ * @param {string} userHome
+ * @returns {void}
+ */
+function finishPlasmaLifecycle(userHome) {
+  const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+  fs.rmSync(journalPath, { force: true });
+  syncPathsDurably([journalPath]);
 }
 
 /**
  * @param {Map<string, string>} layoutContents
+ * @param {string} captureHome
  * @returns {void}
  */
-function validateCapturedRiceSnapshot(layoutContents) {
+function validateCapturedRiceSnapshot(layoutContents, captureHome) {
   const desktopLayout = layoutContents.get(RICE_LAYOUT_FILES[0].snapshotPath);
 
   if (desktopLayout === undefined) {
@@ -198,74 +711,876 @@ function validateCapturedRiceSnapshot(layoutContents) {
   }
 
   assertPortablePlasmaLayoutSnapshot(desktopLayout);
-  assertNoHomePaths(layoutContents);
+  assertNoHomePaths(layoutContents, captureHome);
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; withPlasmaLayout?: boolean; layoutOnly?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean }} [options]
+ * @param {string} root
+ * @param {Array<{ content: Buffer; message: string; targetPath: string }>} capturedFiles
+ * @param {number | undefined} testInterruptPublicationAfter
+ * @returns {void}
+ */
+function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicationAfter) {
+  const token = randomUUID();
+  const transactionRoot = path.join(root, `${CAPTURE_TRANSACTION_PREFIX}${token}`);
+  const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
+  const entries = capturedFiles.map((capturedFile, index) => {
+    const originalChecksum = readCaptureFileGeneration(capturedFile.targetPath);
+
+    return {
+      ...capturedFile,
+      backupPath: path.join(transactionRoot, 'backup', String(index)),
+      existed: originalChecksum !== null,
+      originalChecksum,
+      desiredChecksum: captureChecksum(capturedFile.content),
+      stagedPath: path.join(transactionRoot, 'stage', String(index)),
+    };
+  });
+  const journal = buildCaptureJournal(root, token, 'prepared', entries);
+
+  admitOwnedPaths(
+    root,
+    [
+      journalPath,
+      transactionRoot,
+      ...entries.flatMap(({ targetPath, backupPath, stagedPath }) => [
+        targetPath,
+        backupPath,
+        stagedPath,
+      ]),
+    ],
+    'Rice capture destination'
+  );
+
+  try {
+    for (const entry of entries) {
+      if (entry.existed) {
+        fs.mkdirSync(path.dirname(entry.backupPath), { recursive: true });
+        fs.copyFileSync(entry.targetPath, entry.backupPath);
+        fsyncFile(entry.backupPath);
+
+        if (readCaptureFileGeneration(entry.backupPath) !== entry.originalChecksum) {
+          throw new Error(`Rice capture backup verification failed for ${entry.targetPath}`);
+        }
+      }
+
+      const { content, message, stagedPath } = entry;
+      console.log(message);
+      writeBinaryFileRaw(stagedPath, content);
+      fsyncFile(stagedPath);
+    }
+
+    fsyncDirectory(path.join(transactionRoot, 'stage'));
+
+    if (exists(path.join(transactionRoot, 'backup'))) {
+      fsyncDirectory(path.join(transactionRoot, 'backup'));
+    }
+
+    fsyncDirectory(transactionRoot);
+
+    writeCaptureJournal(root, journal);
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const { stagedPath, targetPath, originalChecksum } = entries[index];
+      assertCaptureFileGeneration(targetPath, originalChecksum, 'before publication');
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.renameSync(stagedPath, targetPath);
+      fsyncFile(targetPath);
+      fsyncDirectory(path.dirname(targetPath));
+
+      if (testInterruptPublicationAfter === index + 1) {
+        throw new SimulatedCaptureInterruption();
+      }
+    }
+
+    for (const entry of entries) {
+      if (!fs.readFileSync(entry.targetPath).equals(entry.content)) {
+        throw new Error(`Rice capture verification failed for ${entry.targetPath}`);
+      }
+    }
+
+    writeCaptureJournal(root, { ...journal, phase: 'verified' });
+    finalizeCapturePublication(root, journalPath, transactionRoot);
+  } catch (error) {
+    if (error instanceof SimulatedCaptureInterruption) {
+      throw error;
+    }
+
+    try {
+      if (exists(journalPath)) {
+        recoverCapturePublication(root);
+      } else {
+        fs.rmSync(transactionRoot, { force: true, recursive: true });
+      }
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        'Rice capture publication and recovery both failed'
+      );
+    }
+
+    throw error;
+  }
+}
+
+class SimulatedCaptureInterruption extends Error {
+  constructor() {
+    super('Simulated interruption during rice capture publication');
+  }
+}
+
+/**
+ * @param {Buffer} content
+ * @returns {string}
+ */
+function captureChecksum(content) {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * @param {string} filePath
+ * @returns {string | null}
+ */
+function readCaptureFileGeneration(filePath) {
+  let stats;
+
+  try {
+    stats = fs.lstatSync(filePath);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`Rice capture generation is not a regular file: ${filePath}`);
+  }
+
+  return captureChecksum(fs.readFileSync(filePath));
+}
+
+/**
+ * @param {string} filePath
+ * @param {string | null} expectedChecksum
+ * @param {string} phase
+ * @returns {void}
+ */
+function assertCaptureFileGeneration(filePath, expectedChecksum, phase) {
+  if (readCaptureFileGeneration(filePath) !== expectedChecksum) {
+    throw new Error(`Rice capture target changed ${phase}: ${filePath}`);
+  }
+}
+
+/**
+ * @param {string} sourcePath
+ * @param {string} label
+ * @returns {void}
+ */
+function assertRegularSourceFile(sourcePath, label) {
+  const stats = fs.lstatSync(sourcePath);
+
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`${label} must be a regular file, not a symbolic link or another file type`);
+  }
+}
+
+/**
+ * @param {string} root
+ * @param {string} sourcePath
+ * @param {string} label
+ * @returns {void}
+ */
+function assertRegularSourceFileUnder(root, sourcePath, label) {
+  const relativePath = path.relative(root, sourcePath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`${label} is outside its owning root`);
+  }
+
+  let currentPath = root;
+
+  for (const segment of relativePath.split(path.sep)) {
+    currentPath = path.join(currentPath, segment);
+    const stats = fs.lstatSync(currentPath);
+
+    if (stats.isSymbolicLink()) {
+      throw new Error(`${label} traverses a symbolic link`);
+    }
+  }
+
+  assertRegularSourceFile(sourcePath, label);
+}
+
+/**
+ * @param {string} root
+ * @param {() => void} action
+ * @returns {void}
+ */
+function withCaptureLock(root, action) {
+  return withTokenFileLock(path.join(root, CAPTURE_LOCK_PATH), action);
+}
+
+/**
+ * @param {string} root
+ * @param {string} token
+ * @param {'prepared' | 'verified' | 'rolledBack'} phase
+ * @param {Array<{ targetPath: string; stagedPath: string; backupPath: string; existed: boolean; originalChecksum: string | null; desiredChecksum: string }>} entries
+ * @returns {{ version: 2; token: string; phase: 'prepared' | 'verified' | 'rolledBack'; transactionRoot: string; entries: Array<{ targetPath: string; stagedPath: string; backupPath: string; existed: boolean; originalChecksum: string | null; desiredChecksum: string }> }}
+ */
+function buildCaptureJournal(root, token, phase, entries) {
+  return {
+    version: 2,
+    token,
+    phase,
+    transactionRoot: `${CAPTURE_TRANSACTION_PREFIX}${token}`,
+    entries: entries.map(
+      ({ targetPath, stagedPath, backupPath, existed, originalChecksum, desiredChecksum }) => ({
+        targetPath: path.relative(root, targetPath),
+        stagedPath: path.relative(root, stagedPath),
+        backupPath: path.relative(root, backupPath),
+        existed,
+        originalChecksum,
+        desiredChecksum,
+      })
+    ),
+  };
+}
+
+/**
+ * @param {string} root
+ * @param {ReturnType<typeof buildCaptureJournal>} journal
+ * @returns {void}
+ */
+function writeCaptureJournal(root, journal) {
+  const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
+  const temporaryPath = `${journalPath}.${randomUUID()}.tmp`;
+
+  try {
+    writeTextFileRaw(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
+    const descriptor = fs.openSync(temporaryPath, 'r');
+
+    try {
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+
+    fs.renameSync(temporaryPath, journalPath);
+    fsyncDirectory(root);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+/**
+ * @param {string} root
+ * @returns {void}
+ */
+function recoverCapturePublication(root) {
+  const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
+
+  if (!exists(journalPath)) {
+    return;
+  }
+
+  let candidate;
+
+  try {
+    const stats = fs.lstatSync(journalPath);
+
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      throw new Error('journal is not a regular file');
+    }
+
+    candidate = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Rice capture journal is corrupt: ${String(error)}`);
+  }
+
+  const journal = validateCaptureJournal(root, candidate);
+  const transactionRoot = path.join(root, journal.transactionRoot);
+  admitOwnedPaths(
+    root,
+    [
+      journalPath,
+      transactionRoot,
+      ...journal.entries.flatMap((entry) => [
+        path.join(root, entry.targetPath),
+        path.join(root, entry.backupPath),
+        path.join(root, entry.stagedPath),
+      ]),
+    ],
+    'Rice capture recovery'
+  );
+
+  if (journal.phase === 'prepared') {
+    for (const entry of journal.entries) {
+      const backupPath = path.join(root, entry.backupPath);
+      const backupChecksum = readCaptureFileGeneration(backupPath);
+
+      if (entry.existed ? backupChecksum !== entry.originalChecksum : backupChecksum !== null) {
+        throw new Error(`Rice capture journal backup is invalid: ${entry.backupPath}`);
+      }
+    }
+
+    const failures = [];
+    for (const [index, entry] of journal.entries
+      .map((entry, index) => /** @type {const} */ ([index, entry]))
+      .toReversed()) {
+      const targetPath = path.join(root, entry.targetPath);
+      const currentChecksum = readCaptureFileGeneration(targetPath);
+
+      if (currentChecksum === entry.originalChecksum) continue;
+      if (currentChecksum !== entry.desiredChecksum) {
+        failures.push(
+          new Error(`Rice capture recovery found external drift at ${entry.targetPath}`)
+        );
+        continue;
+      }
+
+      try {
+        assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
+
+        if (entry.existed) {
+          const restorePath = path.join(transactionRoot, 'restore', String(index));
+          fs.mkdirSync(path.dirname(restorePath), { recursive: true });
+          fs.copyFileSync(path.join(root, entry.backupPath), restorePath);
+          fsyncFile(restorePath);
+          if (readCaptureFileGeneration(restorePath) !== entry.originalChecksum) {
+            throw new Error(`Rice capture recovery restore copy changed for ${entry.targetPath}`);
+          }
+
+          assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
+          fs.renameSync(restorePath, targetPath);
+          fsyncFile(targetPath);
+        } else {
+          assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
+          fs.rmSync(targetPath, { force: true });
+        }
+
+        fsyncDirectory(path.dirname(targetPath));
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        'Rice capture recovery could not safely restore every target'
+      );
+    }
+
+    writeCaptureJournal(root, { ...journal, phase: 'rolledBack' });
+  }
+
+  finalizeCapturePublication(root, journalPath, transactionRoot);
+}
+
+/**
+ * @param {string} root
+ * @param {unknown} candidate
+ * @returns {ReturnType<typeof buildCaptureJournal>}
+ */
+function validateCaptureJournal(root, candidate) {
+  if (!candidate || typeof candidate !== 'object') {
+    throw new Error('Rice capture journal is corrupt');
+  }
+
+  const journal = /** @type {Record<string, any>} */ (candidate);
+  const allowedTargets = [
+    RICE_WALLPAPER_PATH,
+    ...RICE_LAYOUT_FILES.map(({ snapshotPath }) => snapshotPath),
+    RICE_MANIFEST_PATH,
+  ];
+
+  if (
+    journal.version !== 2 ||
+    typeof journal.token !== 'string' ||
+    !/^[0-9a-f-]+$/u.test(journal.token) ||
+    !['prepared', 'verified', 'rolledBack'].includes(journal.phase) ||
+    journal.transactionRoot !== `${CAPTURE_TRANSACTION_PREFIX}${journal.token}` ||
+    !Array.isArray(journal.entries) ||
+    journal.entries.length !== allowedTargets.length
+  ) {
+    throw new Error('Rice capture journal is corrupt');
+  }
+
+  const seenTargets = new Set();
+
+  for (let index = 0; index < journal.entries.length; index += 1) {
+    const entry = journal.entries[index];
+    const expectedStage = path.posix.join(journal.transactionRoot, 'stage', String(index));
+    const expectedBackup = path.posix.join(journal.transactionRoot, 'backup', String(index));
+
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      entry.targetPath !== allowedTargets[index] ||
+      seenTargets.has(entry.targetPath) ||
+      entry.stagedPath !== expectedStage ||
+      entry.backupPath !== expectedBackup ||
+      typeof entry.existed !== 'boolean' ||
+      (entry.originalChecksum !== null &&
+        (typeof entry.originalChecksum !== 'string' ||
+          !/^[0-9a-f]{64}$/u.test(entry.originalChecksum))) ||
+      typeof entry.desiredChecksum !== 'string' ||
+      !/^[0-9a-f]{64}$/u.test(entry.desiredChecksum) ||
+      entry.existed !== (entry.originalChecksum !== null)
+    ) {
+      throw new Error('Rice capture journal is corrupt');
+    }
+
+    for (const relativePath of [entry.targetPath, entry.stagedPath, entry.backupPath]) {
+      const absolutePath = path.resolve(root, relativePath);
+
+      if (!isSameOrDescendant(root, absolutePath)) {
+        throw new Error('Rice capture journal escapes its repository root');
+      }
+    }
+
+    seenTargets.add(entry.targetPath);
+  }
+
+  return /** @type {ReturnType<typeof buildCaptureJournal>} */ (journal);
+}
+
+/**
+ * @param {string} root
+ * @param {string} journalPath
+ * @param {string} transactionRoot
+ * @returns {void}
+ */
+function finalizeCapturePublication(root, journalPath, transactionRoot) {
+  if (!isSameOrDescendant(root, transactionRoot)) {
+    throw new Error('Rice capture transaction root escapes its repository');
+  }
+
+  fs.rmSync(transactionRoot, { force: true, recursive: true });
+  fs.rmSync(journalPath, { force: true });
+  fsyncDirectory(root);
+}
+
+/**
+ * @param {string} directory
+ * @returns {void}
+ */
+function fsyncDirectory(directory) {
+  const descriptor = fs.openSync(directory, 'r');
+
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @returns {void}
+ */
+function fsyncFile(filePath) {
+  const descriptor = fs.openSync(filePath, 'r');
+
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+/**
+ * @param {string} leftRoot
+ * @param {string} rightRoot
+ * @param {string} owner
+ * @returns {void}
+ */
+function assertIndependentRoots(leftRoot, rightRoot, owner) {
+  const left = resolvePathIdentity(leftRoot);
+  const right = resolvePathIdentity(rightRoot);
+
+  if (isSameOrDescendant(left, right) || isSameOrDescendant(right, left)) {
+    throw new Error(`${owner} must not overlap: ${leftRoot} <-> ${rightRoot}`);
+  }
+}
+
+/**
+ * @param {string} ancestor
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function isSameOrDescendant(ancestor, candidate) {
+  const relativePath = path.relative(ancestor, candidate);
+
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+/**
+ * @param {string} userHome
+ * @param {boolean} customRunner
+ * @param {string} owner
+ * @returns {void}
+ */
+function assertCurrentSessionHome(userHome, customRunner, owner) {
+  if (!customRunner && resolvePathIdentity(home) !== userHome) {
+    throw new Error(`${owner} cannot mutate the current Plasma session for another home`);
+  }
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {boolean}
+ */
+function isPlasmaShellActive(runCommand) {
+  try {
+    runCommand('systemctl', ['--user', 'is-active', '--quiet', PLASMA_SHELL_SERVICE], {
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @param {string} owner
+ * @returns {void}
+ */
+function assertPlasmaShellActive(runCommand, owner) {
+  if (!isPlasmaShellActive(runCommand)) {
+    throw new Error(`${owner} requires an active ${PLASMA_SHELL_SERVICE}`);
+  }
+}
+
+/**
+ * @param {Map<string, unknown>} left
+ * @param {Map<string, unknown>} right
+ * @returns {boolean}
+ */
+function sameKeySet(left, right) {
+  return left.size === right.size && [...left.keys()].every((key) => right.has(key));
+}
+
+/**
+ * @param {Map<string, PanelRuntimeState>} before
+ * @param {Map<string, PanelRuntimeState>} after
+ * @returns {boolean}
+ */
+function samePanelRuntimeState(before, after) {
+  if (!sameKeySet(before, after)) {
+    return false;
+  }
+
+  return hasPanelRuntimeState(before, after);
+}
+
+/**
+ * @param {Map<string, PanelRuntimeState>} expectedState
+ * @param {Map<string, PanelRuntimeState>} actualState
+ * @returns {boolean}
+ */
+function hasPanelRuntimeState(expectedState, actualState) {
+  return [...expectedState].every(([panelId, expected]) => {
+    const actual = actualState.get(panelId);
+
+    return (
+      actual !== undefined &&
+      actual.hiding === expected.hiding &&
+      actual.alignment === expected.alignment &&
+      actual.screen === expected.screen &&
+      actual.location === expected.location &&
+      Math.abs((actual.lengthRatio ?? 0) - (expected.lengthRatio ?? 0)) <= 0.002 &&
+      Math.abs((actual.height ?? 0) - (expected.height ?? 0)) <= 0.5
+    );
+  });
+}
+
+/**
+ * @param {WallpaperRuntimeState[]} before
+ * @param {WallpaperRuntimeState[]} after
+ * @returns {boolean}
+ */
+function sameWallpaperRuntimeState(before, after) {
+  /**
+   * @param {WallpaperRuntimeState[]} states
+   */
+  const normalize = (states) =>
+    states
+      .map(({ activityId, screen, image, wallpaperPlugin }) => ({
+        activityId,
+        screen,
+        image,
+        wallpaperPlugin,
+      }))
+      .toSorted((left, right) =>
+        `${left.activityId}:${left.screen}`.localeCompare(`${right.activityId}:${right.screen}`)
+      );
+
+  return JSON.stringify(normalize(before)) === JSON.stringify(normalize(after));
+}
+
+/**
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; location?: number }>} panelStateById
+ * @param {number} screen
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen: number; location: number }>}
+ */
+function buildDesiredPanelRuntimeState(panelStateById, screen) {
+  return new Map(
+    [...panelStateById].map(([panelId, state]) => {
+      const location = state.location;
+
+      if (typeof location !== 'number' || !Number.isSafeInteger(location) || location < 0) {
+        throw new Error(`Plasma panel ${panelId} has no owned placement in the layout snapshot`);
+      }
+
+      return [panelId, { ...state, location, screen }];
+    })
+  );
+}
+
+/**
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; withPlasmaLayout?: boolean; layoutOnly?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStyle?: boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean; testInterruptRecoveryAfterFilesystem?: boolean }} [options]
  * @returns {void}
  */
 export function installRice(options = {}) {
-  const root = options.repoRoot ?? repoRoot;
-  const userHome = options.home ?? home;
+  const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
+  const userHome = resolvePathIdentity(options.home ?? home);
   const apply = options.apply ?? false;
   const withPlasmaLayout = options.withPlasmaLayout ?? true;
   const layoutOnly = options.layoutOnly ?? false;
   const link = options.link ?? false;
   const runCommand = options.runCommand ?? execFileSync;
   const commandExists = options.hasCommand ?? hasCommand;
-  const plan = buildRiceInstallPlan({
-    repoRoot: root,
-    home: userHome,
+  const runtimeRoot = resolvePathIdentity(link ? root : path.join(userHome, TYRIAN_INSTALL_HOME));
+
+  if (apply && withPlasmaLayout) {
+    assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Plasma layout install');
+  }
+
+  if (layoutOnly) {
+    assertIndependentRoots(root, runtimeRoot, 'Rice repository and layout runtime root');
+  }
+
+  withLiveInstallLock(
+    userHome,
+    () => {
+      recoverRiceHomeState(userHome, runCommand, {
+        testInterruptAfterFilesystem: options.testInterruptRecoveryAfterFilesystem,
+      });
+      withCaptureLock(root, () => {
+        recoverCapturePublication(root);
+        const livePlan = !layoutOnly
+          ? buildLiveInstallPlan({ repoRoot: root, home: userHome, apply, link })
+          : undefined;
+        if (withPlasmaLayout) {
+          checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
+        }
+
+        const preparedLayout = withPlasmaLayout
+          ? preparePlasmaLayoutInstallOwned({
+              repoRoot: root,
+              home: userHome,
+              runtimeRoot,
+              apply,
+              runCommand,
+              testInterruptAfterStop: options.testInterruptAfterStop,
+              testInterruptAfterRuntime: options.testInterruptAfterRuntime,
+            })
+          : undefined;
+        const runInstall = () =>
+          installRiceOwned({
+            root,
+            userHome,
+            apply,
+            withPlasmaLayout,
+            layoutOnly,
+            link,
+            runtimeRoot,
+            livePlan,
+            preparedLayout,
+            testInterruptAfterStyle: options.testInterruptAfterStyle,
+          });
+
+        if (!apply || !withPlasmaLayout) {
+          runInstall();
+          return;
+        }
+
+        const targetPaths = [
+          ...(livePlan
+            ? readLiveInstallTransactionTargets(livePlan)
+            : !link
+              ? [path.join(runtimeRoot, RICE_WALLPAPER_PATH)]
+              : []),
+          ...(preparedLayout?.installEntries.flatMap(({ stagedPath, targetPath }) => [
+            targetPath,
+            stagedPath,
+          ]) ?? []),
+        ];
+        const backupRoot = buildTyrianBackupRoot(userHome, 'rice-full-apply');
+
+        for (const targetPath of [...targetPaths, backupRoot]) {
+          assertIndependentRoots(
+            root,
+            targetPath,
+            'Rice repository and filesystem transaction target'
+          );
+        }
+
+        withHomeFilesystemTransaction(
+          userHome,
+          {
+            targetPaths,
+            backupRoot,
+            owner: 'rice',
+            shouldLeavePrepared: (error) =>
+              error instanceof SimulatedRiceInterruption ||
+              error instanceof SimulatedPlasmaStopInterruption ||
+              error instanceof SimulatedPlasmaRuntimeInterruption,
+            afterRollback: () => recoverPlasmaLifecycle(userHome, runCommand, 'rolledBack'),
+            afterCommit: () => {
+              if (options.testInterruptAfterCommit) {
+                throw new SimulatedRiceCommitInterruption();
+              }
+
+              finishPlasmaLifecycle(userHome);
+            },
+          },
+          runInstall
+        );
+        console.log(`Tyrian rice install complete. Backup: ${backupRoot}`);
+      });
+    },
+    { allowPlasmaRecovery: true }
+  );
+}
+
+/**
+ * @param {{ root: string; userHome: string; apply: boolean; withPlasmaLayout: boolean; layoutOnly: boolean; link: boolean; runtimeRoot: string; livePlan?: ReturnType<typeof buildLiveInstallPlan>; preparedLayout?: PreparedPlasmaLayoutInstall; testInterruptAfterStyle?: boolean }} options
+ * @returns {void}
+ */
+function installRiceOwned(options) {
+  const {
+    root,
+    userHome,
+    apply,
     withPlasmaLayout,
+    layoutOnly,
     link,
-  });
+    runtimeRoot,
+    livePlan,
+    preparedLayout,
+    testInterruptAfterStyle,
+  } = options;
 
-  if (!layoutOnly) {
-    checkRequiredCommands(RICE_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
+  /** @type {{ backupRoot: string; rollback: () => void } | undefined} */
+  let filesystemReceipt;
+
+  try {
+    if (!layoutOnly) {
+      filesystemReceipt = installLiveTyrian({
+        repoRoot: root,
+        home: userHome,
+        apply,
+        link,
+        stagingRoot: livePlan?.stagingRoot,
+      });
+    } else if (withPlasmaLayout && !link) {
+      materializeRiceLayoutAssets(root, runtimeRoot, apply);
+    }
+
+    if (testInterruptAfterStyle) {
+      throw new SimulatedRiceInterruption();
+    }
+
+    if (preparedLayout) {
+      installPreparedPlasmaLayout(preparedLayout);
+    } else {
+      console.log(
+        `${apply ? 'apply' : 'dry-run'}: Plasma layout restore skipped by explicit partial install mode`
+      );
+    }
+  } catch (error) {
+    if (filesystemReceipt) {
+      try {
+        filesystemReceipt.rollback();
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'Tyrian rice install and style rollback both failed'
+        );
+      }
+    }
+
+    throw error;
   }
+}
 
-  if (withPlasmaLayout) {
-    checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
+class SimulatedRiceInterruption extends Error {
+  constructor() {
+    super('Simulated interruption between rice style and layout');
   }
+}
 
-  if (withPlasmaLayout) {
-    checkRiceSnapshot({ repoRoot: root });
-  }
-
-  if (!layoutOnly) {
-    installLiveTyrian({
-      repoRoot: root,
-      home: userHome,
-      apply,
-      link,
-      runCommand,
-      hasCommand: commandExists,
-    });
-  } else if (withPlasmaLayout && !link) {
-    materializeRiceLayoutAssets(root, plan.runtimeRoot, apply);
-  }
-
-  if (withPlasmaLayout) {
-    installPlasmaLayout({
-      repoRoot: root,
-      home: userHome,
-      runtimeRoot: plan.runtimeRoot,
-      apply,
-      runCommand,
-    });
-  } else {
-    console.log(
-      `${apply ? 'apply' : 'dry-run'}: Plasma layout restore skipped by explicit partial install mode`
-    );
+class SimulatedRiceCommitInterruption extends Error {
+  constructor() {
+    super('Simulated interruption after the rice filesystem commit');
   }
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner }} [options]
+ * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
  * @returns {void}
  */
 export function installPlasmaLayout(options = {}) {
+  const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
+  const userHome = resolvePathIdentity(options.home ?? home);
+  const runtimeRoot = resolvePathIdentity(
+    options.runtimeRoot ?? path.join(userHome, TYRIAN_INSTALL_HOME)
+  );
+  const apply = options.apply ?? false;
+  const runCommand = options.runCommand ?? execFileSync;
+
+  if (apply) {
+    assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Plasma layout install');
+  }
+
+  withLiveInstallLock(
+    userHome,
+    () => {
+      recoverRiceHomeState(userHome, runCommand);
+      withCaptureLock(root, () => {
+        recoverCapturePublication(root);
+        installPreparedPlasmaLayout(
+          preparePlasmaLayoutInstallOwned({
+            repoRoot: root,
+            home: userHome,
+            runtimeRoot,
+            apply,
+            runCommand,
+            testInterruptAfterStop: options.testInterruptAfterStop,
+            testInterruptAfterRuntime: options.testInterruptAfterRuntime,
+            testInterruptAfterCommit: options.testInterruptAfterCommit,
+          })
+        );
+      });
+    },
+    { allowPlasmaRecovery: true }
+  );
+}
+
+/**
+ * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
+ * @returns {PreparedPlasmaLayoutInstall}
+ */
+function preparePlasmaLayoutInstallOwned(options = {}) {
   const root = options.repoRoot ?? repoRoot;
   const userHome = options.home ?? home;
   const runtimeRoot = options.runtimeRoot ?? path.join(userHome, TYRIAN_INSTALL_HOME);
@@ -273,7 +1588,11 @@ export function installPlasmaLayout(options = {}) {
   const runCommand = options.runCommand ?? execFileSync;
   const backupRoot = buildTyrianBackupRoot(userHome, 'rice-layout-apply');
 
-  checkRiceSnapshot({ repoRoot: root });
+  checkRiceSnapshotOwned(root, userHome);
+
+  if (apply) {
+    assertPlasmaShellActive(runCommand, 'Plasma layout install');
+  }
 
   const sourceEntries = RICE_LAYOUT_FILES.map((file) => ({
     file,
@@ -283,7 +1602,9 @@ export function installPlasmaLayout(options = {}) {
   const currentActivityId = apply ? readCurrentPlasmaActivityId(runCommand) : '';
   const primaryTarget = apply
     ? readPrimaryPlasmaTarget(runCommand)
-    : { height: 0, screen: 0, width: 0 };
+    : { height: 0, otherScreens: [], screen: 0, width: 0 };
+  const previousPanelStateById = apply ? readLivePanelStateById(runCommand) : new Map();
+  const previousWallpaperState = apply ? readLivePlasmaWallpaperState(runCommand) : [];
   const installEntries = sourceEntries.map(({ file, targetPath, sourceContent }) => {
     let installedContent = sourceContent.replaceAll('{{TYRIAN_RICE_ROOT}}', runtimeRoot);
 
@@ -297,38 +1618,154 @@ export function installPlasmaLayout(options = {}) {
     return {
       file,
       installedContent,
+      stagedPath: buildUnusedStagedPath(targetPath),
       targetPath,
     };
-  });
-
-  operation(apply, `${apply ? 'stop' : 'would stop'} Plasma shell before restoring layout`, () => {
-    stopPlasmaShell(runCommand);
-  });
-
-  for (const { installedContent, targetPath } of installEntries) {
-    operation(apply, `${apply ? 'restore' : 'would restore'} ${targetPath}`, () => {
-      backupPath(targetPath, backupRoot, userHome);
-      writeTextFileRaw(targetPath, installedContent, { finalNewline: true });
-    });
-  }
-
-  operation(apply, `${apply ? 'start' : 'would start'} Plasma shell`, () => {
-    startPlasmaShell(runCommand);
   });
 
   const panelStateById = readSnapshotPanelStateById(
     installEntries.find(({ file }) => file.portableWallpaper)?.installedContent ?? ''
   );
-
-  operation(apply, `${apply ? 'restore' : 'would restore'} Plasma panel runtime state`, () => {
-    restorePlasmaPanelState(panelStateById, primaryTarget.screen, runCommand);
-  });
-
   const wallpaperPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
-  operation(apply, `${apply ? 'apply' : 'would apply'} Plasma wallpaper ${wallpaperPath}`, () => {
-    applyPlasmaWallpaper(wallpaperPath, runCommand);
-  });
+  return {
+    apply,
+    backupRoot,
+    home: userHome,
+    installEntries,
+    panelStateById,
+    previousPanelStateById,
+    previousWallpaperState,
+    primaryTarget,
+    runCommand,
+    wallpaperPath,
+    testInterruptAfterStop: options.testInterruptAfterStop,
+    testInterruptAfterRuntime: options.testInterruptAfterRuntime,
+    testInterruptAfterCommit: options.testInterruptAfterCommit,
+  };
+}
+
+/**
+ * @param {PreparedPlasmaLayoutInstall} plan
+ * @returns {void}
+ */
+function installPreparedPlasmaLayout(plan) {
+  if (!plan.apply) {
+    applyPlasmaLayoutInstall(plan);
+    return;
+  }
+
+  const transaction = withHomeFilesystemTransaction(
+    plan.home,
+    {
+      targetPaths: plan.installEntries.flatMap(({ stagedPath, targetPath }) => [
+        targetPath,
+        stagedPath,
+      ]),
+      backupRoot: plan.backupRoot,
+      owner: 'layout',
+      shouldLeavePrepared: (error) =>
+        error instanceof SimulatedPlasmaStopInterruption ||
+        error instanceof SimulatedPlasmaRuntimeInterruption,
+      afterRollback: () => recoverPlasmaLifecycle(plan.home, plan.runCommand, 'rolledBack'),
+      afterCommit: () => {
+        if (plan.testInterruptAfterCommit) {
+          throw new SimulatedRiceCommitInterruption();
+        }
+
+        finishPlasmaLifecycle(plan.home);
+      },
+    },
+    () => applyPlasmaLayoutInstall(plan)
+  );
+
+  if (transaction.receipt) {
+    console.log(`Plasma layout install complete. Backup: ${transaction.receipt.backupRoot}`);
+  }
+}
+
+/**
+ * @param {PreparedPlasmaLayoutInstall} plan
+ * @returns {void}
+ */
+function applyPlasmaLayoutInstall(plan) {
+  if (!plan.apply) {
+    operation(false, 'would stop Plasma shell before restoring layout', () => {});
+
+    for (const { targetPath } of plan.installEntries) {
+      operation(false, `would restore ${targetPath}`, () => {});
+    }
+
+    operation(false, 'would start Plasma shell', () => {});
+    operation(false, 'would restore Plasma panel runtime state', () => {});
+    operation(false, `would apply Plasma wallpaper ${plan.wallpaperPath}`, () => {});
+    return;
+  }
+
+  const preparedEntries = plan.installEntries;
+  const desiredPanelState = buildDesiredPanelRuntimeState(
+    plan.panelStateById,
+    plan.primaryTarget.screen
+  );
+
+  try {
+    for (const entry of preparedEntries) {
+      stageTextFile(entry.stagedPath, entry.installedContent);
+    }
+
+    console.log('apply: stop Plasma shell before restoring layout');
+    beginPlasmaLifecycle(plan.home, 'layout', {
+      previousPanelStateById: plan.previousPanelStateById,
+      previousWallpaperState: plan.previousWallpaperState,
+      primaryScreen: plan.primaryTarget.screen,
+    });
+    stopPlasmaShell(plan.runCommand);
+
+    if (plan.testInterruptAfterStop) {
+      throw new SimulatedPlasmaStopInterruption();
+    }
+
+    for (const entry of preparedEntries) {
+      console.log(`apply: restore ${entry.targetPath}`);
+      fs.renameSync(entry.stagedPath, entry.targetPath);
+    }
+
+    console.log('apply: start Plasma shell');
+    startPlasmaShell(plan.runCommand);
+
+    operation(true, 'restore Plasma panel runtime state', () => {
+      restorePlasmaPanelState(desiredPanelState, plan.primaryTarget.screen, plan.runCommand);
+    });
+
+    operation(true, `apply Plasma wallpaper ${plan.wallpaperPath}`, () => {
+      applyPlasmaWallpaper(plan.wallpaperPath, plan.runCommand);
+    });
+
+    const appliedPanelState = readLivePanelStateById(plan.runCommand);
+
+    if (!samePanelRuntimeState(desiredPanelState, appliedPanelState)) {
+      throw new Error(
+        `Plasma panel runtime state did not match the requested layout: expected ${JSON.stringify(Object.fromEntries(desiredPanelState))}, received ${JSON.stringify(Object.fromEntries(appliedPanelState))}`
+      );
+    }
+
+    const appliedWallpaperState = assertPlasmaWallpaperApplied(plan.wallpaperPath, plan.runCommand);
+    markPlasmaLifecycleRuntimeApplied(plan.home, desiredPanelState, appliedWallpaperState);
+
+    if (plan.testInterruptAfterRuntime) {
+      throw new SimulatedPlasmaRuntimeInterruption();
+    }
+  } finally {
+    for (const { stagedPath } of preparedEntries) {
+      fs.rmSync(stagedPath, { force: true });
+    }
+  }
+}
+
+class SimulatedPlasmaRuntimeInterruption extends Error {
+  constructor() {
+    super('Simulated interruption after applying Plasma runtime state');
+  }
 }
 
 /**
@@ -568,6 +2005,11 @@ function readCurrentPlasmaActivityId(runCommand) {
 function readPrimaryPlasmaTarget(runCommand) {
   const primaryGeometry = readPrimaryOutputGeometry(runCommand);
   const plasmaScreens = readPlasmaScreenGeometries(runCommand);
+
+  if (plasmaScreens.length === 0) {
+    throw new Error('Could not read Plasma screen geometries.');
+  }
+
   const matchingScreen = plasmaScreens.find(
     (screen) =>
       screen.x === primaryGeometry.x &&
@@ -576,12 +2018,16 @@ function readPrimaryPlasmaTarget(runCommand) {
       screen.height === primaryGeometry.height
   );
 
+  if (!matchingScreen) {
+    throw new Error('Plasma screen geometry does not match the primary output.');
+  }
+
   return {
     height: primaryGeometry.height,
     otherScreens: plasmaScreens
       .map((screen) => screen.screen)
-      .filter((screen) => screen !== (matchingScreen?.screen ?? 0)),
-    screen: matchingScreen?.screen ?? 0,
+      .filter((screen) => screen !== matchingScreen.screen),
+    screen: matchingScreen.screen,
     width: primaryGeometry.width,
   };
 }
@@ -667,94 +2113,101 @@ function readPlasmaScreenGeometries(runCommand) {
 
 /**
  * @param {CommandRunner} runCommand
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>}
  */
 function readLivePanelStateById(runCommand) {
-  try {
-    const output = String(
-      runCommand(
-        'qdbus6',
+  const output = String(
+    runCommand(
+      'qdbus6',
+      [
+        'org.kde.plasmashell',
+        '/PlasmaShell',
+        'org.kde.PlasmaShell.evaluateScript',
         [
-          'org.kde.plasmashell',
-          '/PlasmaShell',
-          'org.kde.PlasmaShell.evaluateScript',
-          [
-            'var values = [];',
-            'var fallbackWidth = 0;',
-            'desktops().forEach(function(desktop) {',
-            '  try {',
-            '    var desktopGeometry = screenGeometry(desktop.screen);',
-            '    fallbackWidth = Math.max(fallbackWidth, desktopGeometry.width);',
-            '  } catch (error) {}',
-            '});',
-            'var ids = panelIds;',
-            'for (var i = 0; i < ids.length; i++) {',
-            '  var panel = panelById(ids[i]);',
-            '  var width = fallbackWidth;',
-            '  panel.currentConfigGroup = [];',
-            '  var lastScreen = Number(panel.readConfig("lastScreen"));',
-            '  try {',
-            '    var panelGeometry = screenGeometry(lastScreen);',
-            '    if (panelGeometry.width > 0) width = panelGeometry.width;',
-            '  } catch (error) {}',
-            '  values.push({',
-            '    id: String(ids[i]),',
-            '    hiding: String(panel.hiding),',
-            '    alignment: String(panel.alignment),',
-            '    lengthRatio: width > 0 ? panel.length / width : 1,',
-            '    height: panel.height',
-            '  });',
-            '}',
-            'print(JSON.stringify(values));',
-          ].join('\n'),
-        ],
-        { encoding: 'utf8' }
-      )
-    ).trim();
+          'var values = [];',
+          'var ids = panelIds;',
+          'for (var i = 0; i < ids.length; i++) {',
+          '  var panel = panelById(ids[i]);',
+          '  var width = 0;',
+          '  panel.currentConfigGroup = [];',
+          '  var lastScreen = Number(panel.readConfig("lastScreen"));',
+          '  var actualScreen = Number(panel.screen);',
+          '  if (actualScreen < 0) actualScreen = lastScreen;',
+          '  try {',
+          '    var panelGeometry = screenGeometry(actualScreen);',
+          '    if (panelGeometry.width > 0) width = panelGeometry.width;',
+          '  } catch (error) {}',
+          '  values.push({',
+          '    id: String(ids[i]),',
+          '    hiding: String(panel.hiding),',
+          '    alignment: String(panel.alignment),',
+          '    screen: actualScreen,',
+          '    location: Number(panel.location),',
+          '    lengthRatio: width > 0 ? panel.length / width : null,',
+          '    height: panel.height',
+          '  });',
+          '}',
+          'print(JSON.stringify(values));',
+        ].join('\n'),
+      ],
+      { encoding: 'utf8' }
+    )
+  ).trim();
 
-    return parsePanelStateJson(output);
-  } catch (error) {
-    console.warn(`Could not capture live Plasma panel runtime state: ${String(error)}`);
-    return new Map();
-  }
+  return parsePanelStateJson(output);
 }
 
 /**
  * @param {string} output
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>}
  */
 function parsePanelStateJson(output) {
   const parsed = parseJsonFromQdbusOutput(output);
 
   if (!Array.isArray(parsed)) {
-    return new Map();
+    throw new Error('Could not parse live Plasma panel runtime state.');
   }
 
-  return new Map(
-    parsed
-      .filter(
-        (entry) =>
-          typeof entry?.id === 'string' &&
-          (typeof entry.hiding === 'string' ||
-            typeof entry.alignment === 'string' ||
-            Number.isFinite(entry.lengthRatio) ||
-            Number.isFinite(entry.height))
-      )
-      .map((entry) => [
-        entry.id,
-        {
-          alignment: typeof entry.alignment === 'string' ? entry.alignment : undefined,
-          height: Number.isFinite(entry.height) ? Number(entry.height) : undefined,
-          hiding: typeof entry.hiding === 'string' ? entry.hiding : undefined,
-          lengthRatio: Number.isFinite(entry.lengthRatio) ? Number(entry.lengthRatio) : undefined,
-        },
-      ])
-  );
+  const states = new Map();
+
+  for (const entry of parsed) {
+    if (
+      typeof entry?.id !== 'string' ||
+      entry.id.length === 0 ||
+      !PLASMA_PANEL_HIDING_MODES.has(entry.hiding) ||
+      !PLASMA_PANEL_ALIGNMENTS.has(entry.alignment) ||
+      !Number.isSafeInteger(entry.screen) ||
+      entry.screen < 0 ||
+      !Number.isSafeInteger(entry.location) ||
+      entry.location < 0 ||
+      !Number.isFinite(entry.lengthRatio) ||
+      entry.lengthRatio <= 0 ||
+      !Number.isFinite(entry.height) ||
+      entry.height <= 0
+    ) {
+      throw new Error('Could not parse live Plasma panel runtime state.');
+    }
+
+    if (states.has(entry.id)) {
+      throw new Error(`Plasma panel ${entry.id} appeared more than once in runtime state.`);
+    }
+
+    states.set(entry.id, {
+      alignment: entry.alignment,
+      height: Number(entry.height),
+      hiding: entry.hiding,
+      lengthRatio: Number(entry.lengthRatio),
+      location: Number(entry.location),
+      screen: Number(entry.screen),
+    });
+  }
+
+  return states;
 }
 
 /**
  * @param {string} desktopLayout
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>} panelStateById
  * @returns {string}
  */
 function applyPanelStateToDesktopLayout(desktopLayout, panelStateById) {
@@ -816,6 +2269,7 @@ function readSnapshotPanelStateById(desktopLayout) {
       height: parseOptionalNumber(section.match(/^tyrianPanelHeight=(.+)$/mu)?.[1]),
       hiding: section.match(/^hiding=(.+)$/mu)?.[1],
       lengthRatio: parseOptionalNumber(section.match(/^tyrianPanelLengthRatio=(.+)$/mu)?.[1]),
+      location: parseOptionalNumber(section.match(/^location=(.+)$/mu)?.[1]),
     });
 
     return section;
@@ -825,30 +2279,45 @@ function readSnapshotPanelStateById(desktopLayout) {
 }
 
 /**
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @param {Map<string, PanelRuntimeState>} panelStateById
  * @param {number} primaryScreen
  * @param {CommandRunner} runCommand
  * @returns {void}
  */
 function restorePlasmaPanelState(panelStateById, primaryScreen, runCommand) {
-  if (panelStateById.size === 0) {
-    return;
-  }
-
-  runCommand(
-    'qdbus6',
-    [
-      'org.kde.plasmashell',
-      '/PlasmaShell',
-      'org.kde.PlasmaShell.evaluateScript',
-      buildPlasmaPanelStateScript(panelStateById, primaryScreen),
-    ],
-    { stdio: 'inherit' }
+  const output = String(
+    runCommand(
+      'qdbus6',
+      [
+        'org.kde.plasmashell',
+        '/PlasmaShell',
+        'org.kde.PlasmaShell.evaluateScript',
+        buildPlasmaPanelStateScript(panelStateById, primaryScreen),
+      ],
+      { encoding: 'utf8' }
+    )
   );
+  const result = /** @type {{ requested?: unknown; updated?: unknown; missing?: unknown }} */ (
+    parseJsonFromQdbusOutput(output)
+  );
+  const requestedIds = [...panelStateById.keys()].toSorted();
+  const updatedIds = Array.isArray(result?.updated)
+    ? result.updated.map(String).toSorted()
+    : undefined;
+
+  if (
+    !Array.isArray(result?.requested) ||
+    !Array.isArray(result?.missing) ||
+    result.missing.length > 0 ||
+    JSON.stringify(result.requested.map(String).toSorted()) !== JSON.stringify(requestedIds) ||
+    JSON.stringify(updatedIds) !== JSON.stringify(requestedIds)
+  ) {
+    throw new Error('Plasma panel runtime mutation did not update every requested panel');
+  }
 }
 
 /**
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} panelStateById
+ * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>} panelStateById
  * @param {number} primaryScreen
  * @returns {string}
  */
@@ -856,25 +2325,45 @@ function buildPlasmaPanelStateScript(panelStateById, primaryScreen) {
   return [
     `var panelStateById = ${JSON.stringify(Object.fromEntries(panelStateById))};`,
     `var primaryScreen = ${JSON.stringify(primaryScreen)};`,
-    'var primaryGeometry = screenGeometry(primaryScreen);',
+    'var mutation = { requested: [], updated: [], missing: [], removed: [] };',
+    'var existingPanelIds = panelIds.slice();',
+    'for (var existingIndex = 0; existingIndex < existingPanelIds.length; existingIndex++) {',
+    '  var existingId = String(existingPanelIds[existingIndex]);',
+    '  if (!Object.prototype.hasOwnProperty.call(panelStateById, existingId)) {',
+    '    var stalePanel = panelById(Number(existingId));',
+    '    if (stalePanel) {',
+    '      stalePanel.remove();',
+    '      mutation.removed.push(existingId);',
+    '    }',
+    '  }',
+    '}',
     'for (var id in panelStateById) {',
+    '  mutation.requested.push(String(id));',
     '  var panel = panelById(Number(id));',
     '  if (panel) {',
     '    var state = panelStateById[id];',
+    '    var targetScreen = typeof state.screen === "number" ? state.screen : primaryScreen;',
+    '    var targetGeometry = screenGeometry(targetScreen);',
     '    panel.currentConfigGroup = [];',
-    '    panel.writeConfig("lastScreen", String(primaryScreen));',
+    '    panel.writeConfig("lastScreen", String(targetScreen));',
+    '    panel.screen = targetScreen;',
+    '    if (typeof state.location === "number") panel.location = state.location;',
     '    if (state.hiding) panel.hiding = state.hiding;',
     '    if (state.alignment) panel.alignment = state.alignment;',
     '    if (state.height) panel.height = state.height;',
     '    if (state.lengthRatio) {',
-    '      var length = Math.round(primaryGeometry.width * state.lengthRatio);',
+    '      var length = Math.round(targetGeometry.width * state.lengthRatio);',
     '      panel.minimumLength = length;',
     '      panel.maximumLength = length;',
     '      panel.length = length;',
     '    }',
     '    panel.reloadConfig();',
+    '    mutation.updated.push(String(id));',
+    '  } else {',
+    '    mutation.missing.push(String(id));',
     '  }',
     '}',
+    'print(JSON.stringify(mutation));',
   ].join('\n');
 }
 
@@ -917,9 +2406,9 @@ function parseJsonFromQdbusOutput(output) {
  * @returns {string}
  */
 function stripAnsi(value) {
-  const escape = String.fromCharCode(27);
+  const escapeCharacter = String.fromCharCode(27);
 
-  return value.replaceAll(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, 'gu'), '');
+  return value.replaceAll(new RegExp(`${escapeCharacter}\\[[0-?]*[ -/]*[@-~]`, 'gu'), '');
 }
 
 /**
@@ -969,7 +2458,12 @@ function materializeRiceLayoutAssets(root, runtimeRoot, apply) {
   const sourcePath = path.join(root, RICE_WALLPAPER_PATH);
   const targetPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
-  operation(apply, `${apply ? 'copy' : 'would copy'} ${sourcePath} -> ${targetPath}`, () => {
+  if (!apply) {
+    operation(false, `would copy ${sourcePath} -> ${targetPath}`, () => {});
+    return;
+  }
+
+  operation(true, `copy ${sourcePath} -> ${targetPath}`, () => {
     installManagedPathRaw('copy', sourcePath, targetPath);
   });
 }
@@ -991,6 +2485,136 @@ export function buildPlasmaWallpaperScript(wallpaperPath) {
     '  desktop.writeConfig("Image", wallpaperImage);',
     '}',
   ].join('\n');
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @returns {WallpaperRuntimeState[]}
+ */
+function readLivePlasmaWallpaperState(runCommand) {
+  const output = String(
+    runCommand(
+      'qdbus6',
+      [
+        'org.kde.plasmashell',
+        '/PlasmaShell',
+        'org.kde.PlasmaShell.evaluateScript',
+        [
+          'var wallpaperStates = [];',
+          'var allDesktops = desktops();',
+          'for (var i = 0; i < allDesktops.length; i++) {',
+          '  var desktop = allDesktops[i];',
+          '  desktop.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];',
+          '  wallpaperStates.push({',
+          '    activityId: String(desktop.activityId),',
+          '    screen: Number(desktop.screen),',
+          '    wallpaperPlugin: desktop.wallpaperPlugin,',
+          '    image: String(desktop.readConfig("Image"))',
+          '  });',
+          '}',
+          'print(JSON.stringify(wallpaperStates));',
+        ].join('\n'),
+      ],
+      { encoding: 'utf8' }
+    )
+  );
+  const parsed = parseJsonFromQdbusOutput(output);
+
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every(
+      (wallpaper) =>
+        typeof wallpaper?.activityId === 'string' &&
+        Number.isSafeInteger(wallpaper.screen) &&
+        wallpaper.screen >= 0 &&
+        typeof wallpaper.image === 'string' &&
+        wallpaper.image.length > 0 &&
+        typeof wallpaper.wallpaperPlugin === 'string' &&
+        wallpaper.wallpaperPlugin.length > 0
+    )
+  ) {
+    throw new Error('Could not read live Plasma wallpaper runtime state');
+  }
+
+  return parsed.map(({ activityId, screen, image, wallpaperPlugin }) => ({
+    activityId,
+    screen,
+    image,
+    wallpaperPlugin,
+  }));
+}
+
+/**
+ * @param {WallpaperRuntimeState[]} wallpaperState
+ * @param {CommandRunner} runCommand
+ * @returns {void}
+ */
+function restorePlasmaWallpaperState(wallpaperState, runCommand) {
+  if (wallpaperState.length === 0) {
+    return;
+  }
+
+  const output = String(
+    runCommand(
+      'qdbus6',
+      [
+        'org.kde.plasmashell',
+        '/PlasmaShell',
+        'org.kde.PlasmaShell.evaluateScript',
+        [
+          `var wallpaperState = ${JSON.stringify(wallpaperState)};`,
+          'var mutation = { requested: wallpaperState.length, updated: 0 };',
+          'var allDesktops = desktops();',
+          'for (var i = 0; i < allDesktops.length; i++) {',
+          '  var desktop = allDesktops[i];',
+          '  for (var j = 0; j < wallpaperState.length; j++) {',
+          '    var state = wallpaperState[j];',
+          '    if (String(desktop.activityId) === state.activityId && Number(desktop.screen) === state.screen) {',
+          '      desktop.wallpaperPlugin = "org.kde.image";',
+          '      desktop.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];',
+          '      desktop.writeConfig("Image", state.image);',
+          '      desktop.wallpaperPlugin = state.wallpaperPlugin;',
+          '      mutation.updated += 1;',
+          '      break;',
+          '    }',
+          '  }',
+          '}',
+          'print(JSON.stringify(mutation));',
+        ].join('\n'),
+      ],
+      { encoding: 'utf8' }
+    )
+  );
+  const result = /** @type {{ requested?: unknown; updated?: unknown }} */ (
+    parseJsonFromQdbusOutput(output)
+  );
+
+  if (result.requested !== wallpaperState.length || result.updated !== wallpaperState.length) {
+    throw new Error('Plasma wallpaper runtime mutation did not restore every prior desktop');
+  }
+}
+
+/**
+ * @param {string} wallpaperPath
+ * @param {CommandRunner} runCommand
+ * @returns {WallpaperRuntimeState[]}
+ */
+function assertPlasmaWallpaperApplied(wallpaperPath, runCommand) {
+  const expectedPath = path.resolve(wallpaperPath);
+  const actualState = readLivePlasmaWallpaperState(runCommand);
+
+  if (
+    actualState.some(
+      ({ image, wallpaperPlugin }) =>
+        wallpaperPlugin !== 'org.kde.image' ||
+        path.resolve(parseWallpaperImagePath(image)) !== expectedPath
+    )
+  ) {
+    throw new Error('Plasma wallpaper runtime state did not match the requested wallpaper');
+  }
+
+  return actualState;
 }
 
 /**
@@ -1119,11 +2743,20 @@ function assertPortablePlasmaLayoutSnapshot(desktopLayout) {
 
 /**
  * @param {Map<string, string>} layoutContents
+ * @param {string} [captureHome]
  * @returns {void}
  */
-function assertNoHomePaths(layoutContents) {
+function assertNoHomePaths(layoutContents, captureHome) {
   for (const [snapshotPath, content] of layoutContents) {
-    if (/\/home\/[^/\s]+/u.test(content)) {
+    const normalizedCaptureHome = captureHome ? path.resolve(captureHome) : undefined;
+
+    if (
+      /\/(?:home|var\/home)\/[^/\s]+/u.test(content) ||
+      /\/root(?:\/|\s|$)/u.test(content) ||
+      (normalizedCaptureHome &&
+        (content.includes(normalizedCaptureHome) ||
+          content.includes(pathToFileURL(normalizedCaptureHome).href)))
+    ) {
       throw new Error(`${snapshotPath} contains a user home path; recapture or sanitize the rice`);
     }
 
@@ -1196,17 +2829,30 @@ function assertRiceManifest(manifest) {
 }
 
 /**
- * @param {string} targetPath
- * @param {string} backupRoot
- * @param {string} userHome
+ * @param {string} stagedPath
+ * @param {string} content
  * @returns {void}
  */
-function backupPath(targetPath, backupRoot, userHome) {
-  const backupPathTarget = backupHomePath(targetPath, backupRoot, userHome);
+function stageTextFile(stagedPath, content) {
+  writeTextFileRaw(stagedPath, content, { finalNewline: true });
+}
 
-  if (backupPathTarget) {
-    console.log(`backup: ${targetPath} -> ${backupPathTarget}`);
-  }
+/**
+ * @param {string} targetPath
+ * @returns {string}
+ */
+function buildUnusedStagedPath(targetPath) {
+  /** @type {string} */
+  let stagedPath;
+
+  do {
+    stagedPath = path.join(
+      path.dirname(targetPath),
+      `.${path.basename(targetPath)}.tyrian-${randomUUID()}.tmp`
+    );
+  } while (exists(stagedPath));
+
+  return stagedPath;
 }
 
 /**
@@ -1214,13 +2860,12 @@ function backupPath(targetPath, backupRoot, userHome) {
  * @returns {void}
  */
 function stopPlasmaShell(runCommand) {
-  try {
-    runCommand('systemctl', ['--user', 'stop', 'plasma-plasmashell.service'], {
-      stdio: 'inherit',
-    });
-  } catch (error) {
-    console.warn('Could not stop Plasma shell automatically; layout restore may be overwritten.');
-    console.warn(String(error));
+  runCommand('systemctl', ['--user', 'stop', PLASMA_SHELL_SERVICE], {
+    stdio: 'inherit',
+  });
+
+  if (isPlasmaShellActive(runCommand)) {
+    throw new Error(`${PLASMA_SHELL_SERVICE} remained active after stop`);
   }
 }
 
@@ -1229,36 +2874,23 @@ function stopPlasmaShell(runCommand) {
  * @returns {void}
  */
 function startPlasmaShell(runCommand) {
-  try {
-    runCommand('systemctl', ['--user', 'start', 'plasma-plasmashell.service'], {
-      stdio: 'inherit',
-    });
-  } catch (error) {
-    console.warn('Could not start Plasma shell automatically; log out/in or start plasmashell.');
-    console.warn(String(error));
+  runCommand('systemctl', ['--user', 'start', PLASMA_SHELL_SERVICE], {
+    stdio: 'inherit',
+  });
+  assertPlasmaShellActive(runCommand, 'Plasma shell start');
+}
+
+/**
+ * @param {CommandRunner} runCommand
+ * @param {string} owner
+ * @returns {void}
+ */
+function ensurePlasmaShellActive(runCommand, owner) {
+  if (!isPlasmaShellActive(runCommand)) {
+    startPlasmaShell(runCommand);
   }
-}
 
-/**
- * @param {string} filePath
- * @param {string} content
- * @param {string} message
- * @returns {void}
- */
-function writeTextFile(filePath, content, message) {
-  console.log(message);
-  writeTextFileRaw(filePath, content, { finalNewline: true });
-}
-
-/**
- * @param {string} filePath
- * @param {Buffer} content
- * @param {string} message
- * @returns {void}
- */
-function writeBinaryFile(filePath, content, message) {
-  console.log(message);
-  writeBinaryFileRaw(filePath, content);
+  assertPlasmaShellActive(runCommand, owner);
 }
 
 /**
@@ -1279,13 +2911,17 @@ function main() {
   }
 
   if (args.has('--capture-layout')) {
-    captureRiceLayout();
+    captureRiceLayout({ hasCommand });
     return;
   }
 
   if (args.has('--check')) {
     checkRiceSnapshot();
     return;
+  }
+
+  if (!args.has('--layout-only')) {
+    prepareLiveInstallRepository(repoRoot, { home, link: args.has('--link') });
   }
 
   installRice({

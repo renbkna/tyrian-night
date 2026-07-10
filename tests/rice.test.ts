@@ -7,61 +7,19 @@ import { expect, test } from 'bun:test';
 import {
   RICE_LAYOUT_FILES,
   RICE_LAYOUT_REQUIRED_COMMANDS,
-  RICE_REQUIRED_COMMANDS,
   RICE_MANIFEST_PATH,
   RICE_REQUIREMENTS_PATH,
   RICE_WALLPAPER_PATH,
   RICE_WALLPAPER_PLACEHOLDER,
   buildPlasmaWallpaperScript,
-  buildRiceInstallPlan,
   captureRiceLayout,
   checkRiceSnapshot,
   hydratePlasmaDesktopActivityIds,
   installPlasmaLayout,
   installRice,
 } from '../scripts/rice.mjs';
-import { TYRIAN_REQUIRED_COMMANDS } from '../scripts/commandChecks.mjs';
 
 const FIXTURE_HOME = '/home/example';
-
-test('rice install is a full layout restore by default', () => {
-  const fullPlan = buildRiceInstallPlan({ repoRoot: '/repo', home: FIXTURE_HOME });
-  const nextFullPlan = buildRiceInstallPlan({ repoRoot: '/repo', home: FIXTURE_HOME });
-
-  expect(fullPlan.styleInstaller).toBe('/repo/scripts/installLiveTyrian.mjs');
-  expect(fullPlan.layoutFiles.map((file) => file.homePath)).toEqual([
-    '.config/plasma-org.kde.plasma.desktop-appletsrc',
-    '.config/plasmashellrc',
-  ]);
-  expect(fullPlan.wallpaperPath).toBe(
-    `${FIXTURE_HOME}/.local/share/tyrian-night/assets/wallpaper-tyrian.png`
-  );
-  expect(fullPlan.repoWallpaperPath).toBe('/repo/assets/wallpaper-tyrian.png');
-  expect(fullPlan.runtimeRoot).toBe(`${FIXTURE_HOME}/.local/share/tyrian-night`);
-  expect(fullPlan.backupRoot).toContain(
-    `${FIXTURE_HOME}/.local/state/tyrian-night/backups/rice-layout-apply-`
-  );
-  expect(fullPlan.backupRoot).not.toContain('/repo');
-  expect(nextFullPlan.backupRoot).not.toBe(fullPlan.backupRoot);
-
-  const styleOnlyPlan = buildRiceInstallPlan({
-    repoRoot: '/repo',
-    home: FIXTURE_HOME,
-    withPlasmaLayout: false,
-  });
-
-  expect(styleOnlyPlan.layoutFiles).toEqual([]);
-
-  const linkedLayoutPlan = buildRiceInstallPlan({
-    repoRoot: '/repo',
-    home: FIXTURE_HOME,
-    link: true,
-    withPlasmaLayout: true,
-  });
-
-  expect(linkedLayoutPlan.wallpaperPath).toBe('/repo/assets/wallpaper-tyrian.png');
-  expect(linkedLayoutPlan.runtimeRoot).toBe('/repo');
-});
 
 test('rice snapshot is complete and portable', () => {
   const root = process.cwd();
@@ -101,6 +59,8 @@ test('rice snapshot is complete and portable', () => {
   expect(requirements).toContain('com.axzoros.yorhahud');
   expect(requirements).toContain('luisbocanegra.panel.colorizer');
   expect(requirements).toContain('org.kde.olib.thermalmonitor');
+  expect(requirements).toContain('Application widget style: `Breeze`');
+  expect(requirements).not.toContain('widgetStyle=Union');
   expect(manifest.wallpaperAsset).toBe(RICE_WALLPAPER_PATH);
   expect(manifest.layoutFiles).toEqual(RICE_LAYOUT_FILES);
 });
@@ -161,11 +121,15 @@ test('capturing rice keeps the requirements manifest pointer', () => {
       repoRoot: root,
       home: userHome,
       runCommand: (command, args) => {
-        if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
-          return '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":1,"height":42}]';
+        if (
+          command === 'qdbus6' &&
+          args.includes('org.kde.PlasmaShell.evaluateScript') &&
+          String(args.at(-1)).includes('var ids = panelIds')
+        ) {
+          return '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":1,"height":42,"screen":0,"location":4}]';
         }
 
-        return '';
+        return mockRiceRuntimeCommand(command, args);
       },
     });
 
@@ -274,18 +238,376 @@ test('capturing rice validates portability before overwriting tracked snapshots'
   }
 });
 
+test('rice capture rejects its injected home path outside standard home roots', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'alternate-capture-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const originalWallpaper = fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH));
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'new wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, `[Cache]\npath=${path.join(userHome, 'private-cache')}\n`);
+
+    expect(() =>
+      captureRiceLayout({ repoRoot: root, home: userHome, runCommand: mockRiceRuntimeCommand })
+    ).toThrow('contains a user home path');
+    expect(fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH))).toEqual(originalWallpaper);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice snapshot rejects root and var-home path forms', () => {
+  for (const privatePath of ['/root/private', '/var/home/example/private']) {
+    const root = makeTempRiceRepo();
+
+    try {
+      fs.appendFileSync(
+        path.join(root, RICE_LAYOUT_FILES[1].snapshotPath),
+        `\n[Private]\npath=${privatePath}\n`
+      );
+      expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('contains a user home path');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rice snapshot and capture reject symlinked or wrong-type source artifacts', () => {
+  const root = makeTempRiceRepo();
+  const wallpaperPath = path.join(root, RICE_WALLPAPER_PATH);
+  const realWallpaperPath = path.join(root, 'real-wallpaper.png');
+
+  try {
+    fs.writeFileSync(realWallpaperPath, 'wallpaper');
+    fs.rmSync(wallpaperPath);
+    fs.symlinkSync(realWallpaperPath, wallpaperPath);
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('traverses a symbolic link');
+
+    fs.rmSync(wallpaperPath);
+    fs.mkdirSync(wallpaperPath);
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('must be a regular file');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice snapshot rejects symlinked source ancestors', () => {
+  const root = makeTempRiceRepo();
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-external-config-'));
+  const configRoot = path.join(root, 'rice/plasma-layout/config');
+
+  try {
+    fs.cpSync(configRoot, externalRoot, { recursive: true });
+    fs.rmSync(configRoot, { recursive: true });
+    fs.symlinkSync(externalRoot, configRoot);
+
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('traverses a symbolic link');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
+test('rice capture rejects a symlinked output ancestor before touching Plasma or its target', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-capture-output-'));
+  const configRoot = path.join(root, 'rice/plasma-layout/config');
+  let commandCalled = false;
+
+  try {
+    fs.rmSync(configRoot, { recursive: true });
+    fs.writeFileSync(path.join(externalRoot, 'sentinel'), 'unchanged\n');
+    fs.symlinkSync(externalRoot, configRoot);
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        hasCommand: () => true,
+        runCommand: () => {
+          commandCalled = true;
+          throw new Error('must not run');
+        },
+      })
+    ).toThrow('Rice capture destination traverses a symbolic link');
+    expect(commandCalled).toBe(false);
+    expect(fs.readFileSync(path.join(externalRoot, 'sentinel'), 'utf8')).toBe('unchanged\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
+test('rice capture checks required commands before recovery or lifecycle work', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const journalPath = path.join(root, '.tyrian-rice-capture-journal.json');
+  let commandCalled = false;
+
+  try {
+    fs.writeFileSync(journalPath, '{ corrupt');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        hasCommand: (command) => command !== 'qdbus6',
+        runCommand: () => {
+          commandCalled = true;
+          throw new Error('must not run');
+        },
+      })
+    ).toThrow('Missing Tyrian rice capture commands: qdbus6');
+    expect(commandCalled).toBe(false);
+    expect(fs.readFileSync(journalPath, 'utf8')).toBe('{ corrupt');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice check blocks on a corrupt capture journal', () => {
+  const root = makeTempRiceRepo();
+  const desktopPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
+  const originalDesktop = fs.readFileSync(desktopPath, 'utf8');
+
+  try {
+    fs.writeFileSync(path.join(root, '.tyrian-rice-capture-journal.json'), '{ corrupt');
+
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('capture journal is corrupt');
+    expect(fs.readFileSync(desktopPath, 'utf8')).toBe(originalDesktop);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture recovers an interrupted publication from its fixed journal', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'capture-home');
+  const liveWallpaper = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const originalWallpaper = fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH), 'utf8');
+  const originalDesktop = fs.readFileSync(
+    path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
+    'utf8'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(liveWallpaper, 'new wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${liveWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptPublicationAfter: 2,
+      })
+    ).toThrow('Simulated interruption');
+    const journalPath = path.join(root, '.tyrian-rice-capture-journal.json');
+    expect(fs.existsSync(journalPath)).toBe(true);
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+    const alreadyRestored = journal.entries[0];
+    fs.copyFileSync(
+      path.join(root, alreadyRestored.backupPath),
+      path.join(root, alreadyRestored.targetPath)
+    );
+
+    checkRiceSnapshot({ repoRoot: root });
+
+    expect(fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH), 'utf8')).toBe(originalWallpaper);
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8')).toBe(
+      originalDesktop
+    );
+    expect(fs.existsSync(path.join(root, '.tyrian-rice-capture-journal.json'))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture recovery refuses a newly symlinked output ancestor', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'capture-home');
+  const liveWallpaper = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-recovery-output-'));
+  const configRoot = path.join(root, 'rice/plasma-layout/config');
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(liveWallpaper, 'new wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${liveWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptPublicationAfter: 1,
+      })
+    ).toThrow('Simulated interruption during rice capture publication');
+
+    fs.rmSync(configRoot, { recursive: true });
+    fs.writeFileSync(path.join(externalRoot, 'sentinel'), 'unchanged\n');
+    fs.symlinkSync(externalRoot, configRoot);
+
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow(
+      'Rice capture recovery traverses a symbolic link'
+    );
+    expect(fs.readFileSync(path.join(externalRoot, 'sentinel'), 'utf8')).toBe('unchanged\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(externalRoot, { recursive: true, force: true });
+  }
+});
+
+test('rice capture recovery preserves a post-interruption external generation', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'capture-home');
+  const liveWallpaper = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const publishedWallpaper = path.join(root, RICE_WALLPAPER_PATH);
+  const journalPath = path.join(root, '.tyrian-rice-capture-journal.json');
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(liveWallpaper, 'captured wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${liveWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptPublicationAfter: 1,
+      })
+    ).toThrow('Simulated interruption during rice capture publication');
+
+    fs.writeFileSync(publishedWallpaper, 'external generation');
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow(
+      'Rice capture recovery could not safely restore every target'
+    );
+    expect(fs.readFileSync(publishedWallpaper, 'utf8')).toBe('external generation');
+    expect(fs.existsSync(journalPath)).toBe(true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('concurrent rice captures wait for the live token owner', async () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'capture-home');
+  const liveWallpaper = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const ownerPath = path.join(root, '.tyrian-rice-capture.lock');
+  let holder: ReturnType<typeof Bun.spawn> | undefined;
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(liveWallpaper, 'new wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${liveWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    holder = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "const module = await import('./scripts/installOps.mjs');",
+          'module.withTokenFileLock(process.env.CAPTURE_LOCK, () => {',
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);',
+          '});',
+        ].join(' '),
+      ],
+      env: { ...process.env, CAPTURE_LOCK: ownerPath },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    const readyDeadline = Date.now() + 1_000;
+
+    while (!fs.existsSync(ownerPath) && Date.now() < readyDeadline) {
+      await Bun.sleep(5);
+    }
+
+    expect(fs.existsSync(ownerPath)).toBe(true);
+    const startedAt = Date.now();
+    captureRiceLayout({ repoRoot: root, home: userHome, runCommand: mockRiceRuntimeCommand });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+    await holder.exited;
+  } finally {
+    holder?.kill();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('layout-only rice rejects repository runtime aliases before mutation', () => {
+  const root = makeTempRiceRepo();
+  const alias = path.join(os.tmpdir(), `tyrian-rice-layout-alias-${process.pid}`);
+
+  try {
+    fs.rmSync(alias, { force: true });
+    fs.symlinkSync(root, alias);
+
+    expect(() =>
+      installRice({
+        repoRoot: alias,
+        home: root,
+        apply: false,
+        layoutOnly: true,
+        link: true,
+      })
+    ).toThrow('layout runtime root must not overlap');
+    expect(fs.existsSync(path.join(root, '.tyrian-rice-capture.lock'))).toBe(false);
+  } finally {
+    fs.rmSync(alias, { force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('layout-only rice install does not require terminal style commands', () => {
   const root = makeTempRiceRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-layout-home-'));
   const commandCalls: Array<{ command: string; args: string[] }> = [];
 
   try {
     expect(() =>
       installRice({
         repoRoot: root,
-        home: path.join(root, 'home'),
+        home,
         apply: true,
         layoutOnly: true,
-        hasCommand: (command) => command === 'qdbus6' || command === 'kscreen-doctor',
+        hasCommand: (command) =>
+          command === 'qdbus6' || command === 'kscreen-doctor' || command === 'systemctl',
         runCommand: (command, args) => {
           commandCalls.push({ command, args });
 
@@ -294,37 +616,97 @@ test('layout-only rice install does not require terminal style commands', () => 
       })
     ).not.toThrow();
     expect(commandCalls.map(({ command }) => command)).toEqual([
+      'systemctl',
       'qdbus6',
       'kscreen-doctor',
       'qdbus6',
+      'qdbus6',
+      'qdbus6',
       'systemctl',
       'systemctl',
+      'systemctl',
+      'systemctl',
+      'qdbus6',
+      'qdbus6',
+      'qdbus6',
       'qdbus6',
     ]);
     expect(
       commandCalls.filter(({ command }) => command === 'systemctl').map(({ args }) => args)
     ).toEqual([
+      ['--user', 'is-active', '--quiet', 'plasma-plasmashell.service'],
       ['--user', 'stop', 'plasma-plasmashell.service'],
+      ['--user', 'is-active', '--quiet', 'plasma-plasmashell.service'],
       ['--user', 'start', 'plasma-plasmashell.service'],
+      ['--user', 'is-active', '--quiet', 'plasma-plasmashell.service'],
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('layout-only rice interruption has one reported outer transaction and no inner backup', () => {
+  const root = makeTempRiceRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-layout-only-owner-'));
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  const backupRoot = path.join(home, '.local/state/tyrian-night/backups');
+
+  try {
+    mockPlasmaShellActive = true;
+    expect(() =>
+      installRice({
+        repoRoot: root,
+        home,
+        apply: true,
+        layoutOnly: true,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptAfterStop: true,
+      })
+    ).toThrow('Simulated interruption while the Plasma shell is stopped');
+
+    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8'))).toMatchObject({
+      owner: 'rice',
+      phase: 'prepared',
+    });
+    expect(fs.readdirSync(backupRoot)).toHaveLength(1);
+    expect(fs.readdirSync(backupRoot)[0]).toStartWith('rice-full-apply-');
+
+    installRice({
+      repoRoot: root,
+      home,
+      apply: false,
+      layoutOnly: true,
+      withPlasmaLayout: false,
+      runCommand: mockRiceRuntimeCommand,
+    });
+    expect(fs.existsSync(transactionPath)).toBe(false);
+  } finally {
+    mockPlasmaShellActive = true;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 test('style-only rice install does not require layout snapshots', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-style-test-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-style-home-'));
   const commandCalls: Array<{ command: string; args: string[] }> = [];
 
   try {
     fs.cpSync('assets', path.join(root, 'assets'), { recursive: true });
     fs.cpSync('terminal', path.join(root, 'terminal'), { recursive: true });
     fs.cpSync('desktop', path.join(root, 'desktop'), { recursive: true });
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
 
     expect(() =>
       installRice({
         repoRoot: root,
-        home: path.join(root, 'home'),
+        home,
         apply: true,
         withPlasmaLayout: false,
         hasCommand: () => true,
@@ -334,18 +716,10 @@ test('style-only rice install does not require layout snapshots', () => {
         },
       })
     ).not.toThrow();
-    expect(commandCalls.map(({ command }) => command)).toEqual([
-      'kwriteconfig6',
-      'kwriteconfig6',
-      'kwriteconfig6',
-      'kwriteconfig6',
-      'systemctl',
-      'dbus-update-activation-environment',
-      'plasma-apply-colorscheme',
-      'plasma-apply-desktoptheme',
-    ]);
+    expect(commandCalls).toEqual([]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -371,56 +745,62 @@ test('full rice install honors injected home and command runner for style and la
     const plasmarc = path.join(home, '.config/plasmarc');
 
     expect(fs.existsSync(path.join(home, '.config/ghostty/config'))).toBe(true);
+    expect(fs.existsSync(path.join(home, '.config/foot/foot.ini'))).toBe(true);
     expect(commandCalls.map(({ command }) => command)).toEqual([
-      'kwriteconfig6',
-      'kwriteconfig6',
-      'kwriteconfig6',
-      'kwriteconfig6',
       'systemctl',
-      'dbus-update-activation-environment',
-      'plasma-apply-colorscheme',
-      'plasma-apply-desktoptheme',
       'qdbus6',
       'kscreen-doctor',
       'qdbus6',
+      'qdbus6',
+      'qdbus6',
+      'systemctl',
+      'systemctl',
       'systemctl',
       'systemctl',
       'qdbus6',
       'qdbus6',
+      'qdbus6',
+      'qdbus6',
     ]);
-    expect(commandCalls.filter(({ command }) => command === 'kwriteconfig6')).toEqual([
-      {
-        command: 'kwriteconfig6',
-        args: [
-          '--file',
-          kdeglobals,
-          '--group',
-          'KDE',
-          '--key',
-          'LookAndFeelPackage',
-          'TyrianNight',
-        ],
-      },
-      {
-        command: 'kwriteconfig6',
-        args: ['--file', kdeglobals, '--group', 'General', '--key', 'ColorScheme', 'TyrianNight'],
-      },
-      {
-        command: 'kwriteconfig6',
-        args: ['--file', kdeglobals, '--group', 'KDE', '--key', 'widgetStyle', 'Breeze'],
-      },
-      {
-        command: 'kwriteconfig6',
-        args: ['--file', plasmarc, '--group', 'Theme', '--key', 'name', 'TyrianNight'],
-      },
-    ]);
+    expect(fs.readFileSync(kdeglobals, 'utf8')).toContain('widgetStyle=Breeze');
+    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('name=TyrianNight');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('full rice validates layout runtime before mutating style files', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-preflight-'));
+  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+
+  try {
+    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
+    fs.writeFileSync(ghosttyConfig, 'keep=true\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: (command, args) => {
+          if (args.includes('org.kde.ActivityManager.Activities.CurrentActivity')) {
+            throw new Error('Plasma activity unavailable');
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('Plasma activity unavailable');
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('keep=true\n');
+    expect(fs.existsSync(path.join(home, '.local/share/tyrian-night'))).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 test('Plasma layout restore has its own runtime command contract', () => {
-  expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6', 'kscreen-doctor']);
+  expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6', 'kscreen-doctor', 'systemctl']);
 });
 
 test('Plasma layout restore maps captured panels to the current primary screen', () => {
@@ -498,7 +878,7 @@ test('Plasma layout restore maps captured panels to the current primary screen',
     expect(installedDesktop).toContain('lastResolution=2560x1440');
     expect(panelStateScript).toContain('"149"');
     expect(panelStateScript).toContain('"hiding":"dodgewindows"');
-    expect(panelStateScript).toContain('panel.writeConfig("lastScreen", String(primaryScreen))');
+    expect(panelStateScript).toContain('panel.writeConfig("lastScreen", String(targetScreen))');
     expect(panelStateScript).not.toContain('panel.screen = primaryScreen');
 
     const installedShell = fs.readFileSync(path.join(home, RICE_LAYOUT_FILES[1].homePath), 'utf8');
@@ -542,8 +922,34 @@ test('Plasma qdbus JSON parsing ignores bracketed warning prefixes', () => {
   }
 });
 
-test('Rice runtime and live installer share the same command-policy root set', () => {
-  expect(RICE_REQUIRED_COMMANDS).toEqual(TYRIAN_REQUIRED_COMMANDS);
+test('Plasma layout restore rejects an unmapped primary screen before mutation', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+
+  try {
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          if (
+            command === 'qdbus6' &&
+            args.includes('org.kde.PlasmaShell.evaluateScript') &&
+            String(args.at(-1)).includes('screenGeometry')
+          ) {
+            return '[]';
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('Could not read Plasma screen geometries');
+    expect(fs.existsSync(targetDesktop)).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Plasma layout restore validates all source snapshots before overwriting live files', () => {
@@ -610,6 +1016,789 @@ test('Plasma layout restore validates snapshot portability before overwriting li
     expect(fs.readFileSync(targetDesktop, 'utf8')).toBe('[Existing]\nkeep=true\n');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout restore rejects an inactive shell without starting it', () => {
+  const root = makeTempRiceRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-inactive-home-'));
+  const commandCalls: Array<{ command: string; args: string[] }> = [];
+
+  try {
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          commandCalls.push({ command, args });
+
+          if (command === 'systemctl' && args.includes('is-active')) {
+            throw new Error('inactive');
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('requires an active plasma-plasmashell.service');
+    expect(commandCalls).toEqual([
+      {
+        command: 'systemctl',
+        args: ['--user', 'is-active', '--quiet', 'plasma-plasmashell.service'],
+      },
+    ]);
+    expect(fs.existsSync(path.join(home, RICE_LAYOUT_FILES[0].homePath))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Plasma session mutation rejects another home without an injected runner', () => {
+  const root = makeTempRiceRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-other-home-'));
+
+  try {
+    expect(() => installPlasmaLayout({ repoRoot: root, home, apply: true })).toThrow(
+      'cannot mutate the current Plasma session for another home'
+    );
+    expect(fs.existsSync(path.join(root, '.tyrian-rice-capture.lock'))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('standalone layout rejects physical symlink and wrong-type ancestors before mutation', () => {
+  for (const ancestorType of ['symlink', 'file'] as const) {
+    const root = makeTempRiceRepo();
+    const home = path.join(root, `home-${ancestorType}`);
+    const external = path.join(root, `external-${ancestorType}`);
+    const configPath = path.join(home, '.config');
+
+    try {
+      fs.mkdirSync(home, { recursive: true });
+
+      if (ancestorType === 'symlink') {
+        fs.mkdirSync(external, { recursive: true });
+        fs.symlinkSync(external, configPath);
+      } else {
+        fs.writeFileSync(configPath, 'not a directory\n');
+      }
+
+      expect(() =>
+        installPlasmaLayout({
+          repoRoot: root,
+          home,
+          apply: true,
+          runCommand: mockRiceRuntimeCommand,
+        })
+      ).toThrow(
+        ancestorType === 'symlink' ? 'traverses a symbolic link' : 'non-directory ancestor'
+      );
+      expect(fs.existsSync(path.join(external, 'plasma-org.kde.plasma.desktop-appletsrc'))).toBe(
+        false
+      );
+      expect(
+        fs.existsSync(path.join(home, '.local/state/tyrian-night/live-install-transaction.json'))
+      ).toBe(false);
+      expect(
+        fs.existsSync(path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json'))
+      ).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('standalone layout interruption is recovered by its reported persisted transaction', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const desktopPath = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  const lifecyclePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+
+  try {
+    mockPlasmaShellActive = true;
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(desktopPath, 'original desktop\n');
+    fs.writeFileSync(shellPath, 'original shell\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptAfterStop: true,
+      })
+    ).toThrow('Simulated interruption while the Plasma shell is stopped');
+
+    const transaction = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
+    const lifecycle = JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'));
+    expect(transaction).toMatchObject({ owner: 'layout', phase: 'prepared' });
+    expect(transaction.backupRoot).toContain('rice-layout-apply-');
+    expect(lifecycle).toMatchObject({
+      version: 3,
+      owner: 'layout',
+      phase: 'prepared',
+      previousPanels: expect.arrayContaining([expect.objectContaining({ id: '149' })]),
+    });
+
+    installPlasmaLayout({
+      repoRoot: root,
+      home,
+      apply: false,
+      runCommand: mockRiceRuntimeCommand,
+    });
+
+    expect(fs.readFileSync(desktopPath, 'utf8')).toBe('original desktop\n');
+    expect(fs.readFileSync(shellPath, 'utf8')).toBe('original shell\n');
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+    expect(mockPlasmaShellActive).toBe(true);
+  } finally {
+    mockPlasmaShellActive = true;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout restore requires a stopped shell before replacing files', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const targetShell = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  let stopCalls = 0;
+
+  try {
+    fs.mkdirSync(path.dirname(targetDesktop), { recursive: true });
+    fs.writeFileSync(targetDesktop, 'desktop=original\n');
+    fs.writeFileSync(targetShell, 'shell=original\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          if (command === 'systemctl' && args.includes('stop') && stopCalls++ === 0) {
+            throw new Error('stop failed');
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('stop failed');
+    expect(fs.readFileSync(targetDesktop, 'utf8')).toBe('desktop=original\n');
+    expect(fs.readFileSync(targetShell, 'utf8')).toBe('shell=original\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout restore rolls back committed files and restarts after replacement failure', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const targetShell = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const commandCalls: Array<{ command: string; args: string[] }> = [];
+
+  try {
+    fs.mkdirSync(path.dirname(targetDesktop), { recursive: true });
+    fs.writeFileSync(targetDesktop, 'desktop=original\n');
+    fs.mkdirSync(targetShell, { recursive: true });
+    fs.writeFileSync(path.join(targetShell, 'keep.txt'), 'keep\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          commandCalls.push({ command, args });
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow();
+    expect(fs.readFileSync(targetDesktop, 'utf8')).toBe('desktop=original\n');
+    expect(fs.readFileSync(path.join(targetShell, 'keep.txt'), 'utf8')).toBe('keep\n');
+    expect(commandCalls).toContainEqual({
+      command: 'systemctl',
+      args: ['--user', 'start', 'plasma-plasmashell.service'],
+    });
+    expect(
+      fs.readdirSync(path.dirname(targetDesktop)).some((name) => name.includes('.tyrian-'))
+    ).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout restart failure restores files and restarts the previous layout', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const targetShell = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  let startCalls = 0;
+
+  try {
+    fs.mkdirSync(path.dirname(targetDesktop), { recursive: true });
+    fs.writeFileSync(targetDesktop, 'desktop=original\n');
+    fs.writeFileSync(targetShell, 'shell=original\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          if (command === 'systemctl' && args.includes('start') && startCalls++ === 0) {
+            throw new Error('initial restart failed');
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('initial restart failed');
+    expect(startCalls).toBe(2);
+    expect(fs.readFileSync(targetDesktop, 'utf8')).toBe('desktop=original\n');
+    expect(fs.readFileSync(targetShell, 'utf8')).toBe('shell=original\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma rollback restores the prior image and non-image wallpaper plugin', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const targetShell = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const previousWallpaper = path.join(home, 'previous-wallpaper.png');
+  const wallpaperScripts: string[] = [];
+  const runtime = makeStatefulPlasmaRuntime(previousWallpaper);
+
+  try {
+    runtime.state.wallpaperPlugin = 'org.kde.slideshow';
+    fs.mkdirSync(path.dirname(targetDesktop), { recursive: true });
+    fs.writeFileSync(previousWallpaper, 'previous wallpaper');
+    fs.writeFileSync(
+      targetDesktop,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${previousWallpaper}\n`
+    );
+    fs.writeFileSync(targetShell, 'shell=original\n');
+    const originalDesktop = fs.readFileSync(targetDesktop, 'utf8');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          const script = String(args.at(-1));
+
+          if (
+            command === 'qdbus6' &&
+            (script.includes('var wallpaperImage') || script.includes('var wallpaperState ='))
+          ) {
+            wallpaperScripts.push(script);
+
+            if (script.includes('var wallpaperImage')) {
+              runtime.runCommand(command, args);
+              throw new Error('wallpaper qdbus failed');
+            }
+          }
+
+          return runtime.runCommand(command, args);
+        },
+      })
+    ).toThrow('wallpaper qdbus failed');
+    expect(fs.readFileSync(targetDesktop, 'utf8')).toBe(originalDesktop);
+    expect(fs.readFileSync(targetShell, 'utf8')).toBe('shell=original\n');
+    expect(wallpaperScripts).toHaveLength(2);
+    expect(wallpaperScripts[1]).toContain(previousWallpaper);
+    expect(wallpaperScripts[1]).toContain('org.kde.slideshow');
+    expect(runtime.state.wallpaperPath).toBe(previousWallpaper);
+    expect(runtime.state.wallpaperPlugin).toBe('org.kde.slideshow');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout rejects a desired image when the wallpaper plugin remains wrong', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const targetDesktop = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const targetShell = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const previousWallpaper = path.join(home, 'previous-wallpaper.png');
+  const lifecyclePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const runtime = makeStatefulPlasmaRuntime(previousWallpaper);
+  let ignoredPluginMutations = 0;
+
+  try {
+    runtime.state.wallpaperPlugin = 'org.kde.slideshow';
+    fs.mkdirSync(path.dirname(targetDesktop), { recursive: true });
+    fs.writeFileSync(previousWallpaper, 'previous wallpaper');
+    fs.writeFileSync(
+      targetDesktop,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${previousWallpaper}\n`
+    );
+    fs.writeFileSync(targetShell, 'shell=original\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          const script = String(args.at(-1));
+
+          if (command === 'qdbus6' && script.includes('var wallpaperImage')) {
+            ignoredPluginMutations += 1;
+            runtime.state.wallpaperPath = JSON.parse(
+              script.match(/^var wallpaperImage = (.+);$/mu)?.[1] ?? '""'
+            );
+            return '';
+          }
+
+          return runtime.runCommand(command, args);
+        },
+      })
+    ).toThrow('wallpaper runtime state did not match the requested wallpaper');
+    expect(ignoredPluginMutations).toBe(1);
+    expect(runtime.state.wallpaperPath).toBe(previousWallpaper);
+    expect(runtime.state.wallpaperPlugin).toBe('org.kde.slideshow');
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout rejects a successful panel mutation no-op before runtimeApplied', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const desktopPath = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  let panelMutations = 0;
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(desktopPath, 'original desktop\n');
+    fs.writeFileSync(shellPath, 'original shell\n');
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          const script = String(args.at(-1));
+
+          if (command === 'qdbus6' && script.includes('var panelStateById')) {
+            panelMutations += 1;
+
+            if (panelMutations === 1) {
+              return '{"requested":["149"],"updated":[],"missing":[]}';
+            }
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('did not update every requested panel');
+    expect(panelMutations).toBe(2);
+    expect(fs.readFileSync(desktopPath, 'utf8')).toBe('original desktop\n');
+    expect(fs.readFileSync(shellPath, 'utf8')).toBe('original shell\n');
+    expect(fs.existsSync(path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json'))).toBe(
+      false
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout removes a stale extra panel and proves the exact owned generation', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+
+  try {
+    mockExtraPanelRuntime = {
+      id: '999',
+      alignment: 'left',
+      height: 24,
+      hiding: 'autohide',
+      lengthRatio: 0.5,
+      location: 1,
+      screen: 1,
+    };
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: mockRiceRuntimeCommand,
+      })
+    ).not.toThrow();
+    expect(mockExtraPanelRuntime).toBeUndefined();
+  } finally {
+    mockExtraPanelRuntime = undefined;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout owns an empty panel generation and removes every stale panel', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const snapshotPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
+  let runtimePanels = [
+    {
+      id: '999',
+      alignment: 'left',
+      height: 24,
+      hiding: 'autohide',
+      lengthRatio: 0.5,
+      location: 1,
+      screen: 1,
+    },
+  ];
+  let panelMutations = 0;
+
+  try {
+    fs.writeFileSync(
+      snapshotPath,
+      fs
+        .readFileSync(snapshotPath, 'utf8')
+        .replace(/\[Containments\]\[(?:149|231)\]\n(?:(?!^\[).*\n?)*/gmu, '')
+    );
+
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        apply: true,
+        runCommand: (command, args) => {
+          const script = String(args.at(-1));
+
+          if (command === 'qdbus6' && script.includes('var ids = panelIds')) {
+            return JSON.stringify(runtimePanels);
+          }
+
+          if (command === 'qdbus6' && script.includes('var panelStateById')) {
+            const desired = JSON.parse(script.match(/^var panelStateById = (.+);$/mu)?.[1] ?? '{}');
+            panelMutations += 1;
+            runtimePanels = Object.entries(desired).map(([id, state]) => ({
+              id,
+              ...(state as (typeof runtimePanels)[number]),
+            }));
+            const requested = Object.keys(desired);
+            return JSON.stringify({ requested, updated: requested, missing: [] });
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).not.toThrow();
+    expect(panelMutations).toBe(1);
+    expect(runtimePanels).toEqual([]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('full rice rolls back a successful style install when layout restore fails', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-style-rollback-'));
+  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  let layoutStopCalls = 0;
+
+  try {
+    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
+    fs.writeFileSync(ghosttyConfig, 'original style\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: (command, args) => {
+          if (command === 'systemctl' && args.includes('stop') && layoutStopCalls++ === 0) {
+            throw new Error('layout stop failed');
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('layout stop failed');
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
+    expect(fs.existsSync(path.join(home, '.local/share/tyrian-night'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.config/foot/foot.ini'))).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('full rice recovers a process interruption between style and layout', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-gap-recovery-'));
+  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+
+  try {
+    mockPlasmaShellActive = true;
+    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
+    fs.writeFileSync(ghosttyConfig, 'original style\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptAfterStyle: true,
+      })
+    ).toThrow('Simulated interruption between rice style and layout');
+    expect(fs.existsSync(transactionPath)).toBe(true);
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toBe('original style\n');
+
+    installRice({
+      repoRoot: process.cwd(),
+      home,
+      apply: false,
+      withPlasmaLayout: false,
+      runCommand: mockRiceRuntimeCommand,
+    });
+
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
+    expect(fs.existsSync(path.join(home, '.local/share/tyrian-night'))).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+  } finally {
+    mockPlasmaShellActive = true;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('full rice restores files before restarting a shell interrupted during layout', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-layout-recovery-'));
+  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  const desktopPath = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  const lifecyclePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+
+  try {
+    mockPlasmaShellActive = true;
+    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
+    fs.writeFileSync(ghosttyConfig, 'original style\n');
+    fs.writeFileSync(desktopPath, 'original desktop\n');
+    fs.writeFileSync(shellPath, 'original shell\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptAfterStop: true,
+      })
+    ).toThrow('Simulated interruption while the Plasma shell is stopped');
+    expect(mockPlasmaShellActive).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(true);
+    expect(fs.existsSync(lifecyclePath)).toBe(true);
+
+    installRice({
+      repoRoot: process.cwd(),
+      home,
+      apply: false,
+      withPlasmaLayout: false,
+      runCommand: (command, args) => {
+        if (command === 'systemctl' && args.includes('start')) {
+          expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
+          expect(fs.readFileSync(desktopPath, 'utf8')).toBe('original desktop\n');
+          expect(fs.readFileSync(shellPath, 'utf8')).toBe('original shell\n');
+        }
+
+        return mockRiceRuntimeCommand(command, args);
+      },
+    });
+
+    expect(mockPlasmaShellActive).toBe(true);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+    expect(fs.existsSync(path.join(home, '.local/share/tyrian-night'))).toBe(false);
+  } finally {
+    mockPlasmaShellActive = true;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('full rice crash after runtime mutation restores persisted panels and wallpaper', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-runtime-recovery-'));
+  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  const desktopPath = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const previousWallpaper = path.join(home, 'previous-wallpaper.png');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  const lifecyclePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const runtime = makeStatefulPlasmaRuntime(previousWallpaper);
+
+  try {
+    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
+    fs.writeFileSync(ghosttyConfig, 'original style\n');
+    fs.writeFileSync(previousWallpaper, 'previous wallpaper\n');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${previousWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, 'original shell\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: runtime.runCommand,
+        testInterruptAfterRuntime: true,
+      })
+    ).toThrow('Simulated interruption after applying Plasma runtime state');
+    expect(runtime.state.alignment).toBe('center');
+    expect(runtime.state.wallpaperPath).toContain('wallpaper-tyrian.png');
+    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).phase).toBe('prepared');
+    expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'))).toMatchObject({
+      phase: 'runtimeApplied',
+      previousWallpapers: [
+        expect.objectContaining({
+          image: previousWallpaper,
+          wallpaperPlugin: 'org.kde.image',
+        }),
+      ],
+      previousPanels: expect.arrayContaining([
+        expect.objectContaining({ alignment: 'right', id: '149' }),
+      ]),
+    });
+
+    installRice({
+      repoRoot: process.cwd(),
+      home,
+      apply: false,
+      withPlasmaLayout: false,
+      runCommand: runtime.runCommand,
+    });
+
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
+    expect(runtime.state.alignment).toBe('right');
+    expect(runtime.state.wallpaperPath).toBe(previousWallpaper);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('committed cleanup failure warns, preserves rice success, and closes on next recovery', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-commit-recovery-'));
+  const desktopPath = path.join(home, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(home, RICE_LAYOUT_FILES[1].homePath);
+  const previousWallpaper = path.join(home, 'previous-wallpaper.png');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  const lifecyclePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const runtime = makeStatefulPlasmaRuntime(previousWallpaper);
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+
+  try {
+    console.warn = (message) => warnings.push(String(message));
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(previousWallpaper, 'previous wallpaper\n');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${previousWallpaper}\n`
+    );
+    fs.writeFileSync(shellPath, 'original shell\n');
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        hasCommand: () => true,
+        runCommand: runtime.runCommand,
+        testInterruptAfterCommit: true,
+      })
+    ).not.toThrow();
+    expect(warnings).toContainEqual(
+      expect.stringContaining('Committed rice finalization was deferred')
+    );
+    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).phase).toBe('committed');
+    expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'))).toMatchObject({
+      phase: 'runtimeApplied',
+      desiredPanels: expect.arrayContaining([
+        expect.objectContaining({ id: '149', location: 4, screen: 0 }),
+        expect.objectContaining({ id: '231', location: 3, screen: 0 }),
+      ]),
+      desiredWallpapers: [
+        expect.objectContaining({
+          image: expect.stringContaining('wallpaper-tyrian.png'),
+          wallpaperPlugin: 'org.kde.image',
+        }),
+      ],
+    });
+    expect(runtime.state.alignment).toBe('center');
+    expect(runtime.state.wallpaperPath).toContain('wallpaper-tyrian.png');
+
+    runtime.state.active = false;
+    runtime.state.alignment = 'right';
+    runtime.state.secondAlignment = 'left';
+    runtime.state.wallpaperPath = 'file:///tmp/committed-runtime-drift.png';
+
+    expect(() =>
+      installRice({
+        repoRoot: process.cwd(),
+        home,
+        apply: false,
+        withPlasmaLayout: false,
+        runCommand: runtime.runCommand,
+        testInterruptRecoveryAfterFilesystem: true,
+      })
+    ).toThrow('Simulated interruption during the committed filesystem handoff');
+    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).phase).toBe('committed');
+    expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8')).phase).toBe('runtimeApplied');
+
+    installRice({
+      repoRoot: process.cwd(),
+      home,
+      apply: false,
+      withPlasmaLayout: false,
+      runCommand: runtime.runCommand,
+    });
+
+    expect(runtime.state.alignment).toBe('center');
+    expect(runtime.state.secondAlignment).toBe('center');
+    expect(runtime.state.wallpaperPath).toContain('wallpaper-tyrian.png');
+    expect(runtime.state.active).toBe(true);
+    expect(fs.existsSync(path.join(home, '.config/ghostty/config'))).toBe(true);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+  } finally {
+    console.warn = originalWarn;
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -698,6 +1887,554 @@ test('capturing rice accepts live Plasma file URI wallpaper paths', () => {
   }
 });
 
+test('rice capture freezes files under the shell lifecycle and restores active state', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecycle: string[] = [];
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    captureRiceLayout({
+      repoRoot: root,
+      home: userHome,
+      runCommand: (command, args) => {
+        if (command === 'systemctl') {
+          lifecycle.push(String(args[1]));
+        }
+
+        return mockRiceRuntimeCommand(command, args);
+      },
+    });
+
+    expect(lifecycle).toEqual([
+      'is-active',
+      'stop',
+      'is-active',
+      'is-active',
+      'start',
+      'is-active',
+      'is-active',
+    ]);
+    expect(fs.existsSync(path.join(root, '.tyrian-rice-capture-journal.json'))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma lifecycle flushes its first-created parent chain before stopping the shell', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const syncedDirectories = new Set<string>();
+  const originalFsync = fs.fsyncSync;
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+    fs.fsyncSync = (descriptor) => {
+      const descriptorPath = fs.readlinkSync(`/proc/self/fd/${descriptor}`);
+
+      if (fs.statSync(descriptorPath).isDirectory()) {
+        syncedDirectories.add(fs.realpathSync(descriptorPath));
+      }
+
+      originalFsync(descriptor);
+    };
+
+    captureRiceLayout({
+      repoRoot: root,
+      home: userHome,
+      runCommand: (command, args) => {
+        if (command === 'systemctl' && args.includes('stop')) {
+          for (const relativeDirectory of ['.local', '.local/state', '.local/state/tyrian-night']) {
+            expect(syncedDirectories).toContain(
+              fs.realpathSync(path.join(userHome, relativeDirectory))
+            );
+          }
+        }
+
+        return mockRiceRuntimeCommand(command, args);
+      },
+    });
+  } finally {
+    fs.fsyncSync = originalFsync;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('capture interruption persists and recovers exact panel placement and wallpaper', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecyclePath = path.join(userHome, '.local/state/tyrian-night/plasma-lifecycle.json');
+
+  try {
+    mockPlasmaShellActive = true;
+    mockPanelRuntime = { ...mockPanelRuntime, location: 8, screen: 1 };
+    mockWallpaperRuntime = wallpaperPath;
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: mockRiceRuntimeCommand,
+        testInterruptAfterStop: true,
+      })
+    ).toThrow('Simulated interruption while the Plasma shell is stopped');
+    expect(mockPlasmaShellActive).toBe(false);
+    expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'))).toMatchObject({
+      previousPanels: expect.arrayContaining([
+        expect.objectContaining({ id: '149', location: 8, screen: 1 }),
+      ]),
+      previousWallpapers: [
+        expect.objectContaining({
+          image: wallpaperPath,
+          screen: 0,
+          wallpaperPlugin: 'org.kde.image',
+        }),
+      ],
+    });
+
+    captureRiceLayout({
+      repoRoot: root,
+      home: userHome,
+      runCommand: mockRiceRuntimeCommand,
+    });
+
+    expect(mockPlasmaShellActive).toBe(true);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+  } finally {
+    mockPlasmaShellActive = true;
+    mockPanelRuntime = { ...mockPanelRuntime, location: 4, screen: 0 };
+    mockWallpaperRuntime = 'file:///tmp/tyrian-mock-wallpaper.png';
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('capture crash before restart proof reconciles panels from its persisted pre-state', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecyclePath = path.join(userHome, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const runtime = makeStatefulPlasmaRuntime(wallpaperPath);
+  runtime.state.alignment = 'center';
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      [
+        '[Containments][149]',
+        'formfactor=2',
+        'location=4',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][1][Wallpaper][org.kde.image][General]',
+        `Image=${wallpaperPath}`,
+        '',
+      ].join('\n')
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        testInterruptAfterRestart: true,
+        runCommand: (command, args) => {
+          const result = runtime.runCommand(command, args);
+
+          if (command === 'systemctl' && args.includes('start')) {
+            runtime.state.alignment = 'right';
+          }
+
+          return result;
+        },
+      })
+    ).toThrow('Simulated interruption before proving the restarted Plasma state');
+    expect(runtime.state.alignment).toBe('right');
+    expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8'))).toMatchObject({
+      owner: 'capture',
+      phase: 'prepared',
+      previousPanels: expect.arrayContaining([
+        expect.objectContaining({ alignment: 'center', id: '149' }),
+      ]),
+    });
+
+    captureRiceLayout({
+      repoRoot: root,
+      home: userHome,
+      runCommand: runtime.runCommand,
+    });
+
+    expect(runtime.state.alignment).toBe('center');
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture rejects an inactive shell without starting it', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const commandCalls: Array<{ command: string; args: string[] }> = [];
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(desktopPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          commandCalls.push({ command, args });
+          throw new Error('inactive');
+        },
+      })
+    ).toThrow('requires an active plasma-plasmashell.service');
+    expect(commandCalls).toHaveLength(1);
+    expect(commandCalls[0]?.args).toEqual([
+      '--user',
+      'is-active',
+      '--quiet',
+      'plasma-plasmashell.service',
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture rejects a panel generation change while freezing files', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecycle: string[] = [];
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      [
+        '[Containments][149]',
+        'formfactor=2',
+        'location=4',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][1][Wallpaper][org.kde.image][General]',
+        `Image=${wallpaperPath}`,
+        '',
+      ].join('\n')
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          if (command === 'systemctl') {
+            lifecycle.push(String(args[1]));
+
+            if (args.includes('stop')) {
+              fs.writeFileSync(
+                desktopPath,
+                fs
+                  .readFileSync(desktopPath, 'utf8')
+                  .replace('[Containments][149]', '[Containments][231]')
+              );
+            }
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('panel generation changed');
+    expect(lifecycle).toEqual([
+      'is-active',
+      'stop',
+      'is-active',
+      'is-active',
+      'start',
+      'is-active',
+      'is-active',
+    ]);
+    expect(fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH), 'utf8')).toBe('wallpaper');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture rejects non-ID runtime state drift after shell restart', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const originalSnapshot = fs.readFileSync(
+    path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
+    'utf8'
+  );
+  let panelQueries = 0;
+  let reconciliationScripts = 0;
+  let panelAlignment = 'center';
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      [
+        '[Containments][149]',
+        'formfactor=2',
+        'location=4',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][1][Wallpaper][org.kde.image][General]',
+        `Image=${wallpaperPath}`,
+        '',
+      ].join('\n')
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          const script = String(args.at(-1));
+
+          if (command === 'qdbus6' && script.includes('var ids = panelIds')) {
+            panelQueries += 1;
+            return JSON.stringify([
+              {
+                id: '149',
+                hiding: 'dodgewindows',
+                alignment: panelQueries === 2 ? 'right' : panelAlignment,
+                lengthRatio: 1,
+                height: 42,
+                screen: 0,
+                location: 4,
+              },
+            ]);
+          }
+
+          if (command === 'qdbus6' && script.includes('var panelStateById')) {
+            reconciliationScripts += 1;
+            panelAlignment = 'center';
+            return '{"requested":["149"],"updated":["149"],"missing":[]}';
+          }
+
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('runtime state changed across the capture shell round-trip');
+    expect(panelQueries).toBe(3);
+    expect(reconciliationScripts).toBe(1);
+    expect(panelAlignment).toBe('center');
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8')).toBe(
+      originalSnapshot
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture reconciles and rereads wallpaper drift before deleting its lifecycle', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecyclePath = path.join(userHome, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const originalSnapshot = fs.readFileSync(
+    path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
+    'utf8'
+  );
+  const runtime = makeStatefulPlasmaRuntime(wallpaperPath);
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          const result = runtime.runCommand(command, args);
+
+          if (command === 'systemctl' && args.includes('start')) {
+            runtime.state.wallpaperPath = 'file:///tmp/drifted-wallpaper.png';
+          }
+
+          return result;
+        },
+      })
+    ).toThrow('wallpaper runtime state changed across the capture shell round-trip');
+    expect(runtime.state.wallpaperPath).toBe(wallpaperPath);
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8')).toBe(
+      originalSnapshot
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture detects and reconciles wallpaper-plugin-only drift', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const lifecyclePath = path.join(userHome, '.local/state/tyrian-night/plasma-lifecycle.json');
+  const originalSnapshot = fs.readFileSync(
+    path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
+    'utf8'
+  );
+  const runtime = makeStatefulPlasmaRuntime(wallpaperPath);
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      `[Containments][1][Wallpaper][org.kde.image][General]\nImage=${wallpaperPath}\n`
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          const result = runtime.runCommand(command, args);
+
+          if (command === 'systemctl' && args.includes('start')) {
+            runtime.state.wallpaperPlugin = 'org.kde.slideshow';
+          }
+
+          return result;
+        },
+      })
+    ).toThrow('wallpaper runtime state changed across the capture shell round-trip');
+    expect(runtime.state.wallpaperPath).toBe(wallpaperPath);
+    expect(runtime.state.wallpaperPlugin).toBe('org.kde.image');
+    expect(fs.existsSync(lifecyclePath)).toBe(false);
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8')).toBe(
+      originalSnapshot
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture refuses to publish a panel layout without runtime state', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const wallpaperPath = path.join(root, 'live-wallpaper.png');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const shellPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const originalSnapshot = fs.readFileSync(
+    path.join(root, RICE_LAYOUT_FILES[0].snapshotPath),
+    'utf8'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(wallpaperPath, 'new wallpaper');
+    fs.writeFileSync(
+      desktopPath,
+      [
+        '[Containments][149]',
+        'formfactor=2',
+        'location=4',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][1][Wallpaper][org.kde.image][General]',
+        `Image=${wallpaperPath}`,
+        '',
+      ].join('\n')
+    );
+    fs.writeFileSync(shellPath, '[General]\n');
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command) => {
+          if (command === 'qdbus6') {
+            throw new Error('qdbus failed');
+          }
+
+          return '';
+        },
+      })
+    ).toThrow('qdbus failed');
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: () =>
+          '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":null,"height":42}]',
+      })
+    ).toThrow('Could not parse live Plasma panel runtime state');
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: () =>
+          '[{"id":"149","hiding":"undefined","alignment":"center","lengthRatio":1,"height":42}]',
+      })
+    ).toThrow('Could not parse live Plasma panel runtime state');
+    expect(fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[0].snapshotPath), 'utf8')).toBe(
+      originalSnapshot
+    );
+    expect(fs.readFileSync(path.join(root, RICE_WALLPAPER_PATH), 'utf8')).toBe('wallpaper');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function makeTempRiceRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-test-'));
 
@@ -712,6 +2449,24 @@ function makeTempRiceRepo() {
       '[Containments][1]',
       'activityId=',
       'plugin=org.kde.desktopcontainment',
+      '',
+      '[Containments][149]',
+      'formfactor=2',
+      'location=4',
+      'plugin=org.kde.panel',
+      'hiding=dodgewindows',
+      'tyrianPanelAlignment=center',
+      'tyrianPanelHeight=42',
+      'tyrianPanelLengthRatio=1',
+      '',
+      '[Containments][231]',
+      'formfactor=2',
+      'location=3',
+      'plugin=org.kde.panel',
+      'hiding=dodgewindows',
+      'tyrianPanelAlignment=center',
+      'tyrianPanelHeight=30',
+      'tyrianPanelLengthRatio=1',
       '',
       '[Containments][1][Wallpaper][org.kde.image][General]',
       `Image=${RICE_WALLPAPER_PLACEHOLDER}`,
@@ -749,7 +2504,171 @@ function makeTempRiceRepo() {
   return root;
 }
 
+let mockPlasmaShellActive = true;
+let mockPanelRuntime = {
+  alignment: 'center',
+  height: 42,
+  hiding: 'dodgewindows',
+  lengthRatio: 1,
+  location: 4,
+  screen: 0,
+};
+let mockSecondPanelRuntime = {
+  alignment: 'center',
+  height: 30,
+  hiding: 'dodgewindows',
+  lengthRatio: 1,
+  location: 3,
+  screen: 0,
+};
+let mockExtraPanelRuntime: ({ id: string } & typeof mockPanelRuntime) | undefined;
+let mockWallpaperRuntime = 'file:///tmp/tyrian-mock-wallpaper.png';
+let mockWallpaperPluginRuntime = 'org.kde.image';
+
+function makeStatefulPlasmaRuntime(previousWallpaperPath: string) {
+  const state = {
+    active: true,
+    alignment: 'right',
+    location: 4,
+    screen: 0,
+    secondAlignment: 'left',
+    secondLocation: 3,
+    secondScreen: 1,
+    wallpaperPath: previousWallpaperPath,
+    wallpaperPlugin: 'org.kde.image',
+  };
+
+  return {
+    state,
+    runCommand(command: string, args: string[]) {
+      if (command === 'systemctl') {
+        if (args.includes('is-active')) {
+          if (!state.active) {
+            throw new Error('inactive');
+          }
+
+          return '';
+        }
+
+        if (args.includes('stop')) {
+          state.active = false;
+          return '';
+        }
+
+        if (args.includes('start')) {
+          state.active = true;
+          return '';
+        }
+      }
+
+      if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
+        const script = String(args.at(-1));
+
+        if (script.includes('var ids = panelIds')) {
+          return JSON.stringify([
+            {
+              id: '149',
+              hiding: 'dodgewindows',
+              alignment: state.alignment,
+              lengthRatio: 1,
+              height: 42,
+              location: state.location,
+              screen: state.screen,
+            },
+            {
+              id: '231',
+              hiding: 'dodgewindows',
+              alignment: state.secondAlignment,
+              lengthRatio: 1,
+              height: 30,
+              location: state.secondLocation,
+              screen: state.secondScreen,
+            },
+          ]);
+        }
+
+        if (script.includes('var panelStateById')) {
+          const panelState = JSON.parse(
+            script.match(/^var panelStateById = (.+);$/mu)?.[1] ?? '{}'
+          );
+          const requested = Object.keys(panelState);
+          const target = panelState['149'];
+
+          if (target) {
+            state.alignment = target.alignment;
+            state.location = target.location;
+            state.screen = target.screen;
+          }
+
+          const secondTarget = panelState['231'];
+
+          if (secondTarget) {
+            state.secondAlignment = secondTarget.alignment;
+            state.secondLocation = secondTarget.location;
+            state.secondScreen = secondTarget.screen;
+          }
+
+          return JSON.stringify({ requested, updated: requested, missing: [] });
+        }
+
+        if (script.includes('var wallpaperState =')) {
+          const wallpaperState = JSON.parse(
+            script.match(/^var wallpaperState = (.+);$/mu)?.[1] ?? '[]'
+          );
+          state.wallpaperPath = wallpaperState[0]?.image ?? state.wallpaperPath;
+          state.wallpaperPlugin = wallpaperState[0]?.wallpaperPlugin ?? state.wallpaperPlugin;
+          return JSON.stringify({
+            requested: wallpaperState.length,
+            updated: wallpaperState.length,
+          });
+        }
+
+        if (script.includes('var wallpaperImage')) {
+          state.wallpaperPath = JSON.parse(
+            script.match(/^var wallpaperImage = (.+);$/mu)?.[1] ?? '""'
+          );
+          state.wallpaperPlugin = 'org.kde.image';
+          return '';
+        }
+
+        if (script.includes('var wallpaperStates')) {
+          return JSON.stringify([
+            {
+              activityId: 'current-activity',
+              screen: 0,
+              image: state.wallpaperPath,
+              wallpaperPlugin: state.wallpaperPlugin,
+            },
+          ]);
+        }
+      }
+
+      return mockRiceRuntimeCommand(command, args);
+    },
+  };
+}
+
 function mockRiceRuntimeCommand(command: string, args: string[]) {
+  if (command === 'systemctl') {
+    if (args.includes('is-active')) {
+      if (!mockPlasmaShellActive) {
+        throw new Error('inactive');
+      }
+
+      return '';
+    }
+
+    if (args.includes('stop')) {
+      mockPlasmaShellActive = false;
+      return '';
+    }
+
+    if (args.includes('start')) {
+      mockPlasmaShellActive = true;
+      return '';
+    }
+  }
+
   if (command === 'kscreen-doctor') {
     return [
       'Output: 1 HDMI-A-1',
@@ -768,6 +2687,66 @@ function mockRiceRuntimeCommand(command: string, args: string[]) {
   if (command === 'qdbus6' && args.includes('org.kde.PlasmaShell.evaluateScript')) {
     const script = String(args.at(-1));
 
+    if (script.includes('var ids = panelIds')) {
+      return JSON.stringify([
+        { id: '149', ...mockPanelRuntime },
+        { id: '231', ...mockSecondPanelRuntime },
+        ...(mockExtraPanelRuntime ? [mockExtraPanelRuntime] : []),
+      ]);
+    }
+
+    if (script.includes('var panelStateById')) {
+      const panelState = JSON.parse(script.match(/^var panelStateById = (.+);$/mu)?.[1] ?? '{}');
+      const requested = Object.keys(panelState);
+
+      if (panelState['149']) {
+        mockPanelRuntime = { ...mockPanelRuntime, ...panelState['149'] };
+      }
+
+      if (panelState['231']) {
+        mockSecondPanelRuntime = { ...mockSecondPanelRuntime, ...panelState['231'] };
+      }
+
+      const removed =
+        mockExtraPanelRuntime && !panelState[mockExtraPanelRuntime.id]
+          ? [mockExtraPanelRuntime.id]
+          : [];
+
+      if (removed.length > 0) {
+        mockExtraPanelRuntime = undefined;
+      }
+
+      return JSON.stringify({ requested, updated: requested, missing: [], removed });
+    }
+
+    if (script.includes('var wallpaperState =')) {
+      const wallpaperState = JSON.parse(
+        script.match(/^var wallpaperState = (.+);$/mu)?.[1] ?? '[]'
+      );
+      mockWallpaperRuntime = wallpaperState[0]?.image ?? mockWallpaperRuntime;
+      mockWallpaperPluginRuntime = wallpaperState[0]?.wallpaperPlugin ?? mockWallpaperPluginRuntime;
+      return JSON.stringify({ requested: wallpaperState.length, updated: wallpaperState.length });
+    }
+
+    if (script.includes('var wallpaperImage')) {
+      mockWallpaperRuntime = JSON.parse(
+        script.match(/^var wallpaperImage = (.+);$/mu)?.[1] ?? '""'
+      );
+      mockWallpaperPluginRuntime = 'org.kde.image';
+      return '';
+    }
+
+    if (script.includes('var wallpaperStates')) {
+      return JSON.stringify([
+        {
+          activityId: 'current-activity',
+          screen: 0,
+          image: mockWallpaperRuntime,
+          wallpaperPlugin: mockWallpaperPluginRuntime,
+        },
+      ]);
+    }
+
     if (script.includes('screenGeometry')) {
       return [
         '[',
@@ -777,7 +2756,11 @@ function mockRiceRuntimeCommand(command: string, args: string[]) {
       ].join('\n');
     }
 
-    return '[{"id":"149","hiding":"dodgewindows","alignment":"center","lengthRatio":1,"height":42}]';
+    return JSON.stringify([
+      { id: '149', ...mockPanelRuntime },
+      { id: '231', ...mockSecondPanelRuntime },
+      ...(mockExtraPanelRuntime ? [mockExtraPanelRuntime] : []),
+    ]);
   }
 
   return '';

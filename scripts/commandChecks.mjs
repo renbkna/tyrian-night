@@ -3,17 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const TYRIAN_REQUIRED_COMMANDS = [
-  'chafa',
-  'fastfetch',
-  'fish',
-  'ghostty',
-  'kwriteconfig6',
-  'plasma-apply-colorscheme',
-  'plasma-apply-desktoptheme',
-  'starship',
-];
-
 /**
  * @param {string[]} commands
  * @param {boolean} apply
@@ -65,7 +54,12 @@ export function isExecutable(filePath) {
   try {
     const stat = fs.statSync(filePath);
 
-    return stat.isFile() && (stat.mode & 0o111) !== 0;
+    if (!stat.isFile()) {
+      return false;
+    }
+
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
   } catch {
     return false;
   }
