@@ -1,12 +1,17 @@
 import {
   applyIslandShell,
-  readAllIslandShellStatuses,
+  describeIslandShellFailure,
+  readAllIslandShellStatusesWithDiagnostics,
   readIslandShellApplyReadiness,
+  readIslandShellFailureStatus,
   readIslandShellStatus,
   readIslandShellWriteAccess,
   restoreAllIslandShells,
+  seedIslandDesiredTheme,
+  type IslandDesiredSeedResult,
   type IslandShellCleanupSummary,
   type IslandShellStatus,
+  type IslandShellInventory,
   type IslandShellWriteAccess,
 } from './islandShell.js';
 
@@ -30,13 +35,13 @@ export type IslandUiApplySupervisionResult =
     }
   | {
       kind: 'unsupported';
-      changed: false;
+      changed: boolean;
       status: IslandShellStatus | undefined;
       reason: string;
     }
   | {
       kind: 'blocked';
-      changed: false;
+      changed: boolean;
       status: IslandShellStatus | undefined;
       reason: string;
     };
@@ -47,23 +52,34 @@ export type IslandUiRestoreSupervisionResult =
     })
   | {
       kind: 'permission-required';
-      changed: boolean;
-      restoredAppRoots: string[];
-      failedAppRoots: Array<{ appRoot: string; reason: string }>;
+      changed: IslandShellCleanupSummary['changed'];
+      restoredAppRoots: IslandShellCleanupSummary['restoredAppRoots'];
+      failedAppRoots: IslandShellCleanupSummary['failedAppRoots'];
+      quarantinedRecords: IslandShellCleanupSummary['quarantinedRecords'];
+      enumerationFailure?: IslandShellCleanupSummary['enumerationFailure'];
       reason: string;
     }
   | {
       kind: 'blocked';
-      changed: boolean;
-      restoredAppRoots: string[];
-      failedAppRoots: Array<{ appRoot: string; reason: string }>;
+      changed: IslandShellCleanupSummary['changed'];
+      restoredAppRoots: IslandShellCleanupSummary['restoredAppRoots'];
+      failedAppRoots: IslandShellCleanupSummary['failedAppRoots'];
+      quarantinedRecords: IslandShellCleanupSummary['quarantinedRecords'];
+      enumerationFailure?: IslandShellCleanupSummary['enumerationFailure'];
       reason: string;
     };
 
 export type IslandUiSupervisorStatus = IslandShellStatus & {
   writeAccess: IslandShellWriteAccess | undefined;
-  recommendedAction: 'none' | 'apply' | 'restore' | 'elevated-repair' | 'inspect';
 };
+
+export function seedIslandDesiredThemeSupervised(options: {
+  appRoot: string;
+  desiredThemeId: string;
+  registryHome?: string;
+}): Promise<IslandDesiredSeedResult> {
+  return seedIslandDesiredTheme(options);
+}
 
 export async function applyIslandUiSupervised(options: {
   appRoot: string;
@@ -73,77 +89,45 @@ export async function applyIslandUiSupervised(options: {
 }): Promise<IslandUiApplySupervisionResult> {
   const readiness = await readIslandShellApplyReadiness(options);
 
-  switch (readiness.kind) {
-    case 'permission-required':
-      return {
-        kind: 'permission-required',
-        changed: readiness.changed,
-        status: readiness.status,
-        writeAccess: readiness.writeAccess,
-        reason: readiness.reason,
-      };
-    case 'unsupported':
-      return {
-        kind: 'unsupported',
-        changed: false,
-        status: readiness.status,
-        reason: readiness.reason,
-      };
-    case 'blocked':
-      return {
-        kind: 'blocked',
-        changed: false,
-        status: readiness.status,
-        reason: readiness.reason,
-      };
-    case 'ready':
-      break;
-  }
-
-  if (!readiness.changed) {
-    return {
-      kind: 'already-current',
-      changed: false,
-      status: readiness.status,
-    };
-  }
-
   try {
     const result = await applyIslandShell(options);
-    const status = await readIslandShellStatus(options);
 
     return {
       kind: result.changed ? 'applied' : 'already-current',
       changed: result.changed,
-      status,
+      status: result.status,
     } as IslandUiApplySupervisionResult;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const failure = describeIslandShellFailure(error);
+    const failureStatus = readIslandShellFailureStatus(error) ?? readiness.status;
 
-    if (isPermissionMessage(reason)) {
+    if (failure.code === 'permission-required') {
+      const status = failureStatus ?? (await readIslandShellStatus(options));
+      const writeAccess = readiness.writeAccess ?? (await readIslandShellWriteAccess(options));
+
       return {
         kind: 'permission-required',
-        changed: true,
-        status: readiness.status,
-        writeAccess: readiness.writeAccess,
-        reason,
+        changed: failure.changed,
+        status,
+        writeAccess,
+        reason: failure.reason,
       };
     }
 
-    if (isUnsupportedMessage(reason)) {
+    if (failure.code === 'unsupported') {
       return {
         kind: 'unsupported',
-        changed: false,
-        status: readiness.status,
-        reason,
+        changed: failure.changed,
+        status: failureStatus,
+        reason: failure.reason,
       };
     }
 
     return {
       kind: 'blocked',
-      changed: false,
-      status: readiness.status,
-      reason,
+      changed: failure.changed,
+      status: failureStatus,
+      reason: failure.reason,
     };
   }
 }
@@ -154,7 +138,7 @@ export async function restoreIslandUiSupervised(options?: {
 }): Promise<IslandUiRestoreSupervisionResult> {
   const result = await restoreAllIslandShells(options);
 
-  if (result.failedAppRoots.length === 0) {
+  if (result.failedAppRoots.length === 0 && !result.enumerationFailure) {
     return {
       ...result,
       kind: result.changed ? 'restored' : 'already-classic',
@@ -163,10 +147,15 @@ export async function restoreIslandUiSupervised(options?: {
 
   const reason = result.failedAppRoots
     .map(({ appRoot, reason: failureReason }) => `${appRoot}: ${failureReason}`)
+    .concat(
+      result.enumerationFailure ? [`Registry enumeration: ${result.enumerationFailure.reason}`] : []
+    )
     .join('\n');
-  const kind = result.failedAppRoots.some(({ reason: failureReason }) =>
-    isPermissionMessage(failureReason)
-  )
+  const failureCodes = [
+    ...result.failedAppRoots.map(({ code }) => code),
+    ...(result.enumerationFailure ? [result.enumerationFailure.code] : []),
+  ];
+  const kind = failureCodes.every((code) => code === 'permission-required')
     ? 'permission-required'
     : 'blocked';
 
@@ -177,18 +166,26 @@ export async function restoreIslandUiSupervised(options?: {
   };
 }
 
+export type IslandUiSupervisorInventory = {
+  statuses: IslandUiSupervisorStatus[];
+  registryDiagnostics: string[];
+};
+
 export async function readIslandUiSupervisorStatuses(options?: {
   preferredAppRoots?: string[];
   registryHome?: string;
-}): Promise<IslandUiSupervisorStatus[]> {
-  const statuses = await readAllIslandShellStatuses(options);
+}): Promise<IslandUiSupervisorInventory> {
+  const inventory: IslandShellInventory = await readAllIslandShellStatusesWithDiagnostics(options);
   const supervisorStatuses: IslandUiSupervisorStatus[] = [];
 
-  for (const status of statuses) {
+  for (const status of inventory.statuses) {
     let writeAccess: IslandShellWriteAccess | undefined;
 
     try {
-      writeAccess = await readIslandShellWriteAccess({ appRoot: status.appRoot });
+      writeAccess = await readIslandShellWriteAccess({
+        appRoot: status.appRoot,
+        registryHome: options?.registryHome,
+      });
     } catch {
       writeAccess = undefined;
     }
@@ -196,40 +193,11 @@ export async function readIslandUiSupervisorStatuses(options?: {
     supervisorStatuses.push({
       ...status,
       writeAccess,
-      recommendedAction: recommendAction(status, writeAccess),
     });
   }
 
-  return supervisorStatuses;
-}
-
-function recommendAction(
-  status: IslandShellStatus,
-  writeAccess: IslandShellWriteAccess | undefined
-): IslandUiSupervisorStatus['recommendedAction'] {
-  if (status.classification === 'permission-denied') {
-    return 'elevated-repair';
-  }
-
-  if (status.classification === 'clean' && writeAccess?.writable === false) {
-    return 'elevated-repair';
-  }
-
-  if (status.classification === 'broken-backup' || status.classification === 'checksum-mismatch') {
-    return writeAccess?.writable === false ? 'elevated-repair' : 'restore';
-  }
-
-  if (status.classification === 'managed-only' || status.classification === 'missing') {
-    return 'restore';
-  }
-
-  return 'none';
-}
-
-function isPermissionMessage(message: string): boolean {
-  return /EACCES|EPERM|permission/i.test(message);
-}
-
-function isUnsupportedMessage(message: string): boolean {
-  return message.startsWith('Unsupported ');
+  return {
+    statuses: supervisorStatuses,
+    registryDiagnostics: inventory.registryDiagnostics,
+  };
 }

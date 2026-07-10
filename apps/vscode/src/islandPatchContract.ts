@@ -1,7 +1,8 @@
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
-export const ISLAND_PATCH_CONTRACT_VERSION = 2;
+export const ISLAND_PATCH_CONTRACT_VERSION = 3;
 export const ISLAND_PATCH_STRATEGY = 'stylesheet-link-v1';
 
 export const WORKBENCH_DIR_RELATIVE_PATH = path.join(
@@ -24,8 +25,15 @@ export const ISLAND_CSS_FILE_NAME = 'tyrian-night.island.css';
 export const ISLAND_MANIFEST_FILE_NAME = 'tyrian-night.island.json';
 export const BACKUP_HTML_FILE_NAME = 'tyrian-night.workbench.backup.html';
 export const BACKUP_PRODUCT_FILE_NAME = 'tyrian-night.product.backup.json';
-export const MANAGED_ROOTS_DIR_NAME = '.tyrian-night';
-export const MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
+export const ISLAND_TRANSACTION_FILE_NAME = 'tyrian-night.transaction.json';
+export const TYRIAN_STATE_DIR_NAME = '.tyrian-night';
+export const MANAGED_ROOTS_DIRECTORY_NAME = 'managed-app-roots';
+export const QUARANTINED_ROOTS_DIRECTORY_NAME = 'quarantined-managed-app-roots';
+export const LEGACY_RETIREMENT_FILE_NAME = 'managed-app-roots.retired.json';
+export const LEGACY_MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
+export const ISLAND_ROOT_LOCK_NAME = '.tyrian-night.lock';
+export const ISLAND_REGISTRY_LOCK_NAME = 'managed-app-roots.lock';
+export const ISLAND_MIGRATION_LOCK_NAME = 'legacy-managed-app-roots.lock';
 
 export const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 export const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
@@ -38,10 +46,12 @@ export type IslandPatchPaths = {
   manifestPath: string;
   backupHtmlPath: string;
   backupProductJsonPath: string;
+  transactionJournalPath: string;
 };
 
-export type IslandManifestV2 = {
-  version: 2;
+export type IslandManifestV3 = {
+  version: 3;
+  desiredThemeId: string;
   themeVersion: string;
   installedAt: string;
   appRoot: string;
@@ -70,18 +80,51 @@ export function buildIslandPatchPaths(appRoot: string): IslandPatchPaths {
     manifestPath: path.join(workbenchDirPath, ISLAND_MANIFEST_FILE_NAME),
     backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
     backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
+    transactionJournalPath: path.join(workbenchDirPath, ISLAND_TRANSACTION_FILE_NAME),
   };
 }
 
-export function buildManagedRootsRegistryPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, MANAGED_ROOTS_DIR_NAME, MANAGED_ROOTS_FILE_NAME);
+export function buildManagedRootsDirectoryPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, MANAGED_ROOTS_DIRECTORY_NAME);
 }
 
-export function isIslandManifestV2(
-  manifest: Partial<IslandManifestV2>
-): manifest is IslandManifestV2 {
+export function buildQuarantinedRootsDirectoryPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, QUARANTINED_ROOTS_DIRECTORY_NAME);
+}
+
+export function buildLegacyRetirementMarkerPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, LEGACY_RETIREMENT_FILE_NAME);
+}
+
+export function buildLegacyManagedRootsRegistryPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, LEGACY_MANAGED_ROOTS_FILE_NAME);
+}
+
+export function buildManagedRootRecordPath(appRoot: string, registryHome = os.homedir()): string {
+  const recordName = crypto.createHash('sha256').update(appRoot, 'utf8').digest('hex');
+
+  return path.join(buildManagedRootsDirectoryPath(registryHome), `${recordName}.json`);
+}
+
+export function buildIslandRootLockPath(appRoot: string): string {
+  return path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH, ISLAND_ROOT_LOCK_NAME);
+}
+
+export function buildIslandMigrationLockPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, ISLAND_MIGRATION_LOCK_NAME);
+}
+
+export function buildIslandRegistryLockPath(registryHome = os.homedir()): string {
+  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, ISLAND_REGISTRY_LOCK_NAME);
+}
+
+export function isIslandManifestV3Shape(
+  manifest: Partial<IslandManifestV3>
+): manifest is IslandManifestV3 {
   return (
     manifest.version === ISLAND_PATCH_CONTRACT_VERSION &&
+    typeof manifest.desiredThemeId === 'string' &&
+    manifest.desiredThemeId.length > 0 &&
     typeof manifest.themeVersion === 'string' &&
     typeof manifest.installedAt === 'string' &&
     typeof manifest.appRoot === 'string' &&

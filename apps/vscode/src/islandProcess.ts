@@ -5,6 +5,25 @@ export type IslandProcessResult = {
   stderr: string;
 };
 
+export type IslandProcessFailureEnvelope = {
+  version: 1;
+  code: 'permission-required' | 'unsupported' | 'corrupt' | 'blocked';
+  changed: boolean;
+  reason: string;
+};
+
+export class IslandProcessFailure extends Error {
+  readonly code: IslandProcessFailureEnvelope['code'];
+  readonly changed: boolean;
+
+  constructor(failure: IslandProcessFailureEnvelope) {
+    super(failure.reason);
+    this.name = 'IslandProcessFailure';
+    this.code = failure.code;
+    this.changed = failure.changed;
+  }
+}
+
 export async function runIslandProcess(
   command: string[],
   options: {
@@ -49,13 +68,42 @@ export async function runIslandProcess(
 
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error((stderr || stdout).trim() || options.fallbackMessage));
+        const output = (stderr || stdout).trim();
+        const failure = parseIslandProcessFailure(output);
+        reject(failure ?? new Error(output || options.fallbackMessage));
         return;
       }
 
       resolve({ stdout, stderr });
     });
   });
+}
+
+export function parseIslandProcessFailure(output: string): IslandProcessFailure | undefined {
+  const candidateLine = output
+    .split(/\r?\n/u)
+    .toReversed()
+    .find((line) => line.trim().length > 0);
+  if (candidateLine === undefined) return undefined;
+
+  try {
+    const candidate = JSON.parse(candidateLine) as Partial<IslandProcessFailureEnvelope>;
+    if (
+      candidate.version !== 1 ||
+      !['permission-required', 'unsupported', 'corrupt', 'blocked'].includes(
+        candidate.code ?? ''
+      ) ||
+      typeof candidate.changed !== 'boolean' ||
+      typeof candidate.reason !== 'string' ||
+      candidate.reason.length === 0
+    ) {
+      return undefined;
+    }
+
+    return new IslandProcessFailure(candidate as IslandProcessFailureEnvelope);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runIslandJsonProcess<T>(
