@@ -6,6 +6,24 @@
   "type": "module",
   "publisher": "renbkna",
   "icon": "assets/icon.png",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "apps/vscode/island/tyrian-night.css",
+    "apps/vscode/island/tyrian-nocturne.css",
+    "apps/vscode/island/tyrian-night-old.css",
+    "apps/vscode/island/tyrian-abyss.css",
+    "apps/vscode/island/tyrian-dawn.css",
+    "assets/icon.png",
+    "assets/preview.png",
+    "out/extension.js",
+    "out/islandCli.js",
+    "source/themes/tyrian-night.json",
+    "source/themes/tyrian-nocturne.json",
+    "source/themes/tyrian-night-old.json",
+    "source/themes/tyrian-abyss.json",
+    "source/themes/tyrian-dawn.json"
+  ],
   "engines": {
     "vscode": "^1.118.0"
   },
@@ -75,15 +93,19 @@
     ]
   },
   "scripts": {
-    "verify": "bun run build:generated && bun run check && bun run lint && bun run test && bun run format:check && bun run check:generated && bun run check:union-css && bun run check:rice",
+    "verify": "bun run check:tracked-generated && bun run build:generated && bun run check && bun run lint && bun run test && bun run format:check && bun run check:generated && bun run check:union-css && bun run check:rice",
+    "precommit:tracked-generated": "git ls-files --error-unmatch apps/vscode/src/generated/themeCatalog.ts apps/zed/themes/tyrian-night.json && git diff --quiet -- source/themeCatalog.json source/themes package.json apps/vscode/src/generated/themeCatalog.ts apps/zed/themes/tyrian-night.json",
     "package:check": "bun run verify && bun run build",
     "build:generated": "bun run build:contracts && bun run build:island-css && bun run build:zed-theme && bun run build:terminal-themes && bun run build:desktop-themes",
-    "check:generated": "bun run check:contracts && bun run check:island-css && bun run check:terminal-themes && bun run check:desktop-themes",
+    "build:runtime-generated": "bun run build:island-css && bun run build:terminal-themes && bun run build:desktop-themes",
+    "check:tracked-generated": "bun run check:contracts && bun run check:zed-theme",
+    "check:generated": "bun run check:contracts && bun run check:island-css && bun run check:zed-theme && bun run check:terminal-themes && bun run check:desktop-themes",
     "build:contracts": "node scripts/generatedContracts.mjs",
     "check:contracts": "node scripts/generatedContracts.mjs --check",
     "build:island-css": "node scripts/islandCss.mjs",
     "check:island-css": "node scripts/islandCss.mjs --check",
     "build:zed-theme": "node scripts/zedTheme.mjs",
+    "check:zed-theme": "node scripts/zedTheme.mjs --check",
     "build:terminal-themes": "node scripts/terminalThemes.mjs",
     "check:terminal-themes": "node scripts/terminalThemes.mjs --check",
     "color:audit": "node scripts/themeColorAudit.mjs",
@@ -96,7 +118,7 @@
     "build": "bun run build:generated && tsup",
     "watch": "tsup --watch",
     "check": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun run build:runtime-generated && bun test ./tests",
     "lint": "oxlint apps/vscode/src/ tests/ scripts/",
     "lint:fix": "oxlint apps/vscode/src/ tests/ scripts/ --fix",
     "format": "biome format . --write",
@@ -104,7 +126,7 @@
     "package": "bun run package:check && mkdir -p dist && vsce package --no-dependencies --out dist/tyrian-night.vsix"
   },
   "simple-git-hooks": {
-    "pre-commit": "bun run verify"
+    "pre-commit": "bun run precommit:tracked-generated && bun run verify"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",

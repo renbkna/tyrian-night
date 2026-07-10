@@ -4,15 +4,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
+import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { SOURCE_THEMES, readSourceTheme, readThemeSources } from './themeSources.mjs';
 
 const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
+const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * @typedef {{
+ *   label: string;
+ *   outputPath: string;
+ *   source: import('./themeSources.mjs').ThemeSource;
+ *   tokens: Readonly<Record<string, string>>;
+ * }} IslandCssTheme
+ */
 
 /** @type {Record<string, Record<string, string>>} */
 const ISLAND_CSS_THEME_TOKENS = {
   'tyrian-abyss': {
-    '--islands-bg-canvas': '#030207',
-    '--islands-bg-surface': '#07040d',
     '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(134, 82, 255, 0))',
     '--islands-breathe-peak': 'drop-shadow(0 0 10px rgba(134, 82, 255, 0.42))',
     '--islands-aurora-primary': 'rgba(134, 82, 255, 0.42)',
@@ -65,8 +74,6 @@ const ISLAND_CSS_THEME_TOKENS = {
     secondaryRgb: '160, 136, 192',
   }),
   'tyrian-nocturne': {
-    '--islands-bg-canvas': '#0a0910',
-    '--islands-bg-surface': '#0f0d16',
     '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(166, 108, 255, 0))',
     '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(166, 108, 255, 0.36))',
     '--islands-aurora-primary': 'rgba(166, 108, 255, 0.38)',
@@ -111,8 +118,6 @@ const ISLAND_CSS_THEME_TOKENS = {
     '--islands-terminal-border-left': '1px solid rgba(185, 138, 255, 0.08)',
   },
   'tyrian-dawn': {
-    '--islands-bg-canvas': '#fcfaff',
-    '--islands-bg-surface': '#f7f3fc',
     '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(111, 53, 184, 0))',
     '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(111, 53, 184, 0.26))',
     '--islands-aurora-primary': 'rgba(111, 53, 184, 0.26)',
@@ -167,13 +172,15 @@ const ISLAND_CSS_THEME_TOKENS = {
   },
 };
 
-/** @type {Array<{ label: string; outputPath: string; source: import('./themeSources.mjs').ThemeSource; tokens: Record<string, string> }>} */
-export const ISLAND_CSS_THEMES = SOURCE_THEMES.map((source) => ({
-  label: source.label,
-  outputPath: source.islandCssPath,
-  source,
-  tokens: requireIslandThemeTokens(source.slug),
-}));
+for (const tokens of Object.values(ISLAND_CSS_THEME_TOKENS)) {
+  Object.freeze(tokens);
+}
+Object.freeze(ISLAND_CSS_THEME_TOKENS);
+
+/** @type {ReadonlyArray<IslandCssTheme>} */
+export const ISLAND_CSS_THEMES = Object.freeze(
+  projectIslandCssThemes(SOURCE_THEMES).map((theme) => Object.freeze(theme))
+);
 
 const ROOT_LAYOUT_TOKENS = {
   '--islands-panel-radius': '24px',
@@ -190,8 +197,6 @@ const ROOT_LAYOUT_TOKENS = {
  */
 function neutralDarkIslandTokens(colors) {
   return {
-    '--islands-bg-canvas': '#0c0c0c',
-    '--islands-bg-surface': '#0f0f0f',
     '--islands-breathe-rest': `drop-shadow(0 0 2px rgba(${colors.primaryRgb}, 0))`,
     '--islands-breathe-peak': `drop-shadow(0 0 8px rgba(${colors.primaryRgb}, 0.3))`,
     '--islands-aurora-primary': `rgba(${colors.primaryRgb}, 0.35)`,
@@ -247,11 +252,11 @@ function neutralDarkIslandTokens(colors) {
 }
 
 /**
- * @param {{ label: string; source: import('./themeSources.mjs').ThemeSource; tokens: Record<string, string> }} theme
- * @param {string} [repoRoot]
+ * @param {IslandCssTheme} theme
+ * @param {string} repoRoot
  * @returns {string}
  */
-export function buildIslandCss(theme, repoRoot = process.cwd()) {
+function renderIslandCss(theme, repoRoot) {
   const baseCss = fs.readFileSync(path.join(repoRoot, BASE_TEMPLATE_PATH), 'utf8');
   const sourceTheme = readSourceTheme(theme.source, repoRoot);
 
@@ -268,10 +273,31 @@ ${baseCss}`;
  * @param {string} [repoRoot]
  * @returns {Array<{ outputPath: string; css: string }>}
  */
-export function buildAllIslandCss(repoRoot = process.cwd()) {
-  return ISLAND_CSS_THEMES.map((theme) => ({
+export function buildAllIslandCss(repoRoot = defaultRepoRoot) {
+  return islandCssThemes(repoRoot).map((theme) => ({
     outputPath: theme.outputPath,
-    css: buildIslandCss(theme, repoRoot),
+    css: renderIslandCss(theme, repoRoot),
+  }));
+}
+
+/**
+ * @param {string} repoRoot
+ * @returns {typeof ISLAND_CSS_THEMES}
+ */
+function islandCssThemes(repoRoot) {
+  return projectIslandCssThemes(readThemeSources(repoRoot));
+}
+
+/**
+ * @param {ReadonlyArray<import('./themeSources.mjs').ThemeSource>} sourceThemes
+ * @returns {IslandCssTheme[]}
+ */
+function projectIslandCssThemes(sourceThemes) {
+  return sourceThemes.map((source) => ({
+    label: source.label,
+    outputPath: source.islandCssPath,
+    source,
+    tokens: requireIslandThemeTokens(source.slug),
   }));
 }
 
@@ -279,27 +305,32 @@ export function buildAllIslandCss(repoRoot = process.cwd()) {
  * @param {string} [repoRoot]
  * @returns {void}
  */
-export function writeIslandCss(repoRoot = process.cwd()) {
-  for (const { outputPath, css } of buildAllIslandCss(repoRoot)) {
-    fs.writeFileSync(path.join(repoRoot, outputPath), css, 'utf8');
-  }
+export function writeIslandCss(repoRoot = defaultRepoRoot) {
+  syncGeneratedAssets(islandCssAssets(repoRoot), repoRoot, {
+    ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
+  });
 }
 
 /**
  * @param {string} [repoRoot]
  * @returns {string[]}
  */
-export function checkIslandCss(repoRoot = process.cwd()) {
-  const staleFiles = [];
+export function checkIslandCss(repoRoot = defaultRepoRoot) {
+  return syncGeneratedAssets(islandCssAssets(repoRoot), repoRoot, {
+    check: true,
+    ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
+  });
+}
 
-  for (const { outputPath, css } of buildAllIslandCss(repoRoot)) {
-    const current = fs.readFileSync(path.join(repoRoot, outputPath), 'utf8');
-    if (current !== css) {
-      staleFiles.push(outputPath);
-    }
-  }
-
-  return staleFiles;
+/**
+ * @param {string} repoRoot
+ * @returns {Array<{ path: string; content: string }>}
+ */
+function islandCssAssets(repoRoot) {
+  return buildAllIslandCss(repoRoot).map(({ outputPath, css }) => ({
+    path: outputPath,
+    content: css,
+  }));
 }
 
 /**
@@ -326,7 +357,7 @@ function formatCssVariables(tokens) {
 
 /**
  * @param {{ colors: Record<string, string> }} theme
- * @returns {Record<string, string>}
+ * @returns {Readonly<Record<string, string>>}
  */
 function sourcePaletteTokens(theme) {
   return {

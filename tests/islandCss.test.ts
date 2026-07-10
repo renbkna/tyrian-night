@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
@@ -32,6 +34,24 @@ test('Island UI CSS assets match the generated template and theme tokens', () =>
   }
 });
 
+test('Island CSS generation resolves catalog identity from the injected repository root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-island-root-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'apps/vscode/island'), { recursive: true });
+    fs.copyFileSync('apps/vscode/island/base.css', path.join(root, 'apps/vscode/island/base.css'));
+    const themePath = path.join(root, 'source/themes/tyrian-night.json');
+    const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as Record<string, unknown>;
+    theme.name = 'Injected Island Night';
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    expect(buildAllIslandCss(root)[0]?.css).toContain('Injected Island Night - Custom UI Styles');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Island UI canvas and surface palette tokens derive from source themes', () => {
   for (const source of SOURCE_THEMES) {
     const theme = readSourceTheme<{ colors: Record<string, string> }>(source);
@@ -54,6 +74,8 @@ test('Island UI custom token blocks are explicit for every source theme', () => 
 
     expect(islandTheme).toBeDefined();
     expect(Object.keys(islandTheme?.tokens ?? {}).length).toBeGreaterThan(40);
+    expect(islandTheme?.tokens).not.toHaveProperty('--islands-bg-canvas');
+    expect(islandTheme?.tokens).not.toHaveProperty('--islands-bg-surface');
   }
 
   expect(fs.readFileSync('apps/vscode/island/tyrian-night.css', 'utf8')).toContain(

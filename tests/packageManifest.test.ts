@@ -1,16 +1,14 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
-import {
-  DEFAULT_ISLAND_BROKER_ASSET_ROOTS,
-  DEFAULT_ISLAND_BROKER_PATHS,
-  ISLAND_BROKER_CHMOD_PATH,
-  ISLAND_BROKER_CHOWN_PATH,
-  ISLAND_BROKER_NODE_PATH,
-  ISLAND_BROKER_PKEXEC_PATH,
-} from '../apps/vscode/src/generated/islandBrokerInstallContract';
 import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog';
+import {
+  buildVscodeThemeContributions,
+  syncGeneratedContracts,
+} from '../scripts/generatedContracts.mjs';
 import { SOURCE_THEMES } from '../scripts/themeSources.mjs';
 
 type ExtensionPackage = {
@@ -24,9 +22,11 @@ type ExtensionPackage = {
     vscode: string;
   };
   extensionKind?: string[];
+  files: string[];
   icon: string;
   main: string;
   scripts: Record<string, string | undefined>;
+  'simple-git-hooks': Record<string, string | undefined>;
 };
 
 test('manifest declares the VS Code host and contribution contracts this extension depends on', () => {
@@ -79,56 +79,45 @@ test('manifest declares the VS Code host and contribution contracts this extensi
 });
 
 test('VS Code package includes only VS Code runtime and marketplace assets', () => {
-  const ignoredFiles = fs.readFileSync('.vscodeignore', 'utf8').split(/\r?\n/);
+  const manifest = readJson<ExtensionPackage>('package.json');
 
-  expect(ignoredFiles).toContain('scripts/**');
-  expect(ignoredFiles).toContain('out/islandBroker.js');
-  expect(ignoredFiles).toContain('apps/vscode/src/**');
-  expect(ignoredFiles).toContain('apps/vscode/island/base.css');
-  expect(ignoredFiles).toContain('apps/zed/**');
-  expect(ignoredFiles).toContain('terminal/**');
-  expect(ignoredFiles).toContain('desktop/**');
-  expect(ignoredFiles).toContain('rice/**');
-  expect(ignoredFiles).toContain('source/themeCatalog.json');
-  expect(ignoredFiles).toContain('source/islandBrokerInstallContract.json');
-  expect(ignoredFiles).toContain('source/union-css/**');
-  expect(ignoredFiles).toContain('assets/tyrian-fetch.webp');
-  expect(ignoredFiles).toContain('assets/tyrian.png');
-  expect(ignoredFiles).toContain('assets/wallpaper-tyrian.png');
-  expect(ignoredFiles).toContain('assets/preview.ts');
-  expect(ignoredFiles).toContain('apps/vscode/settings.example.json');
-  expect(ignoredFiles).not.toContain('assets/icon.png');
-  expect(ignoredFiles).not.toContain('assets/preview.png');
-  expect(ignoredFiles).not.toContain('source/**');
+  expect(manifest.files).toEqual([
+    'LICENSE',
+    'README.md',
+    ...SOURCE_THEMES.map(({ islandCssPath }) => islandCssPath),
+    'assets/icon.png',
+    'assets/preview.png',
+    'out/extension.js',
+    'out/islandCli.js',
+    ...SOURCE_THEMES.map(({ sourcePath }) => sourcePath),
+  ]);
+  expect(fs.existsSync('.vscodeignore')).toBe(false);
 });
 
-test('generated Island broker contract exposes only runtime discovery defaults', () => {
-  expect(DEFAULT_ISLAND_BROKER_PATHS).toEqual([
-    '/usr/lib/tyrian-night/islandBroker.js',
-    '/usr/local/lib/tyrian-night/islandBroker.js',
-  ]);
-  expect(DEFAULT_ISLAND_BROKER_ASSET_ROOTS).toEqual([
-    '/usr/share/tyrian-night/vscode/island',
-    '/usr/local/share/tyrian-night/vscode/island',
-  ]);
-  expect(ISLAND_BROKER_CHMOD_PATH).toBe('/usr/bin/chmod');
-  expect(ISLAND_BROKER_CHOWN_PATH).toBe('/usr/bin/chown');
-  expect(ISLAND_BROKER_NODE_PATH).toBe('/usr/bin/node');
-  expect(ISLAND_BROKER_PKEXEC_PATH).toBe('/usr/bin/pkexec');
-});
-
-test('source theme catalog owns identity only and marks one explicit default', () => {
+test('source theme catalog owns ordered membership and explicit default roles only', () => {
   const catalog = readJson<Array<Record<string, unknown>>>('source/themeCatalog.json');
   const defaultEntries = catalog.filter((entry) => entry.default === true);
+  const terminalDefaultEntries = catalog.filter((entry) => entry.terminalDefault === true);
 
   expect(defaultEntries).toEqual([
     expect.objectContaining({
-      label: 'Tyrian Night',
       slug: 'tyrian-night',
     }),
   ]);
+  expect(terminalDefaultEntries.map(({ slug }) => slug)).toEqual([
+    'tyrian-nocturne',
+    'tyrian-dawn',
+  ]);
 
   for (const entry of catalog) {
+    expect(Object.keys(entry).toSorted()).toEqual(
+      Object.keys(entry)
+        .filter((key) => ['default', 'slug', 'terminalDefault'].includes(key))
+        .toSorted()
+    );
+    expect(entry).not.toHaveProperty('label');
+    expect(entry).not.toHaveProperty('appearance');
+    expect(entry).not.toHaveProperty('vscodeUiTheme');
     expect(entry).not.toHaveProperty('sourcePath');
     expect(entry).not.toHaveProperty('vscodeContributionPath');
     expect(entry).not.toHaveProperty('islandCssFile');
@@ -139,6 +128,44 @@ test('source theme catalog owns identity only and marks one explicit default', (
 
 test('generated theme catalog default does not depend on source catalog position', () => {
   expect(TYRIAN_THEME_CATALOG.find((theme) => theme.isDefault)?.label).toBe('Tyrian Night');
+});
+
+test('VS Code contribution generation resolves the injected catalog root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-contract-root-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'package.json'), '{"contributes":{}}\n');
+    const themePath = path.join(root, 'source/themes/tyrian-night.json');
+    const theme = readJson<Record<string, unknown>>(themePath);
+    theme.name = 'Injected Tyrian Night';
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    expect(buildVscodeThemeContributions(root)[0]?.label).toBe('Injected Tyrian Night');
+    const packageBeforeCheck = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+    expect(syncGeneratedContracts(root, { check: true })).toEqual([
+      'apps/vscode/src/generated/themeCatalog.ts',
+      'package.json contributes.themes',
+      'package.json files',
+    ]);
+    expect(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).toBe(packageBeforeCheck);
+    expect(fs.existsSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'))).toBe(false);
+
+    syncGeneratedContracts(root);
+    expect(
+      fs.readFileSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'), 'utf8')
+    ).toContain("label: 'Injected Tyrian Night'");
+    expect(
+      readJson<{ contributes: { themes: Array<{ label: string }> } }>(
+        path.join(root, 'package.json')
+      ).contributes.themes[0]?.label
+    ).toBe('Injected Tyrian Night');
+    expect(readJson<{ files: string[] }>(path.join(root, 'package.json')).files).toContain(
+      'source/themes/tyrian-night.json'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('VS Code companion settings example is parseable and aligned with Tyrian defaults', () => {
@@ -184,6 +211,19 @@ test('repo does not keep stale packaged VSIX artifacts as proof surfaces', () =>
   expect(fs.readdirSync('.').filter((fileName) => fileName.endsWith('.vsix'))).toEqual([]);
 });
 
+test('existing build output exposes only declared runtime entrypoints', () => {
+  if (!fs.existsSync('out')) {
+    return;
+  }
+
+  expect(
+    fs
+      .readdirSync('out')
+      .filter((fileName) => fileName.endsWith('.js'))
+      .toSorted()
+  ).toEqual(['extension.js', 'islandCli.js']);
+});
+
 test('package scripts own the full verification path without npm shims', () => {
   const manifest = readJson<ExtensionPackage>('package.json');
   const ciWorkflow = fs.readFileSync('.github/workflows/ci.yml', 'utf8');
@@ -194,7 +234,21 @@ test('package scripts own the full verification path without npm shims', () => {
   }>('tsconfig.json');
 
   expect(manifest.scripts['vscode:prepublish']).toBeUndefined();
-  expect(manifest.scripts.verify).toContain('bun run build:generated');
+  expect(manifest.scripts.verify).toStartWith(
+    'bun run check:tracked-generated && bun run build:generated'
+  );
+  expect(manifest.scripts['check:tracked-generated']).toBe(
+    'bun run check:contracts && bun run check:zed-theme'
+  );
+  expect(manifest.scripts['precommit:tracked-generated']).toContain(
+    'git diff --quiet -- source/themeCatalog.json source/themes package.json'
+  );
+  expect(manifest.scripts['precommit:tracked-generated']).toContain(
+    'git ls-files --error-unmatch apps/vscode/src/generated/themeCatalog.ts apps/zed/themes/tyrian-night.json'
+  );
+  expect(manifest['simple-git-hooks']['pre-commit']).toBe(
+    'bun run precommit:tracked-generated && bun run verify'
+  );
   expect(manifest.scripts.verify).toContain('bun run check:generated');
   expect(manifest.scripts.verify).toContain('bun run check:rice');
   expect(manifest.scripts['build:generated']).toContain('bun run build:contracts');
@@ -202,12 +256,15 @@ test('package scripts own the full verification path without npm shims', () => {
   expect(manifest.scripts['build:generated']).toContain('bun run build:zed-theme');
   expect(manifest.scripts['build:generated']).toContain('bun run build:terminal-themes');
   expect(manifest.scripts['build:generated']).toContain('bun run build:desktop-themes');
+  expect(manifest.scripts['build:runtime-generated']).toBe(
+    'bun run build:island-css && bun run build:terminal-themes && bun run build:desktop-themes'
+  );
+  expect(manifest.scripts.test).toBe('bun run build:runtime-generated && bun test ./tests');
   expect(manifest.scripts['check:generated']).toContain('bun run check:contracts');
   expect(manifest.scripts['check:generated']).toContain('bun run check:island-css');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:zed-theme');
   expect(manifest.scripts['check:generated']).toContain('bun run check:terminal-themes');
   expect(manifest.scripts['check:generated']).toContain('bun run check:desktop-themes');
-  expect(manifest.scripts['install:island-broker']).toBeUndefined();
-  expect(manifest.scripts['install:island-broker:apply']).toBeUndefined();
   expect(manifest.scripts.build).toBe('bun run build:generated && tsup');
   expect(manifest.scripts['package:check']).toBe('bun run verify && bun run build');
   expect(manifest.scripts.package).toBe(
@@ -226,11 +283,19 @@ test('package scripts own the full verification path without npm shims', () => {
   expect(tsconfig.include).toContain('scripts');
   expect(tsupConfig).toContain("VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22'");
   expect(tsupConfig).toContain('apps/vscode/src/extension.ts');
-  expect(tsupConfig).toContain('apps/vscode/src/islandBroker.ts');
   expect(tsupConfig).not.toContain("target: 'esnext'");
   expect(ciWorkflow).toContain('bun-version: 1.3.11');
   expect(ciWorkflow).toContain('run: bun install --frozen-lockfile');
   expect(ciWorkflow).toContain('run: bun run package');
+});
+
+test('clean clones retain generated projections required by typecheck and Zed development', () => {
+  const gitignore = fs.readFileSync('.gitignore', 'utf8');
+
+  expect(gitignore).not.toContain('apps/vscode/src/generated/');
+  expect(gitignore).not.toContain('apps/zed/themes/tyrian-night.json');
+  expect(fs.existsSync('apps/vscode/src/generated/themeCatalog.ts')).toBe(true);
+  expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
 });
 
 function readJson<T>(filePath: string): T {

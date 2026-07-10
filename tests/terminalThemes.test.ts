@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
@@ -7,7 +9,7 @@ import {
   FASTFETCH_IMAGE_ASSET_PATH,
   FASTFETCH_IMAGE_CONFIG_PATH,
 } from '../scripts/portableAssets.mjs';
-import { buildTerminalThemeAssets } from '../scripts/terminalThemes.mjs';
+import { buildTerminalThemeAssets, writeTerminalThemeAssets } from '../scripts/terminalThemes.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type HighlightSettings = {
@@ -28,6 +30,68 @@ test('terminal theme assets match the generated VS Code-derived outputs', () => 
   }
 });
 
+test('terminal generation resolves validated default roles from the injected catalog root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-terminal-root-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const catalogPath = path.join(root, 'source/themeCatalog.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as Array<{
+      slug: string;
+      terminalDefault?: boolean;
+    }>;
+    for (const entry of catalog) {
+      if (entry.slug === 'tyrian-nocturne') delete entry.terminalDefault;
+      if (entry.slug === 'tyrian-night') entry.terminalDefault = true;
+    }
+    fs.writeFileSync(catalogPath, `${JSON.stringify(catalog)}\n`);
+
+    const injectedAssets = new Map(
+      buildTerminalThemeAssets(root).map((asset) => [asset.path, asset.content])
+    );
+    expect(injectedAssets.get('terminal/ghostty/config.example')).toContain(
+      'theme = dark:tyrian-night,light:tyrian-dawn'
+    );
+    expect(injectedAssets.get('terminal/foot/foot.ini')).toContain(
+      'terminal/foot/themes/tyrian-night.ini'
+    );
+    expect(injectedAssets.get('terminal/fish/config.example.fish')).toContain(
+      'terminal/fish/themes/tyrian-night.fish'
+    );
+    expect(injectedAssets.get('terminal/starship/tyrian-night.toml')).toContain(
+      'palette = "tyrian_night"'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('terminal generation preserves unrelated files in mixed output directories', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-terminal-ownership-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const manualFiles = [
+      'terminal/fish/functions/manual.fish',
+      'terminal/fish/conf.d/manual.fish',
+      'terminal/fastfetch/manual.jsonc',
+      'terminal/ghostty/README.md',
+    ];
+    for (const filePath of manualFiles) {
+      fs.mkdirSync(path.dirname(path.join(root, filePath)), { recursive: true });
+      fs.writeFileSync(path.join(root, filePath), 'manual\n');
+    }
+
+    writeTerminalThemeAssets(root);
+
+    for (const filePath of manualFiles) {
+      expect(fs.readFileSync(path.join(root, filePath), 'utf8')).toBe('manual\n');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Ghostty themes derive terminal colors from the VS Code theme sources', () => {
   for (const source of SOURCE_THEMES) {
     const theme = readSourceTheme<VscodeTheme>(source);
@@ -42,6 +106,32 @@ test('Ghostty themes derive terminal colors from the VS Code theme sources', () 
     expect(ghosttyTheme).toContain(
       `selection-background = ${opaqueHex(theme.colors['terminal.selectionBackground'], background)}`
     );
+  }
+});
+
+test('Foot themes derive terminal colors from the VS Code theme sources', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = readSourceTheme<VscodeTheme>(source);
+    const footTheme = requiredAsset(`terminal/foot/themes/${source.slug}.ini`);
+
+    expect(footTheme).toContain(`[colors-dark]`);
+    expect(footTheme).not.toContain(`[colors]`);
+    expect(footTheme).toContain(`background=${footHex(theme.colors['terminal.background'])}`);
+    expect(footTheme).toContain(`foreground=${footHex(theme.colors['terminal.foreground'])}`);
+    expect(footTheme).toContain('alpha=0.82');
+    expect(footTheme).toContain('blur=yes');
+    expect(footTheme).toContain(`regular0=${footHex(theme.colors['terminal.ansiBlack'])}`);
+    expect(footTheme).toContain(`regular5=${footHex(theme.colors['terminal.ansiMagenta'])}`);
+    expect(footTheme).toContain(`bright7=${footHex(theme.colors['terminal.ansiBrightWhite'])}`);
+    expect(footTheme).toContain(
+      `selection-background=${footHex(
+        opaqueHex(theme.colors['terminal.selectionBackground'], theme.colors['terminal.background'])
+      )}`
+    );
+    expect(footTheme).toContain(`[csd]`);
+    expect(footTheme).toContain(`color=ff${footHex(theme.colors['terminal.background'])}`);
+    expect(footTheme).toContain(`button-color=ff${footHex(theme.colors['terminal.foreground'])}`);
+    expect(footTheme).not.toContain('#');
   }
 });
 
@@ -178,7 +268,18 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
     'mouse-scroll-multiplier = discrete:1,precision:1'
   );
+  expect(requiredAsset('terminal/ghostty/config.example')).toContain('copy-on-select = clipboard');
   expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain(
+    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-nocturne.ini'
+  );
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('font=Monaspace Neon:size=13');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('font-italic=Monaspace Radon:size=13');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('selection-target=clipboard');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('[csd]');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('preferred=client');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('hide-when-maximized=yes');
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('style=beam');
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
     'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
   );
@@ -191,6 +292,16 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/fish/config.example.fish')).not.toContain(
     'function fish_greeting'
   );
+  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
+    'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
+  );
+  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
+    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-nocturne.fish'
+  );
+  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
+    'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'
+  );
+  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).not.toContain('starship init');
   const fishGreeting = requiredAsset('terminal/fish/functions/fish_greeting.fish');
   expect(fishGreeting).toContain('status current-filename');
   expect(fishGreeting).toContain(
@@ -204,12 +315,14 @@ test('example configs point each terminal layer at the right owner', () => {
 
 test('terminal docs list the generated theme and palette surfaces from source themes', () => {
   const ghosttyReadme = fs.readFileSync('terminal/ghostty/README.md', 'utf8');
+  const footReadme = fs.readFileSync('terminal/foot/README.md', 'utf8');
   const starshipReadme = fs.readFileSync('terminal/starship/README.md', 'utf8');
 
   for (const source of SOURCE_THEMES) {
     const theme = readSourceTheme<VscodeTheme>(source);
 
     expect(ghosttyReadme).toContain(`- \`${source.slug}\``);
+    expect(footReadme).toContain(`- \`${source.slug}.ini\``);
     expect(starshipReadme).toContain(theme.name.replace(/^Tyrian /u, ''));
   }
 });
@@ -237,6 +350,14 @@ function requiredThemeSource(slug: string) {
 function fishHex(color: string | undefined): string {
   if (!color) {
     throw new Error('Missing fish color');
+  }
+
+  return opaqueHex(color).slice(1);
+}
+
+function footHex(color: string | undefined): string {
+  if (!color) {
+    throw new Error('Missing Foot color');
   }
 
   return opaqueHex(color).slice(1);

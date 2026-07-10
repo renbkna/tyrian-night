@@ -1,10 +1,11 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { isLightHex, isTransparentHex, withHexAlpha } from './colorUtils.mjs';
-import { SOURCE_THEMES, readJson } from './themeSources.mjs';
+import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { readJson, readThemeSources } from './themeSources.mjs';
 
 /**
  * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
@@ -18,17 +19,18 @@ import { SOURCE_THEMES, readJson } from './themeSources.mjs';
  */
 
 const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
+const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @param {string} [repoRoot]
  * @returns {{ $schema: string; name: string; author: string; themes: unknown[] }}
  */
-export function buildZedThemeFamily(repoRoot = process.cwd()) {
+export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
   return {
     $schema: 'https://zed.dev/schema/themes/v0.2.0.json',
     name: 'Tyrian Night',
     author: 'renbkna',
-    themes: SOURCE_THEMES.map(({ sourcePath, appearance }) =>
+    themes: readThemeSources(repoRoot).map(({ sourcePath, appearance }) =>
       buildZedTheme(
         /** @type {VscodeTheme} */ (readJson(path.join(repoRoot, sourcePath))),
         appearance
@@ -39,15 +41,22 @@ export function buildZedThemeFamily(repoRoot = process.cwd()) {
 
 /**
  * @param {string} [repoRoot]
- * @returns {void}
+ * @param {{ check?: boolean }} [options]
+ * @returns {string[]}
  */
-export function writeZedThemeFamily(repoRoot = process.cwd()) {
-  const outputPath = path.join(repoRoot, OUTPUT_PATH);
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(
-    outputPath,
-    `${JSON.stringify(buildZedThemeFamily(repoRoot), null, 2)}\n`,
-    'utf8'
+export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
+  return syncGeneratedAssets(
+    [
+      {
+        path: OUTPUT_PATH,
+        content: `${JSON.stringify(buildZedThemeFamily(repoRoot), null, 2)}\n`,
+      },
+    ],
+    repoRoot,
+    {
+      check: options.check,
+      ownership: [{ directory: 'apps/zed/themes' }],
+    }
   );
 }
 
@@ -449,6 +458,13 @@ function clean(value) {
   return value;
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  writeZedThemeFamily();
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const staleFiles = writeZedThemeFamily(defaultRepoRoot, {
+    check: process.argv.includes('--check'),
+  });
+
+  if (staleFiles.length > 0) {
+    console.error(`Zed theme assets are stale: ${staleFiles.join(', ')}`);
+    process.exit(1);
+  }
 }

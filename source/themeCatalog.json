@@ -1,33 +1,20 @@
 [
   {
-    "label": "Tyrian Night",
     "slug": "tyrian-night",
-    "vscodeUiTheme": "vs-dark",
-    "appearance": "dark",
     "default": true
   },
   {
-    "label": "Tyrian Nocturne",
     "slug": "tyrian-nocturne",
-    "vscodeUiTheme": "vs-dark",
-    "appearance": "dark"
+    "terminalDefault": true
   },
   {
-    "label": "Tyrian Night Old",
-    "slug": "tyrian-night-old",
-    "vscodeUiTheme": "vs-dark",
-    "appearance": "dark"
+    "slug": "tyrian-night-old"
   },
   {
-    "label": "Tyrian Abyss",
-    "slug": "tyrian-abyss",
-    "vscodeUiTheme": "vs-dark",
-    "appearance": "dark"
+    "slug": "tyrian-abyss"
   },
   {
-    "label": "Tyrian Dawn",
     "slug": "tyrian-dawn",
-    "vscodeUiTheme": "vs",
-    "appearance": "light"
+    "terminalDefault": true
   }
 ]

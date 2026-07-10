@@ -1,7 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
+import { contrastRatio } from '../scripts/colorScience.mjs';
 import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildDesktopThemeAssets } from '../scripts/desktopThemes.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
@@ -44,6 +47,28 @@ const UNION_FORBIDDEN_CONTRACT = [
 test('desktop theme assets match the generated VS Code-derived outputs', () => {
   for (const [assetPath, content] of assets) {
     expect(fs.readFileSync(assetPath, 'utf8')).toBe(content);
+  }
+});
+
+test('desktop generation resolves catalog identity from the injected repository root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-desktop-root-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'package.json'), '{"version":"1.0.0"}\n');
+    const themePath = path.join(root, 'source/themes/tyrian-night.json');
+    const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as Record<string, unknown>;
+    theme.name = 'Injected Desktop Night';
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    const generated = new Map(
+      buildDesktopThemeAssets(root).map((asset) => [asset.path, asset.content])
+    );
+    expect(generated.get('desktop/kde/color-schemes/TyrianNight.colors')).toContain(
+      'Name=Injected Desktop Night'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -263,6 +288,29 @@ test('Caelestia schemes derive Material and terminal tokens from Tyrian sources'
     expect(state.mode).toBe(mode);
     expect(state.colours.background).toBe(background);
     expect(state.colours.primary).toBe(primary);
+
+    for (const [backgroundRole, foregroundRole] of [
+      ['primary', 'onPrimary'],
+      ['primaryContainer', 'onPrimaryContainer'],
+      ['primaryFixed', 'onPrimaryFixed'],
+      ['primaryFixedDim', 'onPrimaryFixedVariant'],
+      ['secondary', 'onSecondary'],
+      ['secondaryContainer', 'onSecondaryContainer'],
+      ['secondaryFixed', 'onSecondaryFixed'],
+      ['secondaryFixedDim', 'onSecondaryFixedVariant'],
+      ['tertiary', 'onTertiary'],
+      ['tertiaryContainer', 'onTertiaryContainer'],
+      ['tertiaryFixed', 'onTertiaryFixed'],
+      ['tertiaryFixedDim', 'onTertiaryFixedVariant'],
+      ['error', 'onError'],
+      ['errorContainer', 'onErrorContainer'],
+      ['success', 'onSuccess'],
+      ['successContainer', 'onSuccessContainer'],
+    ]) {
+      expect(
+        contrastRatio(`#${state.colours[foregroundRole]}`, `#${state.colours[backgroundRole]}`)
+      ).toBeGreaterThanOrEqual(4.5);
+    }
   }
 });
 

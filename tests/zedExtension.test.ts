@@ -1,8 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
-import { buildZedThemeFamily } from '../scripts/zedTheme.mjs';
+import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type ZedThemeFamily = {
@@ -295,6 +297,40 @@ test('Zed theme asset matches the generated Zed schema port of the VS Code theme
   ]);
 });
 
+test('Zed generation resolves theme membership and identity from the injected root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-zed-root-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-night.json');
+    const theme = readJson<Record<string, unknown>>(themePath);
+    theme.name = 'Injected Zed Night';
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    const generated = buildZedThemeFamily(root) as ZedThemeFamily;
+    expect(generated.themes[0]?.name).toBe('Injected Zed Night');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Zed generation owns the complete themes directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-zed-ownership-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'apps/zed/themes/nested'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'apps/zed/themes/stale.json'), '{}\n');
+    fs.writeFileSync(path.join(root, 'apps/zed/themes/nested/stale.txt'), 'stale\n');
+
+    writeZedThemeFamily(root);
+
+    expect(fs.readdirSync(path.join(root, 'apps/zed/themes'))).toEqual(['tyrian-night.json']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Zed theme covers the current schema and built-in style and syntax surfaces', () => {
   const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
 
@@ -418,9 +454,9 @@ test('Zed example settings match the repo companion settings contract', () => {
     light: 'Colored Zed Icons Theme Dark',
     dark: 'Colored Zed Icons Theme Dark',
   });
-  expect(settings.buffer_font_family).toBe('Monaspace Neon Var');
+  expect(settings.buffer_font_family).toBe('Monaspace Neon');
   expect(settings.buffer_font_size).toBe(18);
-  expect(settings.buffer_font_weight).toBe(450);
+  expect(settings.buffer_font_weight).toBe(300);
   expect(settings.buffer_line_height).toEqual({ custom: 1.45 });
   expect(settings.disable_ai).toBe(true);
   expect(settings.text_rendering_mode).toBe('platform_default');
@@ -451,7 +487,6 @@ test('Zed example settings match the repo companion settings contract', () => {
     line_width: 1,
     active_line_width: 1,
     coloring: 'indent_aware',
-    background_coloring: 'disabled',
   });
   expect(settings.terminal.font_family).toBe('Monaspace Neon');
   expect(settings.terminal.font_size).toBe(12);
@@ -461,7 +496,7 @@ test('Zed example settings match the repo companion settings contract', () => {
   expect(settings.terminal.minimum_contrast).toBe(0);
   expect(settings.cli_default_open_behavior).toBe('existing_window');
   expect(settings.diff_view_style).toBe('split');
-  expect(settings.helix_mode).toBe(false);
+  expect(settings).not.toHaveProperty('helix_mode');
   expect(settings.inlay_hints).toEqual({
     enabled: true,
     show_type_hints: true,
@@ -471,7 +506,7 @@ test('Zed example settings match the repo companion settings contract', () => {
   });
   expect(settings.use_on_type_format).toBe(true);
   expect(settings.show_edit_predictions).toBe(false);
-  expect(settings.edit_predictions.provider).toBe('copilot');
+  expect(settings).not.toHaveProperty('edit_predictions');
   expect(settings.autosave.after_delay.milliseconds).toBe(2000);
   expect(settings.hover_popover_delay).toBe(300);
   expect(settings.vertical_scroll_margin).toBe(6);

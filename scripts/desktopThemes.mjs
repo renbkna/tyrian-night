@@ -2,11 +2,16 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { isLightHex, opaqueHex, parseHexColor } from './colorUtils.mjs';
-import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
+import { contrastRatio } from './colorScience.mjs';
+import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { readSourceTheme, readThemeSources } from './themeSources.mjs';
 import { flattenCssFile } from './union/flattenCss.mjs';
 import { lintUnionCss } from './union/lintUnionCss.mjs';
+
+const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
@@ -190,14 +195,24 @@ const ANSI_KEYS = [
   'terminal.ansiBrightWhite',
 ];
 
+const DESKTOP_GENERATED_OWNERSHIP = [
+  { directory: 'desktop/kde/color-schemes' },
+  { directory: 'desktop/kde/plasma/desktoptheme' },
+  { directory: 'desktop/kde/plasma/look-and-feel' },
+  { directory: 'desktop/kde/union/css/styles' },
+  { directory: 'desktop/caelestia/schemes/tyrian' },
+  { directory: 'desktop/caelestia/hypr' },
+  { directory: 'desktop/caelestia/state' },
+];
+
 /**
  * @param {string} [repoRoot]
  * @returns {GeneratedAsset[]}
  */
-export function buildDesktopThemeAssets(repoRoot = process.cwd()) {
+export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const packageVersion = readPackageVersion(repoRoot);
 
-  return SOURCE_THEMES.flatMap((source) => {
+  return readThemeSources(repoRoot).flatMap((source) => {
     const theme = /** @type {VscodeTheme} */ (readSourceTheme(source, repoRoot));
     const palette = buildDesktopPalette(theme);
     const kdeFileName = pascalSlug(source.slug);
@@ -263,25 +278,11 @@ function readPackageVersion(repoRoot) {
  * @param {{ check?: boolean }} [options]
  * @returns {void}
  */
-export function writeDesktopThemeAssets(repoRoot = process.cwd(), options = {}) {
-  const staleAssets = [];
-
-  for (const asset of buildDesktopThemeAssets(repoRoot)) {
-    const outputPath = path.join(repoRoot, asset.path);
-
-    if (options.check) {
-      const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : undefined;
-
-      if (current !== asset.content) {
-        staleAssets.push(asset.path);
-      }
-
-      continue;
-    }
-
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, asset.content, 'utf8');
-  }
+export function writeDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+  const staleAssets = syncGeneratedAssets(buildDesktopThemeAssets(repoRoot), repoRoot, {
+    check: options.check,
+    ownership: DESKTOP_GENERATED_OWNERSHIP,
+  });
 
   if (staleAssets.length > 0) {
     throw new Error(
@@ -1337,7 +1338,15 @@ function stripHash(color) {
  * @returns {string}
  */
 function contrastText(color) {
-  return isLightHex(color) ? '#0C0C0C' : '#FFFFFF';
+  const dark = '#000000';
+  const light = '#FFFFFF';
+  const text = contrastRatio(dark, color) >= contrastRatio(light, color) ? dark : light;
+
+  if (contrastRatio(text, color) < 4.5) {
+    throw new Error(`Could not derive AA contrast text for '${color}'.`);
+  }
+
+  return text;
 }
 
 /**
@@ -1384,6 +1393,6 @@ function semanticColor(theme, key, fallbackKey) {
     : themeColor(theme, fallbackKey, undefined);
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  writeDesktopThemeAssets(process.cwd(), { check: process.argv.includes('--check') });
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  writeDesktopThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }

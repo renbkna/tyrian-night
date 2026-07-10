@@ -1,11 +1,18 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { FASTFETCH_IMAGE_CONFIG_PATH } from './portableAssets.mjs';
-import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
+import {
+  getTerminalDefaultThemeSource,
+  readSourceTheme,
+  readThemeSources,
+} from './themeSources.mjs';
+
+const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
@@ -18,7 +25,7 @@ import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
 
-const GHOSTTY_ANSI_KEYS = [
+const TERMINAL_ANSI_KEYS = [
   'terminal.ansiBlack',
   'terminal.ansiRed',
   'terminal.ansiGreen',
@@ -37,19 +44,29 @@ const GHOSTTY_ANSI_KEYS = [
   'terminal.ansiBrightWhite',
 ];
 
-const DEFAULT_DARK_TERMINAL_THEME_SLUG = 'tyrian-nocturne';
-const DEFAULT_LIGHT_TERMINAL_THEME_SLUG = 'tyrian-dawn';
+const TERMINAL_GENERATED_OWNERSHIP = [
+  { directory: 'terminal/ghostty/themes' },
+  { directory: 'terminal/fish/themes' },
+  { directory: 'terminal/fish/functions', match: /^fish_greeting\.fish$/u },
+  { directory: 'terminal/fish/conf.d', match: /^tyrian-night\.fish$/u },
+  { directory: 'terminal/foot/themes' },
+  { directory: 'terminal/fastfetch', match: /^tyrian-night\.jsonc$/u },
+  { directory: 'terminal/ghostty', match: /^(?:config\.example|ghostty\.css)$/u },
+  { directory: 'terminal/fish', match: /^config\.example\.fish$/u },
+  { directory: 'terminal/foot', match: /^foot\.ini$/u },
+  { directory: 'terminal/starship', match: /^tyrian-night\.toml$/u },
+];
 
 /**
  * @param {string} [repoRoot]
  * @returns {GeneratedAsset[]}
  */
-export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
-  const sourceThemes = SOURCE_THEMES.map((source) => ({
+export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
+  const sourceThemes = readThemeSources(repoRoot).map((source) => ({
     source,
     theme: /** @type {VscodeTheme} */ (readSourceTheme(source, repoRoot)),
   }));
-  const defaultDarkTheme = defaultTerminalSourceTheme(sourceThemes).theme;
+  const defaultDarkTheme = terminalSourceTheme(sourceThemes, 'dark').theme;
 
   return [
     ...sourceThemes.flatMap(({ source, theme }) => [
@@ -58,21 +75,33 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
         content: buildGhosttyTheme(theme),
       },
       {
+        path: `terminal/foot/themes/${source.slug}.ini`,
+        content: buildFootTheme(theme),
+      },
+      {
         path: `terminal/fish/themes/${source.slug}.fish`,
         content: buildFishTheme(theme),
       },
     ]),
     {
       path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig({ theme: defaultDarkTheme }),
+      content: buildGhosttyConfig({ repoRoot }),
     },
     {
       path: 'terminal/ghostty/ghostty.css',
       content: buildGhosttyGtkCss(defaultDarkTheme),
     },
     {
+      path: 'terminal/foot/foot.ini',
+      content: buildFootConfig({ repoRoot }),
+    },
+    {
       path: 'terminal/fish/config.example.fish',
-      content: buildFishConfig(),
+      content: buildFishConfig({ repoRoot }),
+    },
+    {
+      path: 'terminal/fish/conf.d/tyrian-night.fish',
+      content: buildFishStartupConfig({ repoRoot }),
     },
     {
       path: 'terminal/fish/functions/fish_greeting.fish',
@@ -94,25 +123,11 @@ export function buildTerminalThemeAssets(repoRoot = process.cwd()) {
  * @param {{ check?: boolean }} [options]
  * @returns {void}
  */
-export function writeTerminalThemeAssets(repoRoot = process.cwd(), options = {}) {
-  const staleAssets = [];
-
-  for (const asset of buildTerminalThemeAssets(repoRoot)) {
-    const outputPath = path.join(repoRoot, asset.path);
-
-    if (options.check) {
-      const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : undefined;
-
-      if (current !== asset.content) {
-        staleAssets.push(asset.path);
-      }
-
-      continue;
-    }
-
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, asset.content, 'utf8');
-  }
+export function writeTerminalThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+  const staleAssets = syncGeneratedAssets(buildTerminalThemeAssets(repoRoot), repoRoot, {
+    check: options.check,
+    ownership: TERMINAL_GENERATED_OWNERSHIP,
+  });
 
   if (staleAssets.length > 0) {
     throw new Error(
@@ -138,7 +153,7 @@ function buildGhosttyTheme(theme) {
   );
 
   return [
-    ...GHOSTTY_ANSI_KEYS.map(
+    ...TERMINAL_ANSI_KEYS.map(
       (colorKey, index) => `palette = ${index}=${opaqueThemeColor(colors[colorKey], background)}`
     ),
     `background = ${background}`,
@@ -147,6 +162,56 @@ function buildGhosttyTheme(theme) {
     `cursor-text = ${themeColor(theme, 'editorCursor.background', 'terminal.background')}`,
     `selection-background = ${selectionBackground}`,
     `selection-foreground = ${foreground}`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * @param {VscodeTheme} theme
+ * @returns {string}
+ */
+function buildFootTheme(theme) {
+  const colors = theme.colors;
+  const background = themeColor(theme, 'terminal.background', 'editor.background');
+  const foreground = themeColor(theme, 'terminal.foreground', 'editor.foreground');
+
+  const ansiColors = TERMINAL_ANSI_KEYS.map((colorKey) =>
+    footColor(opaqueThemeColor(colors[colorKey], background))
+  );
+
+  return [
+    '[colors-dark]',
+    `foreground=${footColor(foreground)}`,
+    `background=${footColor(background)}`,
+    'alpha=0.82',
+    'blur=yes',
+    `regular0=${ansiColors[0]}`,
+    `regular1=${ansiColors[1]}`,
+    `regular2=${ansiColors[2]}`,
+    `regular3=${ansiColors[3]}`,
+    `regular4=${ansiColors[4]}`,
+    `regular5=${ansiColors[5]}`,
+    `regular6=${ansiColors[6]}`,
+    `regular7=${ansiColors[7]}`,
+    `bright0=${ansiColors[8]}`,
+    `bright1=${ansiColors[9]}`,
+    `bright2=${ansiColors[10]}`,
+    `bright3=${ansiColors[11]}`,
+    `bright4=${ansiColors[12]}`,
+    `bright5=${ansiColors[13]}`,
+    `bright6=${ansiColors[14]}`,
+    `bright7=${ansiColors[15]}`,
+    `cursor=${footColor(themeColor(theme, 'editorCursor.foreground', 'terminal.foreground'))} ${footColor(
+      themeColor(theme, 'editorCursor.background', 'terminal.background')
+    )}`,
+    `selection-foreground=${footColor(foreground)}`,
+    `selection-background=${footColor(
+      themeColor(theme, 'terminal.selectionBackground', 'editor.selectionBackground')
+    )}`,
+    '',
+    '[csd]',
+    `color=ff${footColor(background)}`,
+    `button-color=ff${footColor(foreground)}`,
     '',
   ].join('\n');
 }
@@ -210,14 +275,17 @@ function buildFishTheme(theme) {
 }
 
 /**
- * @param {{ gtkCustomCss?: string; theme?: VscodeTheme }} [options]
+ * @param {{ gtkCustomCss?: string; repoRoot?: string }} [options]
  * @returns {string}
  */
 export function buildGhosttyConfig(options = {}) {
-  const theme =
-    options.theme ?? /** @type {VscodeTheme} */ (readSourceTheme(defaultTerminalSource()));
+  const root = options.repoRoot ?? defaultRepoRoot;
+  const sourceThemes = readThemeSources(root);
+  const darkSource = getTerminalDefaultThemeSource('dark', sourceThemes);
+  const lightSource = getTerminalDefaultThemeSource('light', sourceThemes);
+  const theme = /** @type {VscodeTheme} */ (readSourceTheme(darkSource, root));
   const lines = [
-    `theme = dark:${DEFAULT_DARK_TERMINAL_THEME_SLUG},light:${DEFAULT_LIGHT_TERMINAL_THEME_SLUG}`,
+    `theme = dark:${darkSource.slug},light:${lightSource.slug}`,
     'background-opacity = 0.82',
     'background-blur = true',
     'font-family = Monaspace Neon',
@@ -243,6 +311,7 @@ export function buildGhosttyConfig(options = {}) {
     'window-padding-y = 8',
     'minimum-contrast = 1',
     'mouse-scroll-multiplier = discrete:1,precision:1',
+    'copy-on-select = clipboard',
   ];
 
   if (options.gtkCustomCss) {
@@ -253,7 +322,39 @@ export function buildGhosttyConfig(options = {}) {
 }
 
 /**
- * @param {{ tyrianRoot?: string }} [options]
+ * @param {{ repoRoot?: string; themeDirectory?: string }} [options]
+ * @returns {string}
+ */
+export function buildFootConfig(options = {}) {
+  const root = options.repoRoot ?? defaultRepoRoot;
+  const defaultDarkSource = getTerminalDefaultThemeSource('dark', readThemeSources(root));
+  const themeDirectory = options.themeDirectory ?? '/path/to/tyrian-night/terminal/foot/themes';
+
+  return [
+    `include=${themeDirectory}/${defaultDarkSource.slug}.ini`,
+    '',
+    '[main]',
+    'font=Monaspace Neon:size=13',
+    'font-bold=Monaspace Neon:size=13',
+    'font-italic=Monaspace Radon:size=13',
+    'font-bold-italic=Monaspace Radon:size=13',
+    'pad=10x8',
+    'selection-target=clipboard',
+    '',
+    '[csd]',
+    'preferred=client',
+    'font=Monaspace Neon',
+    'hide-when-maximized=yes',
+    '',
+    '[cursor]',
+    'style=beam',
+    'blink=yes',
+    '',
+  ].join('\n');
+}
+
+/**
+ * @param {{ repoRoot?: string; tyrianRoot?: string }} [options]
  * @returns {string}
  */
 export function buildFishConfig(options = {}) {
@@ -261,12 +362,30 @@ export function buildFishConfig(options = {}) {
 
   return [
     'if status is-interactive',
-    `    set -gx TYRIAN_NIGHT_ROOT "${fishEscape(tyrianRoot)}"`,
-    `    source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/${DEFAULT_DARK_TERMINAL_THEME_SLUG}.fish`,
-    '    set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml',
+    ...buildFishStartupConfig({ repoRoot: options.repoRoot, tyrianRoot })
+      .trimEnd()
+      .split('\n')
+      .map((line) => `    ${line}`),
     '',
     '    starship init fish | source',
     'end',
+    '',
+  ].join('\n');
+}
+
+/**
+ * @param {{ repoRoot?: string; tyrianRoot?: string }} [options]
+ * @returns {string}
+ */
+export function buildFishStartupConfig(options = {}) {
+  const root = options.repoRoot ?? defaultRepoRoot;
+  const defaultDarkSource = getTerminalDefaultThemeSource('dark', readThemeSources(root));
+  const tyrianRoot = options.tyrianRoot ?? '/path/to/tyrian-night';
+
+  return [
+    `set -gx TYRIAN_NIGHT_ROOT "${fishEscape(tyrianRoot)}"`,
+    `source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/${defaultDarkSource.slug}.fish`,
+    'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml',
     '',
   ].join('\n');
 }
@@ -451,7 +570,7 @@ function buildStarshipConfig(sourceThemes) {
   return [
     '"$schema" = "https://starship.rs/config-schema.json"',
     '',
-    `palette = "${defaultTerminalSourceTheme(sourceThemes).source.paletteName}"`,
+    `palette = "${terminalSourceTheme(sourceThemes, 'dark').source.paletteName}"`,
     '',
     'format = """',
     '[](fg:surface)\\',
@@ -541,29 +660,19 @@ function buildStarshipConfig(sourceThemes) {
 }
 
 /**
- * @returns {import('./themeSources.mjs').ThemeSource}
- */
-function defaultTerminalSource() {
-  const source = SOURCE_THEMES.find(({ slug }) => slug === DEFAULT_DARK_TERMINAL_THEME_SLUG);
-
-  if (!source) {
-    throw new Error(`Missing default terminal theme source: ${DEFAULT_DARK_TERMINAL_THEME_SLUG}`);
-  }
-
-  return source;
-}
-
-/**
  * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }>} sourceThemes
+ * @param {'dark' | 'light'} appearance
  * @returns {{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }}
  */
-function defaultTerminalSourceTheme(sourceThemes) {
-  const sourceTheme = sourceThemes.find(
-    ({ source }) => source.slug === DEFAULT_DARK_TERMINAL_THEME_SLUG
+function terminalSourceTheme(sourceThemes, appearance) {
+  const defaultSource = getTerminalDefaultThemeSource(
+    appearance,
+    sourceThemes.map(({ source }) => source)
   );
+  const sourceTheme = sourceThemes.find(({ source }) => source.slug === defaultSource.slug);
 
   if (!sourceTheme) {
-    throw new Error(`Missing default terminal theme source: ${DEFAULT_DARK_TERMINAL_THEME_SLUG}`);
+    throw new Error(`Missing resolved ${appearance} terminal source theme.`);
   }
 
   return sourceTheme;
@@ -754,6 +863,14 @@ function rgba(color, alpha) {
 }
 
 /**
+ * @param {string} color
+ * @returns {string}
+ */
+function footColor(color) {
+  return opaqueHex(color).slice(1);
+}
+
+/**
  * @param {string} value
  * @returns {string}
  */
@@ -787,6 +904,6 @@ function tokenSettings(theme, scope) {
   throw new Error(`Missing token scope '${scope}' in ${theme.name}`);
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  writeTerminalThemeAssets(process.cwd(), { check: process.argv.includes('--check') });
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  writeTerminalThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }
