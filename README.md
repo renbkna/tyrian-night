@@ -18,10 +18,10 @@ A deep, ultra-saturated visual system built on color science and exported across
 
 This repo defines the Tyrian Night visual identity and exports it everywhere I use a computer.
 
-- `source/` is the canonical theme source.
+- `source/themes/` owns theme identity and palette data; `source/themeCatalog.json` owns ordered membership and default roles.
 - `apps/vscode/` owns the VS Code extension runtime and Island UI assets.
 - `apps/zed/` owns the Zed theme extension.
-- `terminal/` owns Ghostty, fish, Starship, and Fastfetch outputs.
+- `terminal/` owns Ghostty, Foot, fish, Starship, and Fastfetch outputs.
 - `desktop/` owns KDE Plasma and Caelestia outputs.
 - `rice/` owns the captured portable layout and wallpaper profile.
 - `scripts/` owns generators, live install, and rice install logic.
@@ -92,7 +92,7 @@ Italic syntax is reserved for prose surfaces: comments, doc comments, notes, TOD
 
 Tyrian Night ships its own Island UI supervisor — no external UI patching extension required.
 
-When a Tyrian theme is active, the extension can install or repair Island UI. Switching away from the Tyrian theme family restores the stock VS Code shell. Apply and repair run through a preflight supervisor first: Tyrian checks the VS Code app root, current patch state, write access, backups, and checksum state before it attempts to mutate workbench files.
+When a Tyrian theme is active, the extension can install or repair Island UI. Apply records that exact style for the physical VS Code installation, so windows using other color themes do not compete over the app-wide shell. Only `Restore Classic UI` disables it. Apply and repair run through a preflight supervisor first: Tyrian checks the canonical app root, desired style, current patch state, backups, checksum state, and whether the app files are locally writable before it attempts to mutate them.
 
 > [!WARNING]
 > If Island UI is active, you must run `Tyrian Night: Restore Classic UI` before uninstalling the extension. Uninstalling Tyrian Night does not remove the custom UI patch.
@@ -100,7 +100,7 @@ When a Tyrian theme is active, the extension can install or repair Island UI. Sw
 > [!WARNING]
 > Do not click uninstall first. Restore the classic UI, reload VS Code, confirm the patch is gone, and only then uninstall the extension.
 
-The patch surface is intentionally narrow: a single Tyrian stylesheet injected into `workbench.html`, one CSS asset copied into the workbench directory, and a matching `product.json` checksum update. Tyrian-owned backups sit next to patched files for reliable rollback, and a v2 manifest receipt records the app root, patch strategy, upstream hashes, patched hashes, CSS hash, and owned sidecar names. A small user-level registry tracks managed app roots so `Restore Classic UI` can clean up completely. Restore trusts backup sidecars only when the manifest v2 restore proof is valid; old or incomplete Tyrian sidecars are cleaned by stripping the owned workbench block instead. If a VS Code package update resets the app tree or file permissions, Tyrian reports that as a repair state instead of failing with a raw filesystem error.
+The patch surface is intentionally narrow: a single Tyrian stylesheet injected into `workbench.html`, one CSS asset copied into the workbench directory, and a matching `product.json` checksum update. Tyrian-owned backups sit next to patched files for reliable rollback, and a v3 manifest receipt records the app root, desired style, patch strategy, upstream hashes, patched hashes, CSS hash, and owned sidecar names. One shared user-level record per canonical app root owns both the desired style and managed-installation lifecycle. A physical-root lock serializes every writer, while a recoverable mutation journal rolls an interrupted commit back before the next operation. Restore trusts backup sidecars only when the complete manifest receipt matches the current patch and upstream backups; otherwise it removes all Tyrian stylesheet evidence and repairs the checksum. If a VS Code package update resets the app tree or file permissions, Tyrian reports that as a repair state instead of failing with a raw filesystem error.
 
 **Required uninstall steps:**
 
@@ -112,13 +112,11 @@ The patch surface is intentionally narrow: a single Tyrian stylesheet injected i
 **Commands:**
 `Tyrian Night: Apply Island UI` · `Repair Island UI` · `Restore Classic UI` · `Doctor Island UI`
 
-**Doctor** classifies each managed app root as `clean`, `patched`, `managed-only`, `missing`, `permission-denied`, `broken-backup`, or `checksum-mismatch`, reports desired state, VS Code version, workbench hashes, writeability, restore proof, the last manifest receipt, system write-access prompt availability, and the recommended action. Self-healable state is routed through `Restore Classic UI`; permission-required state is reported explicitly so the user knows the VS Code package install or update reset the writable patch surface.
+**Doctor** classifies each managed app root as `clean`, `patched`, `managed-only`, `missing`, `permission-denied`, `broken-backup`, or `checksum-mismatch`, compares the exact desired and installed styles, and reports VS Code version, workbench hashes, writability, restore proof, the last manifest receipt, and the recommended action. Permission-required and blocked roots are reported separately; partial cleanup is never announced as complete.
 
-For package-managed Linux installs, the preferred flow is a one-time scoped write-access unlock from inside the extension. When VS Code app files are not writable, Tyrian asks for system permission with `pkexec`, validates the current `workbench.html` and `product.json` hashes from the supervisor preflight, runs only the system `chown` and `chmod` tools for the workbench directory, `workbench.html`, and `product.json`, verifies the grant, and then retries the normal extension-owned apply or restore path. This does not run user-writable VSIX JavaScript as root, does not read project files, and does not send telemetry or network requests.
+Package-managed installs must make the VS Code app files writable outside Tyrian before applying or restoring Island UI. Tyrian does not request administrator privileges or change file ownership and permissions. Package updates may reset those files, so re-establish writability with the system package or administration tools before running `Repair Island UI` or `Restore Classic UI`.
 
-Restoring Classic UI removes Tyrian's workbench block, CSS, manifest, and backup sidecars. When a restore follows a Tyrian-triggered write-access unlock, Tyrian can ask system permission again to return the three VS Code app surfaces to root-owned package-style access (`0755` for the workbench directory, `0644` for `workbench.html` and `product.json`) after hash verification. If the system prompt is unavailable, the visual restore still removes the Island UI patch, and the next VS Code package update will usually reset package ownership.
-
-The VSIX excludes the system broker entrypoint and uses the scoped write-access flow above for package-managed installs. Package updates may reset VS Code file ownership, in which case Tyrian will ask for the scoped unlock again.
+Restoring Classic UI removes Tyrian's workbench block, CSS, manifest, and backup sidecars. If the app files are no longer writable, restore stops and Doctor reports the affected roots instead of claiming cleanup succeeded.
 
 > Because Island UI patches `workbench.html`, VS Code may show *"Your installation appears to be corrupt"* while it is active. This is expected and does not indicate broken files.
 
@@ -129,6 +127,7 @@ The VSIX excludes the system broker entrypoint and uses the scoped write-access 
 Tyrian Night also ships repo-local companion configs for terminal tools:
 
 - `terminal/ghostty/` controls terminal window colors and ANSI palette.
+- `terminal/foot/` controls terminal window colors and ANSI palette.
 - `terminal/fish/` controls shell syntax and pager colors.
 - `terminal/starship/` controls the prompt layout and prompt colors.
 - `terminal/fastfetch/` controls the startup system summary.
@@ -159,7 +158,7 @@ node scripts/installLiveTyrian.mjs --apply
 
 The default install copies Tyrian-owned assets and generated configs into
 `~/.local/share/tyrian-night/`, then writes the live terminal, KDE, and Caelestia config targets to use that installed copy.
-Backups are written under `~/.local/state/tyrian-night/backups/`. After a normal install, the
+The entrypoint prepares ignored generated runtime assets first, so it works from a clean checkout. The apply is filesystem-transactional and restores the exact prior files and directory absence on failure. It does not mutate the current systemd, D-Bus, or Plasma process state; restart affected applications or start a new desktop session after a style-only install. Backups are written under `~/.local/state/tyrian-night/backups/`. After a normal install, the
 cloned repo can be moved or deleted. Use `--link` only for local theme development when you want
 live app files to follow edits inside the repo:
 
@@ -171,7 +170,7 @@ node scripts/installLiveTyrian.mjs --apply --link
 
 The rice entrypoint installs the complete Tyrian setup:
 
-- `terminal/ghostty/`, `terminal/fish/`, `terminal/starship/`, and `terminal/fastfetch/`
+- `terminal/ghostty/`, `terminal/foot/`, `terminal/fish/`, `terminal/starship/`, and `terminal/fastfetch/`
 - KDE color scheme, Plasma desktop-theme skin, launcher/taskbar surfaces, lock-screen wallpaper, and Caelestia color state
 - Plasma panel/widget layout from `rice/plasma-layout/`
 
@@ -200,13 +199,15 @@ source used by live apps. Use `--link` only when this repo should remain the liv
 bun run rice --apply --link
 ```
 
-The Plasma layout restore replaces `~/.config/plasma-org.kde.plasma.desktop-appletsrc` and `~/.config/plasmashellrc`, backs up the previous files under `~/.local/state/tyrian-night/backups/`, injects the current machine's active Plasma activity ID into desktop containments, restarts Plasma shell, and applies the wallpaper to the current desktops through `qdbus6`. The runtime activity and wallpaper steps are intentional because Plasma desktop containments are machine-local while the repo snapshot must stay portable and publishable.
+The Plasma layout restore replaces `~/.config/plasma-org.kde.plasma.desktop-appletsrc` and `~/.config/plasmashellrc`, backs up the previous files under `~/.local/state/tyrian-night/backups/`, injects the current machine's active Plasma activity ID into desktop containments, restarts Plasma shell, and applies the wallpaper to the current desktops through `qdbus6`. One persisted transaction owns the complete style-and-layout generation, including shell, panel, and wallpaper state. A failed operation rolls back the whole generation; the next rice operation recovers an interrupted one before starting new work. The runtime activity and wallpaper steps are intentional because Plasma desktop containments are machine-local while the repo snapshot must stay portable and publishable.
 
 Recapture the current machine layout after deliberate widget or wallpaper changes:
 
 ```sh
 bun run rice --capture-layout
 ```
+
+Capture briefly stops an active Plasma shell so its configuration and runtime panel state form one generation, proves the original shell and panel state after restart before publishing, and retains a repository lock plus recovery journal until that proof is complete.
 
 ## Contributing
 

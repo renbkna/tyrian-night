@@ -15,4 +15,4 @@ To switch palette, change the top-level value:
 palette = "tyrian_nocturne"
 ```
 
-The prompt uses Nerd Font symbols, matching the Ghostty example font.
+The prompt uses Nerd Font symbols, matching the terminal example fonts.
