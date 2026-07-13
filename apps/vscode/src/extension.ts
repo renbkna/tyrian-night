@@ -13,7 +13,7 @@ import type {
   IslandUiApplySupervisionResult as IslandApplyResult,
   IslandUiRestoreSupervisionResult as IslandRestoreResult,
   IslandUiSupervisorInventory,
-  IslandUiSupervisorStatus as IslandSupervisorStatus,
+  IslandUiRecommendedAction,
 } from './islandSupervisor.js';
 import { runIslandJsonProcess } from './islandProcess.js';
 
@@ -32,7 +32,6 @@ const UNINSTALL_WARNING_MESSAGE =
 let extContext: vscode.ExtensionContext;
 let syncQueue = Promise.resolve();
 
-type IslandRecommendedAction = 'none' | 'apply' | 'repair' | 'restore' | 'fix-permissions';
 type LegacyStateMigration = {
   theme: string;
   keys: string[];
@@ -167,11 +166,14 @@ async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefin
   const desiredCssFile = resolveDesiredCssFile(status.desiredThemeId);
 
   if (desiredCssFile !== undefined) {
-    await applyIslandCssFile(desiredCssFile, {
+    const result = await applyIslandCssFile(desiredCssFile, {
       interactive: false,
       notifyWhenUnchanged: false,
       reloadMessage: 'Tyrian Night: Island UI was updated. Reload VS Code to apply it.',
     });
+    if (result.kind !== 'applied' && result.kind !== 'already-current') {
+      throw new Error(`Island UI startup reconciliation is ${result.kind}. ${result.reason}`);
+    }
     return;
   }
 
@@ -249,6 +251,13 @@ async function repairIslandUi(): Promise<void> {
   const activeTheme = getActiveTheme();
   const theme = isTyrianTheme(activeTheme) ? activeTheme : undefined;
 
+  if (typeof status.desiredThemeId === 'string' && configuredCssFile === undefined) {
+    vscode.window.showErrorMessage(
+      `Tyrian Night: Island UI desires unavailable style '${status.desiredThemeId}'. Install a matching Tyrian Night version or restore Classic UI; repair left the shared desired style unchanged.`
+    );
+    return;
+  }
+
   if (configuredCssFile === undefined && !theme) {
     vscode.window.showInformationMessage('Tyrian Night: Apply Island UI once before repairing it.');
     return;
@@ -278,7 +287,7 @@ async function applyIslandUi(
     reloadMessage: string;
   },
   theme: string
-): Promise<IslandApplyResult['kind']> {
+): Promise<IslandApplyResult> {
   const cssFile = getCssFileForTheme(theme);
   return applyIslandCssFile(cssFile, options);
 }
@@ -290,7 +299,7 @@ async function applyIslandCssFile(
     notifyWhenUnchanged: boolean;
     reloadMessage: string;
   }
-): Promise<IslandApplyResult['kind']> {
+): Promise<IslandApplyResult> {
   const result = await runIslandCli<IslandApplyResult>([
     'apply-supervised',
     '--app-root',
@@ -303,18 +312,29 @@ async function applyIslandCssFile(
 
   switch (result.kind) {
     case 'applied':
-      await promptForReload(options.reloadMessage);
-      return result.kind;
+      if (result.physicalChanged) {
+        await promptForReload(options.reloadMessage);
+      } else if (options.notifyWhenUnchanged) {
+        vscode.window.showInformationMessage(
+          'Tyrian Night: Island UI desired state was updated; app files are already current.'
+        );
+      }
+      return result;
     case 'already-current':
       if (options.notifyWhenUnchanged) {
         vscode.window.showInformationMessage('Tyrian Night: Island UI is already up to date.');
       }
-      return result.kind;
+      return result;
     case 'permission-required':
       if (options.interactive) {
         await showIslandPermissionRequired(result);
+        if (result.physicalChanged) {
+          await promptForReload(
+            'Tyrian Night: Island UI changed app files but remains incomplete. Reload after resolving the reported failure.'
+          );
+        }
       }
-      return result.kind;
+      return result;
     case 'unsupported':
       if (options.interactive) {
         await vscode.window
@@ -329,14 +349,19 @@ async function applyIslandCssFile(
             }
           });
       }
-      return result.kind;
+      return result;
     case 'blocked':
       if (options.interactive) {
         await vscode.window.showErrorMessage(
           `Tyrian Night: Island UI repair is blocked. ${result.reason}`
         );
+        if (result.physicalChanged) {
+          await promptForReload(
+            'Tyrian Night: Island UI changed app files but remains incomplete. Reload after resolving the reported failure.'
+          );
+        }
       }
-      return result.kind;
+      return result;
   }
 }
 
@@ -396,20 +421,20 @@ async function doctorIslandUi(): Promise<void> {
     `Desired Island UI state: ${desiredState}`,
     '',
     ...registryDiagnostics.flatMap((diagnostic) => [
-      `Registry diagnostic: ${diagnostic}`,
-      'Recommended action: Restore Classic UI',
+      `Registry diagnostic: ${diagnostic.reason}`,
+      `Recommended action: ${formatRecommendedAction(diagnostic.recommendedAction)}`,
       '',
     ]),
     ...statuses.map((status) => {
-      const desired = typeof status.desiredThemeId === 'string';
-      const recommendedAction = recommendIslandAction(status, desired);
+      const recommendedAction = status.recommendedAction;
       const detailLines = [
         `- \`${status.appRoot}\`: ${formatDoctorClassification(status.classification)}`,
         `  Desired: ${status.desiredThemeId ? `enabled (${status.desiredThemeId})` : 'disabled'}`,
         `  Verification: ${status.verificationPassed ? 'passed' : 'failed'}`,
-        `  Self-heal: ${status.canSelfHeal ? 'available via Restore Classic UI' : 'not needed'}`,
+        `  Self-heal: ${recommendedAction === 'restore' || recommendedAction === 'prune-missing' ? 'available via Restore Classic UI' : 'not available'}`,
         `  Recommended action: ${formatRecommendedAction(recommendedAction)}`,
         `  Restore proof: ${formatRestoreProof(status.restoreProof)}`,
+        `  Transaction: ${status.transaction.kind} (${status.transaction.recoverability})`,
       ];
 
       if (status.workbenchChecksum) {
@@ -455,9 +480,9 @@ async function doctorIslandUi(): Promise<void> {
 
   const healableStatuses = statuses.filter(
     (status) =>
-      recommendIslandAction(status, typeof status.desiredThemeId === 'string') === 'restore'
+      status.recommendedAction === 'restore' || status.recommendedAction === 'prune-missing'
   );
-  const healableCount = healableStatuses.length + registryDiagnostics.length;
+  const healableCount = healableStatuses.length;
 
   if (healableCount > 0) {
     const action = await vscode.window.showWarningMessage(
@@ -488,7 +513,7 @@ async function restoreIslandUi(options: {
       await showIslandRestorePermissionRequired(result);
     }
 
-    if (result.changed) {
+    if (result.physicalChanged) {
       await promptForReload(
         'Tyrian Night: Island UI cleanup changed some installations but remains incomplete. Reload VS Code after resolving the reported failures.'
       );
@@ -498,7 +523,7 @@ async function restoreIslandUi(options: {
   }
 
   if (result.kind === 'blocked') {
-    if (result.changed) {
+    if (result.physicalChanged) {
       await promptForReload(
         'Tyrian Night: Island UI cleanup changed some installations but remains incomplete. Reload VS Code after resolving the reported failures.'
       );
@@ -507,7 +532,7 @@ async function restoreIslandUi(options: {
     throw new Error(`Tyrian Night cleanup is incomplete. ${result.reason}`);
   }
 
-  if (!result.changed) {
+  if (!result.physicalChanged) {
     if (options.notifyWhenUnchanged) {
       vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
     }
@@ -565,13 +590,13 @@ async function readCurrentIslandStatus(): Promise<IslandShellStatus> {
 }
 
 async function restoreCurrentIslandUi(): Promise<void> {
-  const result = await runIslandCli<{ changed: boolean; active: false }>([
-    'restore',
-    '--app-root',
-    vscode.env.appRoot,
-  ]);
+  const result = await runIslandCli<{
+    physicalChanged: boolean;
+    incompleteRecovery: boolean;
+    active: false;
+  }>(['restore', '--app-root', vscode.env.appRoot]);
 
-  if (result.changed) {
+  if (result.physicalChanged) {
     await promptForReload(
       'Tyrian Night: Incomplete legacy Island UI state was restored. Reload VS Code to finish reverting.'
     );
@@ -596,6 +621,8 @@ function formatDoctorClassification(
     | 'clean'
     | 'patched'
     | 'managed-only'
+    | 'transaction-pending'
+    | 'transaction-blocked'
     | 'missing'
     | 'permission-denied'
     | 'broken-backup'
@@ -608,6 +635,10 @@ function formatDoctorClassification(
       return 'Patched';
     case 'managed-only':
       return 'Managed-only';
+    case 'transaction-pending':
+      return 'Transaction pending';
+    case 'transaction-blocked':
+      return 'Transaction blocked';
     case 'missing':
       return 'Missing';
     case 'permission-denied':
@@ -619,38 +650,7 @@ function formatDoctorClassification(
   }
 }
 
-function recommendIslandAction(
-  status: IslandSupervisorStatus,
-  desired: boolean
-): IslandRecommendedAction {
-  if (status.registrationState === 'corrupt') {
-    return 'restore';
-  }
-
-  if (status.classification === 'permission-denied' || status.writeAccess?.writable === false) {
-    return desired ||
-      status.managed ||
-      status.active ||
-      (status.registered && status.desiredThemeId === null)
-      ? 'fix-permissions'
-      : 'none';
-  }
-
-  if (desired) {
-    if (status.classification === 'patched') {
-      return 'none';
-    }
-
-    return status.classification === 'broken-backup' ||
-      status.classification === 'checksum-mismatch'
-      ? 'repair'
-      : 'apply';
-  }
-
-  return status.managed || status.active ? 'restore' : 'none';
-}
-
-function formatRecommendedAction(action: IslandRecommendedAction): string {
+function formatRecommendedAction(action: IslandUiRecommendedAction): string {
   switch (action) {
     case 'none':
       return 'None';
@@ -660,8 +660,12 @@ function formatRecommendedAction(action: IslandRecommendedAction): string {
       return 'Repair Island UI';
     case 'restore':
       return 'Restore Classic UI';
+    case 'prune-missing':
+      return 'Prune missing installation via Restore Classic UI';
     case 'fix-permissions':
       return 'Fix app-file permissions';
+    case 'manual-recovery':
+      return 'Inspect and recover transaction evidence manually';
   }
 }
 

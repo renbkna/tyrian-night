@@ -1,5 +1,10 @@
 export class IslandRegistryQuarantineError extends Error {
   readonly changed = true;
+  readonly desiredStateChanged = false;
+  readonly registryChanged = true;
+  readonly physicalChanged = false;
+  readonly externalDrift = false;
+  readonly incompleteRecovery = true;
   readonly quarantinePath: string;
 
   constructor(quarantinePath: string, cause: unknown) {

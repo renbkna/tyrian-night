@@ -8,6 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 
 import {
   IslandLockActionReleaseError,
+  IslandLockReleaseError,
   withIslandProcessLockCore,
 } from '../apps/vscode/src/islandProcessLockCore';
 import { withIslandProcessLock } from '../apps/vscode/src/islandProcessLock';
@@ -224,6 +225,118 @@ test('an old unidentifiable claim fails closed and is never stolen by age', asyn
   }
 });
 
+test('a PID-only live claim is reported as ambiguous within the acquisition bound', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-pid-only-test-'));
+  const lockKey = path.join(testRoot, 'pid-only.lock');
+  await fs.writeFile(
+    lockKey,
+    JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      token: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    }).concat('\n'),
+    'utf8'
+  );
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, { timeoutMs: 60, retryMs: 5 })
+    ).rejects.toThrow('ambiguous PID-only process identity');
+    expect(await fs.readFile(lockKey, 'utf8')).toContain(`"pid":${process.pid}`);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('a parseable crash-left owner candidate is scavenged before acquisition', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-candidate-test-'));
+  const lockKey = path.join(testRoot, 'candidate.lock');
+  const token = crypto.randomUUID();
+  const candidatePath = path.join(testRoot, `.${path.basename(lockKey)}.${token}.owner`);
+  await fs.writeFile(
+    candidatePath,
+    JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      token,
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+    }).concat('\n'),
+    'utf8'
+  );
+
+  try {
+    await expect(withIslandProcessLock(lockKey, async () => 'acquired')).resolves.toBe('acquired');
+    await expect(fs.stat(candidatePath)).rejects.toThrow();
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('cyclic persisted reaper metadata fails within the acquisition bound', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-cycle-test-'));
+  const lockKey = path.join(testRoot, 'cycle.lock');
+  const claimContent = JSON.stringify({
+    version: 1,
+    pid: 2_147_483_647,
+    token: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+  }).concat('\n');
+  await fs.writeFile(lockKey, claimContent, 'utf8');
+  const stats = await fs.lstat(lockKey);
+  const owner = JSON.parse(claimContent) as { token: string };
+  const expected = {
+    dev: String(stats.dev),
+    ino: String(stats.ino),
+    contentHash: crypto.createHash('sha256').update(claimContent, 'utf8').digest('hex'),
+    ownerToken: owner.token,
+  };
+  const generationId = crypto
+    .createHash('sha256')
+    .update(
+      `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
+      'utf8'
+    )
+    .digest('hex');
+  const firstToken = crypto.randomUUID();
+  const secondToken = crypto.randomUUID();
+  const records = [
+    { token: firstToken, predecessorToken: null },
+    { token: secondToken, predecessorToken: firstToken },
+    { token: firstToken, predecessorToken: secondToken },
+  ];
+
+  for (const [index, record] of records.entries()) {
+    const suffix =
+      index === 0
+        ? ''
+        : `-${crypto.createHash('sha256').update(String(record.predecessorToken), 'utf8').digest('hex')}`;
+    await fs.writeFile(
+      `${lockKey}.reap-${generationId}${suffix}`,
+      JSON.stringify({
+        version: 1,
+        expected,
+        reaper: {
+          version: 1,
+          pid: 2_147_483_647,
+          token: record.token,
+          createdAt: new Date().toISOString(),
+        },
+        predecessorToken: record.predecessorToken,
+      }).concat('\n'),
+      'utf8'
+    );
+  }
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, { timeoutMs: 60, retryMs: 5 })
+    ).rejects.toThrow('cyclic reaper token');
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
 test('a crashed parseable reaper generation is resumed without stealing a replacement', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-dead-reaper-test-'));
   const lockKey = path.join(testRoot, 'shared.lock');
@@ -331,7 +444,7 @@ test('a live reaper barrier blocks publication and entry until validated cleanup
   }
 });
 
-test('a successful action survives release loss and a throwing warning observer', async () => {
+test('a transient release failure is retried synchronously before success is reported', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-release-test-'));
   const lockKey = path.join(testRoot, 'release.lock');
   let warningCalls = 0;
@@ -351,8 +464,42 @@ test('a successful action survives release loss and a throwing warning observer'
     });
 
     expect(result).toEqual({ changed: true });
-    expect(warningCalls).toBe(1);
-    await waitForMissingPath(lockKey);
+    expect(warningCalls).toBe(0);
+    expect(releaseCalls).toBe(2);
+    await expect(fs.stat(lockKey)).rejects.toThrow();
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('persistent release failure after success is observable with a bounded failure ceiling', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-release-bound-test-'));
+  const lockKey = path.join(testRoot, 'release-bound.lock');
+  let releaseCalls = 0;
+
+  try {
+    await expect(
+      withIslandProcessLockCore(
+        lockKey,
+        async () => ({
+          ...mutationFacts({ physicalChanged: true }),
+          value: 'completed',
+        }),
+        {
+          retryMs: 1,
+          unlinkClaim: async () => {
+            releaseCalls += 1;
+            throw new Error('persistent release failure');
+          },
+        }
+      )
+    ).rejects.toMatchObject({
+      name: IslandLockReleaseError.name,
+      physicalChanged: true,
+      incompleteRecovery: true,
+    });
+    expect(releaseCalls).toBe(3);
+    expect(await fs.stat(lockKey)).toBeDefined();
   } finally {
     await fs.rm(testRoot, { force: true, recursive: true });
   }
@@ -361,7 +508,9 @@ test('a successful action survives release loss and a throwing warning observer'
 test('action and release failure are reported as one typed aggregate', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-dual-failure-test-'));
   const lockKey = path.join(testRoot, 'dual-failure.lock');
-  const actionError = Object.assign(new Error('action failed'), { changed: true });
+  const actionError = Object.assign(new Error('action failed'), {
+    ...mutationFacts({ physicalChanged: true }),
+  });
 
   try {
     try {
@@ -376,27 +525,38 @@ test('action and release failure are reported as one typed aggregate', async () 
     } catch (error) {
       expect(error).toBeInstanceOf(IslandLockActionReleaseError);
       expect((error as IslandLockActionReleaseError).changed).toBe(true);
+      expect((error as IslandLockActionReleaseError).incompleteRecovery).toBe(true);
     }
   } finally {
     await fs.rm(testRoot, { force: true, recursive: true });
   }
 });
 
-async function waitForMissingPath(filePath: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try {
-      await fs.stat(filePath);
-    } catch {
-      return;
-    }
-    await delay(10);
-  }
-  throw new Error(`Path was not removed by deferred release: ${filePath}`);
-}
-
 async function listReaperArtifacts(claimPath: string): Promise<string[]> {
   const prefix = `${path.basename(claimPath)}.reap-`;
   return (await fs.readdir(path.dirname(claimPath))).filter((entry) => entry.startsWith(prefix));
+}
+
+function mutationFacts(
+  facts: Partial<{
+    desiredStateChanged: boolean;
+    registryChanged: boolean;
+    physicalChanged: boolean;
+    externalDrift: boolean;
+    incompleteRecovery: boolean;
+  }> = {}
+) {
+  const result = {
+    desiredStateChanged: facts.desiredStateChanged ?? false,
+    registryChanged: facts.registryChanged ?? false,
+    physicalChanged: facts.physicalChanged ?? false,
+    externalDrift: facts.externalDrift ?? false,
+    incompleteRecovery: facts.incompleteRecovery ?? false,
+  };
+  return {
+    ...result,
+    changed: result.desiredStateChanged || result.registryChanged || result.physicalChanged,
+  };
 }
 
 function delay(milliseconds: number): Promise<void> {

@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { didIslandMutationChange } from './islandSupervisorCore.js';
+import { readIslandMutationFacts } from './islandSupervisorCore.js';
 
 const DEFAULT_LOCK_RETRY_MS = 20;
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_RELEASE_ATTEMPTS = 3;
+const MAX_REAPER_CHAIN_LENGTH = 128;
 const heldLockContext = new AsyncLocalStorage<ReadonlySet<string>>();
-const deferredReleases = new Map<string, DeferredRelease>();
 
 type LockOwner = {
   version: 1 | 2;
@@ -40,11 +41,6 @@ type ReaperElectionRecord = {
   predecessorToken: string | null;
 };
 
-type DeferredRelease = {
-  generation: ClaimGeneration;
-  unlinkClaim: (claimPath: string) => Promise<void>;
-};
-
 export type IslandLockReleaseWarning = {
   claimPath: string;
   message: string;
@@ -60,9 +56,15 @@ export type IslandProcessLockCoreOptions = {
 };
 
 export class IslandLockActionReleaseError extends AggregateError {
+  readonly islandLifecycleFailure = 'lock-release' as const;
   readonly actionError: unknown;
   readonly releaseError: unknown;
   readonly changed: boolean;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery = true;
 
   constructor(claimPath: string, actionError: unknown, releaseError: unknown) {
     super(
@@ -72,8 +74,64 @@ export class IslandLockActionReleaseError extends AggregateError {
     this.name = 'IslandLockActionReleaseError';
     this.actionError = actionError;
     this.releaseError = releaseError;
-    this.changed = didIslandMutationChange(actionError);
+    const facts = readIslandMutationFacts(actionError);
+    this.desiredStateChanged = facts.desiredStateChanged;
+    this.registryChanged = facts.registryChanged;
+    this.physicalChanged = facts.physicalChanged;
+    this.externalDrift = facts.externalDrift;
+    this.changed = facts.changed;
   }
+}
+
+export class IslandLockReleaseError<T> extends Error {
+  readonly islandLifecycleFailure = 'lock-release' as const;
+  readonly actionResult: T;
+  readonly releaseError: unknown;
+  readonly changed: boolean;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery = true;
+
+  constructor(claimPath: string, actionResult: T, releaseError: unknown) {
+    super(`Tyrian action completed, but lock release failed at '${claimPath}'.`, {
+      cause: releaseError,
+    });
+    this.name = 'IslandLockReleaseError';
+    this.actionResult = actionResult;
+    this.releaseError = releaseError;
+    const facts = readIslandMutationFacts(actionResult);
+    this.desiredStateChanged = facts.desiredStateChanged;
+    this.registryChanged = facts.registryChanged;
+    this.physicalChanged = facts.physicalChanged;
+    this.externalDrift = facts.externalDrift;
+    this.changed = facts.changed;
+  }
+}
+
+export function isIslandLockLifecycleFailure(error: unknown): boolean {
+  const pending = [error];
+  const visited = new Set<unknown>();
+
+  while (pending.length > 0) {
+    const candidate = pending.shift();
+    if (candidate === undefined || visited.has(candidate)) continue;
+    visited.add(candidate);
+
+    if (
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      'islandLifecycleFailure' in candidate &&
+      candidate.islandLifecycleFailure === 'lock-release'
+    ) {
+      return true;
+    }
+    if (candidate instanceof AggregateError) pending.push(...candidate.errors);
+    if (candidate instanceof Error && candidate.cause !== undefined) pending.push(candidate.cause);
+  }
+
+  return false;
 }
 
 export async function withIslandProcessLockCore<T>(
@@ -86,7 +144,6 @@ export async function withIslandProcessLockCore<T>(
     return action();
   }
 
-  await attemptDeferredRelease(claimPath);
   const generation = await acquireClaim(claimPath, options);
   const nextHeld = new Set(heldLocks ?? []);
   nextHeld.add(claimPath);
@@ -96,49 +153,37 @@ export async function withIslandProcessLockCore<T>(
     value = await heldLockContext.run(nextHeld, action);
   } catch (actionError) {
     try {
-      await releaseClaim(claimPath, generation, options.unlinkClaim);
+      await releaseClaimWithRetry(claimPath, generation, options);
     } catch (releaseError) {
-      ownDeferredRelease(claimPath, generation, options.unlinkClaim);
       throw new IslandLockActionReleaseError(claimPath, actionError, releaseError);
     }
     throw actionError;
   }
 
   try {
-    await releaseClaim(claimPath, generation, options.unlinkClaim);
+    await releaseClaimWithRetry(claimPath, generation, options);
   } catch (releaseError) {
     const warning: IslandLockReleaseWarning = {
       claimPath,
-      message: `Tyrian action completed, but lock release failed at '${claimPath}'. Deferred cleanup owns the remaining claim.`,
+      message: `Tyrian action completed, but lock release failed at '${claimPath}' after bounded retries.`,
       cause: releaseError,
     };
-    ownDeferredRelease(claimPath, generation, options.unlinkClaim);
     try {
       options.onReleaseWarning?.(warning);
     } catch {
       // Warning observers cannot change the already-completed action result.
     }
+    throw new IslandLockReleaseError(claimPath, value, releaseError);
   }
 
   return value;
-}
-
-function ownDeferredRelease(
-  claimPath: string,
-  generation: ClaimGeneration,
-  unlinkClaim: ((claimPath: string) => Promise<void>) | undefined
-): void {
-  deferredReleases.set(claimPath, {
-    generation,
-    unlinkClaim: unlinkClaim ?? fs.unlink,
-  });
-  scheduleDeferredRelease(claimPath);
 }
 
 async function acquireClaim(
   claimPath: string,
   options: IslandProcessLockCoreOptions
 ): Promise<ClaimGeneration> {
+  await scavengeOwnerCandidates(claimPath);
   const owner = createLockOwner();
   const candidatePath = ownerCandidatePath(claimPath, owner.token);
   const startedAt = Date.now();
@@ -192,12 +237,15 @@ async function acquireClaim(
             `Tyrian lock claim '${claimPath}' is unidentifiable and cannot be proven safe to reclaim.`
           );
         }
-      } else if (!isProcessAlive(generation.owner)) {
+      } else if (classifyProcessOwner(generation.owner) === 'dead') {
         await beginReaperElection(claimPath, generation, options);
         continue;
       } else if (Date.now() - startedAt >= timeoutMs) {
+        const ownerState = classifyProcessOwner(generation.owner);
         throw new Error(
-          `Timed out waiting for Tyrian lock '${claimPath}' owned by process ${generation.owner.pid}.`
+          ownerState === 'ambiguous'
+            ? `Tyrian lock claim '${claimPath}' has ambiguous PID-only process identity and cannot be proven safe to reclaim within ${timeoutMs}ms.`
+            : `Timed out waiting for Tyrian lock '${claimPath}' owned by process ${generation.owner.pid}.`
         );
       }
 
@@ -262,7 +310,8 @@ async function settleReaperGeneration(
   if (elections.length === 0) return true;
   const tip = elections.at(-1)!;
 
-  if (isProcessAlive(tip.record.reaper)) return false;
+  const reaperState = classifyProcessOwner(tip.record.reaper);
+  if (reaperState !== 'dead') return false;
 
   const successor: ReaperElectionRecord = {
     version: 1,
@@ -358,6 +407,16 @@ async function readReaperElectionChain(
     if (record !== undefined) elections.push({ path: electionPath, record });
   }
   if (elections.length === 0) return [];
+  if (elections.length > MAX_REAPER_CHAIN_LENGTH) {
+    throw new Error(
+      `Tyrian reaper election '${generationId}' exceeds the ${MAX_REAPER_CHAIN_LENGTH}-record recovery bound.`
+    );
+  }
+
+  const uniqueTokens = new Set(elections.map(({ record }) => record.reaper.token));
+  if (uniqueTokens.size !== elections.length) {
+    throw new Error(`Tyrian reaper election '${generationId}' contains a cyclic reaper token.`);
+  }
 
   const chain: Array<{ path: string; record: ReaperElectionRecord }> = [];
   let current = elections.find(({ record }) => record.predecessorToken === null);
@@ -365,7 +424,12 @@ async function readReaperElectionChain(
     throw new Error(`Tyrian reaper election '${generationId}' has no root record.`);
   }
 
+  const visitedPaths = new Set<string>();
   while (current !== undefined) {
+    if (visitedPaths.has(current.path)) {
+      throw new Error(`Tyrian reaper election '${generationId}' contains a cycle.`);
+    }
+    visitedPaths.add(current.path);
     chain.push(current);
     const successors = elections.filter(
       ({ record }) => record.predecessorToken === current!.record.reaper.token
@@ -493,6 +557,56 @@ function ownerCandidatePath(targetPath: string, token: string): string {
   return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${token}.owner`);
 }
 
+async function scavengeOwnerCandidates(claimPath: string): Promise<void> {
+  const directoryPath = path.dirname(claimPath);
+  const baseName = path.basename(claimPath);
+  const pattern = new RegExp(
+    String.raw`^\.${escapeRegExp(baseName)}(?:\.reap-[0-9a-f]{64}(?:-[0-9a-f]{64})?)?\.[0-9a-f-]{36}\.owner$`,
+    'iu'
+  );
+  const entries = await fs.readdir(directoryPath);
+  let removed = false;
+
+  for (const entry of entries) {
+    if (!pattern.test(entry)) continue;
+    const candidatePath = path.join(directoryPath, entry);
+    const before = await lstatIfExists(candidatePath);
+    if (before === undefined || !before.isFile() || before.isSymbolicLink()) continue;
+
+    let value: unknown;
+    try {
+      value = JSON.parse(await fs.readFile(candidatePath, 'utf8'));
+    } catch {
+      continue;
+    }
+
+    const after = await lstatIfExists(candidatePath);
+    if (after === undefined || before.dev !== after.dev || before.ino !== after.ino) continue;
+    const owner = parseLockOwnerValue(value) ?? readReaperOwnerValue(value);
+    if (
+      owner === undefined ||
+      Date.now() - Date.parse(owner.createdAt) < DEFAULT_LOCK_TIMEOUT_MS ||
+      classifyProcessOwner(owner) !== 'dead'
+    ) {
+      continue;
+    }
+
+    try {
+      await fs.unlink(candidatePath);
+      removed = true;
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  if (removed) await syncDirectory(directoryPath);
+}
+
+function readReaperOwnerValue(value: unknown): LockOwner | undefined {
+  if (typeof value !== 'object' || value === null || !('reaper' in value)) return undefined;
+  return parseLockOwnerValue(value.reaper);
+}
+
 async function writeOwnerCandidate(candidatePath: string, owner: LockOwner): Promise<void> {
   return writeDurableCandidate(candidatePath, owner);
 }
@@ -556,36 +670,29 @@ async function releaseClaim(
   await (unlinkClaim ?? fs.unlink)(claimPath);
 }
 
-function scheduleDeferredRelease(claimPath: string): void {
-  const timer = setTimeout(() => {
-    void attemptDeferredRelease(claimPath)
-      .then((released) => {
-        if (!released && deferredReleases.has(claimPath)) scheduleDeferredRelease(claimPath);
-      })
-      .catch(() => {
-        if (deferredReleases.has(claimPath)) scheduleDeferredRelease(claimPath);
-      });
-  }, DEFAULT_LOCK_RETRY_MS);
-  timer.unref?.();
-}
+async function releaseClaimWithRetry(
+  claimPath: string,
+  generation: ClaimGeneration,
+  options: IslandProcessLockCoreOptions
+): Promise<void> {
+  let lastError: unknown;
 
-async function attemptDeferredRelease(claimPath: string): Promise<boolean> {
-  const deferred = deferredReleases.get(claimPath);
-  if (deferred === undefined) return true;
-
-  const current = await inspectClaim(claimPath);
-  if (current === undefined || !sameGeneration(current, deferred.generation)) {
-    deferredReleases.delete(claimPath);
-    return true;
+  for (let attempt = 1; attempt <= DEFAULT_RELEASE_ATTEMPTS; attempt += 1) {
+    try {
+      await releaseClaim(claimPath, generation, options.unlinkClaim);
+      return;
+    } catch (error) {
+      lastError = error;
+      const current = await inspectClaim(claimPath);
+      if (current === undefined) return;
+      if (!sameGeneration(current, generation)) break;
+      if (attempt < DEFAULT_RELEASE_ATTEMPTS) {
+        await delay(options.retryMs ?? DEFAULT_LOCK_RETRY_MS);
+      }
+    }
   }
 
-  try {
-    await deferred.unlinkClaim(claimPath);
-    deferredReleases.delete(claimPath);
-    return true;
-  } catch {
-    return false;
-  }
+  throw lastError;
 }
 
 function sameGeneration(left: ClaimGeneration, right: ClaimGeneration): boolean {
@@ -649,16 +756,17 @@ async function lstatIfExists(
   }
 }
 
-function isProcessAlive(owner: LockOwner): boolean {
+function classifyProcessOwner(owner: LockOwner): 'alive' | 'dead' | 'ambiguous' {
   try {
     process.kill(owner.pid, 0);
   } catch (error) {
-    if (!isNodeError(error) || error.code !== 'EPERM') return false;
+    if (!isNodeError(error) || error.code !== 'EPERM') return 'dead';
   }
 
-  if (owner.processIdentity === undefined) return true;
+  if (owner.processIdentity === undefined) return 'ambiguous';
   const currentIdentity = readLinuxProcessIdentity(owner.pid);
-  return currentIdentity === undefined || currentIdentity === owner.processIdentity;
+  if (currentIdentity === undefined) return 'ambiguous';
+  return currentIdentity === owner.processIdentity ? 'alive' : 'dead';
 }
 
 function readLinuxProcessIdentity(pid: number): string | undefined {

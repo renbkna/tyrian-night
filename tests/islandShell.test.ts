@@ -101,6 +101,136 @@ test('Doctor inventory reports corrupt registry entries without mutating them', 
   }
 });
 
+test('legacy registry transaction journals are read-only manual recovery evidence', async () => {
+  const directoryPath = buildManagedRootsDirectoryPath(registryHome);
+  const journalPath = path.join(directoryPath, `.tyrian-night-journal-${'a'.repeat(64)}.json`);
+  await fs.mkdir(directoryPath, { recursive: true });
+  await fs.writeFile(journalPath, '{ preserved legacy registry transaction }\n', 'utf8');
+
+  const inventory = await readAllIslandShellStatusesWithDiagnostics({ registryHome });
+  expect(inventory.statuses).toEqual([]);
+  expect(inventory.registryDiagnostics).toEqual([
+    expect.stringContaining('unsupported legacy registry transaction journal'),
+  ]);
+  expect(await fs.readFile(journalPath, 'utf8')).toBe(
+    '{ preserved legacy registry transaction }\n'
+  );
+
+  const cleanup = await restoreAllIslandShells({ registryHome });
+  expect(cleanup).toMatchObject({
+    changed: true,
+    registryChanged: true,
+    incompleteRecovery: true,
+    enumerationFailure: {
+      code: 'unsupported',
+      reason: expect.stringContaining('manual recovery'),
+    },
+  });
+  expect(await fs.readFile(journalPath, 'utf8')).toBe(
+    '{ preserved legacy registry transaction }\n'
+  );
+});
+
+test('raw restore-all exits nonzero while preserving its incomplete machine-readable summary', async () => {
+  await writeLegacyManagedRootsRegistryContent('{ invalid legacy registry\n');
+  const child = Bun.spawn(
+    [process.execPath, path.resolve('apps/vscode/src/islandCli.ts'), 'restore-all'],
+    {
+      env: { ...process.env, HOME: registryHome },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }
+  );
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+
+  expect(exitCode).toBe(2);
+  expect(stderr).toBe('');
+  expect(JSON.parse(stdout)).toMatchObject({
+    failedAppRoots: [],
+    enumerationFailure: {
+      reason: expect.stringContaining('invalid JSON'),
+    },
+  });
+});
+
+test('supervised CLI commands exit nonzero for typed root-lock release failure', async () => {
+  const appRoot = await createAppRoot('supervised-lock-release-cli');
+  const cssSource = path.join(testRoot, 'supervised-lock-release.css');
+  const preloadPath = path.join(testRoot, 'inject-lock-release.ts');
+  const lockModulePath = path.resolve('apps/vscode/src/islandProcessLock.js');
+  const lockCorePath = path.resolve('apps/vscode/src/islandProcessLockCore.ts');
+  const cliPath = path.resolve('apps/vscode/src/islandCli.ts');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: violet; }\n', 'utf8');
+  await fs.writeFile(
+    preloadPath,
+    [
+      "import path from 'node:path';",
+      "import { mock } from 'bun:test';",
+      `import { IslandLockActionReleaseError, IslandLockReleaseError, isIslandLockLifecycleFailure } from ${JSON.stringify(lockCorePath)};`,
+      `mock.module(${JSON.stringify(lockModulePath)}, () => ({`,
+      '  IslandLockActionReleaseError,',
+      '  IslandLockReleaseError,',
+      '  isIslandLockLifecycleFailure,',
+      '  withIslandProcessLock: async (claimPath, action) => {',
+      '    const result = await action();',
+      "    if (path.basename(claimPath) === '.tyrian-night.lock') {",
+      "      throw new IslandLockReleaseError(claimPath, result, new Error('injected persistent release failure'));",
+      '    }',
+      '    return result;',
+      '  },',
+      '}));',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+
+  const commands = [
+    [
+      'apply-supervised',
+      '--app-root',
+      appRoot,
+      '--css-source',
+      cssSource,
+      '--theme-version',
+      'test',
+    ],
+    ['restore-supervised', '--app-root', appRoot],
+  ];
+
+  for (const command of commands) {
+    const child = Bun.spawn([process.execPath, '--preload', preloadPath, cliPath, ...command], {
+      env: { ...process.env, HOME: registryHome },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    const failure = JSON.parse(stderr.trim());
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(failure).toMatchObject({
+      version: 1,
+      code: 'blocked',
+      physicalChanged: true,
+      incompleteRecovery: true,
+      causes: expect.arrayContaining([
+        expect.objectContaining({ reason: expect.stringContaining('.tyrian-night.lock') }),
+        expect.objectContaining({ reason: 'injected persistent release failure' }),
+      ]),
+    });
+  }
+});
+
 test('status-all reports registered missing roots without mutating the registry', async () => {
   const missingAppRoot = path.join(testRoot, 'missing-root');
   const recordPath = await writeManagedRootRecord(missingAppRoot);
@@ -476,6 +606,13 @@ test('clean roots with semantically correct checksum are not rewritten during re
   });
 
   expect(result.changed).toBe(true);
+  expect(result).toMatchObject({
+    desiredStateChanged: true,
+    registryChanged: true,
+    physicalChanged: false,
+    externalDrift: false,
+    incompleteRecovery: false,
+  });
   expect(result.failedAppRoots).toEqual([]);
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
@@ -499,6 +636,11 @@ test('restore-all removes registered clean roots without touching workbench file
   const result = await restoreAllIslandShells({ registryHome });
 
   expect(result.changed).toBe(true);
+  expect(result).toMatchObject({
+    desiredStateChanged: true,
+    registryChanged: true,
+    physicalChanged: false,
+  });
   expect(result.failedAppRoots).toEqual([]);
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
   await expect(readAllIslandShellStatuses({ registryHome })).resolves.toMatchObject([
@@ -611,6 +753,11 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
 
   expect(result).toEqual({
     changed: true,
+    desiredStateChanged: false,
+    registryChanged: true,
+    physicalChanged: false,
+    externalDrift: false,
+    incompleteRecovery: false,
     restoredAppRoots: [],
     failedAppRoots: [],
     quarantinedRecords: [],
@@ -1171,14 +1318,13 @@ test('apply preflights corrupt managed root registry before writing app files', 
   await expectRestoredAppRoot(appRoot);
 });
 
-test('status leaves an interrupted transaction untouched and the next mutation recovers it', async () => {
+test('legacy v2 transaction evidence fails closed without overwriting a newer target', async () => {
   const appRoot = await createAppRoot('interrupted-transaction');
   const cssSource = path.join(testRoot, 'interrupted.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
   const paths = buildIslandPatchPaths(appRoot);
-  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const id = crypto.randomUUID();
   const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
   const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
@@ -1210,22 +1356,75 @@ test('status leaves an interrupted transaction untouched and the next mutation r
 
   await expect(readAllIslandShellStatuses({ registryHome })).resolves.toMatchObject([
     {
-      classification: 'broken-backup',
+      classification: 'transaction-blocked',
       verificationPassed: false,
+      transaction: {
+        kind: 'unsupported',
+        recoverability: 'manual',
+        version: 2,
+      },
     },
   ]);
   expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe('partially committed content\n');
   expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
 
-  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
-  await expect(fs.stat(paths.transactionJournalPath)).rejects.toThrow();
-  await expect(fs.stat(backupPath)).rejects.toThrow();
-  await expect(fs.stat(stagedPath)).rejects.toThrow();
+  await expect(
+    applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
+  ).rejects.toMatchObject({
+    incompleteRecovery: true,
+    physicalChanged: false,
+    externalDrift: false,
+  });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe('partially committed content\n');
+  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
+  expect((await fs.stat(backupPath)).isFile()).toBe(true);
+  expect((await fs.stat(stagedPath)).isFile()).toBe(true);
+});
+
+test('legacy v1 transaction evidence is also preserved as unsupported', async () => {
+  const appRoot = await createAppRoot('legacy-v1-transaction');
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const newerHtml = originalHtml.replace('</head>', '<meta name="newer">\n\t</head>');
+  const id = crypto.randomUUID();
+  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
+  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
+  await fs.writeFile(backupPath, originalHtml, 'utf8');
+  await fs.writeFile(stagedPath, 'legacy staged content\n', 'utf8');
+  await fs.writeFile(paths.workbenchHtmlPath, newerHtml, 'utf8');
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify({
+      version: 1,
+      id,
+      phase: 'prepared',
+      entries: [
+        {
+          filePath: paths.workbenchHtmlPath,
+          backupPath,
+          stagedPath,
+          existed: true,
+        },
+      ],
+    }).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-blocked',
+    transaction: { kind: 'unsupported', version: 1 },
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
+    incompleteRecovery: true,
+    physicalChanged: false,
+  });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(newerHtml);
+  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
 });
 
 test('transaction recovery never overwrites an externally replaced generation', async () => {
   const appRoot = await createAppRoot('external-drift-recovery');
+  await restoreIslandShell({ appRoot, registryHome });
   const paths = buildIslandPatchPaths(appRoot);
   const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const desiredHtml = originalHtml.replace('</head>', '<meta name="desired">\n\t</head>');
@@ -1261,27 +1460,216 @@ test('transaction recovery never overwrites an externally replaced generation', 
     'utf8'
   );
 
-  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
-    'found external drift'
-  );
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
+    changed: false,
+    physicalChanged: false,
+    externalDrift: true,
+    incompleteRecovery: true,
+  });
   expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(externalHtml);
   expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
 });
 
-test('status does not parse a corrupt journal and mutation blocks rather than guessing', async () => {
+test('restore reports a physical mutation performed by successful transaction recovery', async () => {
+  const appRoot = await createAppRoot('recovery-mutation-result');
+  await restoreIslandShell({ appRoot, registryHome });
+  const paths = buildIslandPatchPaths(appRoot);
+  const id = crypto.randomUUID();
+  const transactionContent = '{"pending":true}\n';
+  const backupPath = transactionTemporaryPath(paths.manifestPath, id, 'backup');
+  await fs.writeFile(paths.manifestPath, transactionContent, 'utf8');
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify(
+      {
+        version: 3,
+        id,
+        appRoot,
+        phase: 'committing',
+        entries: [
+          {
+            filePath: paths.manifestPath,
+            backupPath,
+            existed: false,
+            originalChecksum: null,
+            desiredChecksum: sha256Base64(transactionContent),
+          },
+        ],
+      },
+      null,
+      2
+    ).concat('\n'),
+    'utf8'
+  );
+
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    changed: true,
+    desiredStateChanged: false,
+    registryChanged: false,
+    physicalChanged: true,
+  });
+  await expect(fs.stat(paths.manifestPath)).rejects.toThrow();
+  await expect(fs.stat(paths.transactionJournalPath)).rejects.toThrow();
+});
+
+test('post-rollback cleanup failure retains the completed physical mutation fact', async () => {
+  const appRoot = await createAppRoot('rollback-cleanup-mutation-fact');
+  await restoreIslandShell({ appRoot, registryHome });
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const desiredHtml = `${originalHtml}\n<!-- pending transaction -->\n`;
+  const id = crypto.randomUUID();
+  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
+  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
+  await fs.writeFile(backupPath, originalHtml, 'utf8');
+  await fs.mkdir(stagedPath);
+  await fs.writeFile(
+    path.join(stagedPath, 'cleanup-blocker'),
+    'preserve failure evidence\n',
+    'utf8'
+  );
+  await fs.writeFile(paths.workbenchHtmlPath, desiredHtml, 'utf8');
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify({
+      version: 3,
+      id,
+      appRoot,
+      phase: 'committing',
+      entries: [
+        {
+          filePath: paths.workbenchHtmlPath,
+          backupPath,
+          stagedPath,
+          existed: true,
+          originalChecksum: sha256Base64(originalHtml),
+          desiredChecksum: sha256Base64(desiredHtml),
+        },
+      ],
+    }).concat('\n'),
+    'utf8'
+  );
+
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
+    changed: true,
+    physicalChanged: true,
+    incompleteRecovery: true,
+  });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  expect((await fs.stat(stagedPath)).isDirectory()).toBe(true);
+});
+
+test('raw CLI failure envelopes preserve all actionable recovery causes', async () => {
+  const appRoot = await createAppRoot('aggregate-cli-recovery');
+  await restoreIslandShell({ appRoot, registryHome });
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const originalProduct = await fs.readFile(paths.productJsonPath, 'utf8');
+  const desiredHtml = `${originalHtml}\n<!-- desired generation -->\n`;
+  const desiredProduct = `${originalProduct}\n`;
+  const externalHtml = `${originalHtml}\n<!-- external generation -->\n`;
+  const externalProduct = `${originalProduct} `;
+  const id = crypto.randomUUID();
+  const htmlBackup = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
+  const htmlStage = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
+  const productBackup = transactionTemporaryPath(paths.productJsonPath, id, 'backup');
+  const productStage = transactionTemporaryPath(paths.productJsonPath, id, 'stage');
+  await Promise.all([
+    fs.writeFile(htmlBackup, originalHtml, 'utf8'),
+    fs.writeFile(htmlStage, desiredHtml, 'utf8'),
+    fs.writeFile(productBackup, originalProduct, 'utf8'),
+    fs.writeFile(productStage, desiredProduct, 'utf8'),
+    fs.writeFile(paths.workbenchHtmlPath, externalHtml, 'utf8'),
+    fs.writeFile(paths.productJsonPath, externalProduct, 'utf8'),
+  ]);
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify({
+      version: 3,
+      id,
+      appRoot,
+      phase: 'committing',
+      entries: [
+        {
+          filePath: paths.workbenchHtmlPath,
+          backupPath: htmlBackup,
+          stagedPath: htmlStage,
+          existed: true,
+          originalChecksum: sha256Base64(originalHtml),
+          desiredChecksum: sha256Base64(desiredHtml),
+        },
+        {
+          filePath: paths.productJsonPath,
+          backupPath: productBackup,
+          stagedPath: productStage,
+          existed: true,
+          originalChecksum: sha256Base64(originalProduct),
+          desiredChecksum: sha256Base64(desiredProduct),
+        },
+      ],
+    }).concat('\n'),
+    'utf8'
+  );
+
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      path.resolve('apps/vscode/src/islandCli.ts'),
+      'restore',
+      '--app-root',
+      appRoot,
+    ],
+    {
+      env: { ...process.env, HOME: registryHome },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }
+  );
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  const failure = JSON.parse(stderr);
+
+  expect(exitCode).toBe(1);
+  expect(stdout).toBe('');
+  expect(failure).toMatchObject({
+    changed: false,
+    physicalChanged: false,
+    externalDrift: true,
+    incompleteRecovery: true,
+  });
+  expect(failure.causes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ reason: expect.stringContaining(paths.workbenchHtmlPath) }),
+      expect.objectContaining({ reason: expect.stringContaining(paths.productJsonPath) }),
+    ])
+  );
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(externalHtml);
+  expect(await fs.readFile(paths.productJsonPath, 'utf8')).toBe(externalProduct);
+});
+
+test('status exposes corrupt transaction evidence before mutation blocks', async () => {
   const appRoot = await createAppRoot('corrupt-journal');
   const { transactionJournalPath } = buildIslandPatchPaths(appRoot);
   await fs.writeFile(transactionJournalPath, '{ broken journal\n', 'utf8');
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'clean',
+    classification: 'transaction-blocked',
+    transaction: {
+      kind: 'corrupt',
+      recoverability: 'manual',
+      reason: expect.stringContaining('invalid JSON'),
+    },
   });
   await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
     'Tyrian file transaction journal is invalid JSON'
   );
 });
 
-test('verified cleanup failure preserves success and retries from the journal', async () => {
+test('verified v3 cleanup failure is visible and remains retryable from the journal', async () => {
   const appRoot = await createAppRoot('verified-cleanup-retry');
   const paths = buildIslandPatchPaths(appRoot);
   const id = crypto.randomUUID();
@@ -1291,7 +1679,7 @@ test('verified cleanup failure preserves success and retries from the journal', 
     paths.transactionJournalPath,
     JSON.stringify(
       {
-        version: 2,
+        version: 3,
         id,
         appRoot,
         phase: 'verified',
@@ -1300,6 +1688,8 @@ test('verified cleanup failure preserves success and retries from the journal', 
             filePath: paths.workbenchHtmlPath,
             backupPath,
             existed: false,
+            originalChecksum: null,
+            desiredChecksum: null,
           },
         ],
       },
@@ -1310,13 +1700,15 @@ test('verified cleanup failure preserves success and retries from the journal', 
   );
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'clean',
+    classification: 'transaction-pending',
+    transaction: { kind: 'recoverable', phase: 'verified' },
   });
   expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
 
   await fs.rm(backupPath, { recursive: true });
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'clean',
+    classification: 'transaction-pending',
+    transaction: { kind: 'recoverable', phase: 'verified' },
   });
   expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
   await restoreIslandShell({ appRoot, registryHome });

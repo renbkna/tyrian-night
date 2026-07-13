@@ -9,69 +9,67 @@ import {
   restoreAllIslandShells,
   seedIslandDesiredTheme,
   type IslandDesiredSeedResult,
+  type IslandMutationResult,
   type IslandShellCleanupSummary,
   type IslandShellStatus,
   type IslandShellInventory,
   type IslandShellWriteAccess,
 } from './islandShell.js';
+import { isIslandLockLifecycleFailure } from './islandProcessLock.js';
+import { islandMutationFacts } from './islandSupervisorCore.js';
 
 export type IslandUiApplySupervisionResult =
-  | {
+  | (IslandMutationResult & {
       kind: 'applied';
-      changed: true;
       status: IslandShellStatus;
-    }
-  | {
+    })
+  | (IslandMutationResult & {
       kind: 'already-current';
-      changed: false;
       status: IslandShellStatus;
-    }
-  | {
+    })
+  | (IslandMutationResult & {
       kind: 'permission-required';
-      changed: boolean;
       status: IslandShellStatus;
       writeAccess: IslandShellWriteAccess;
       reason: string;
-    }
-  | {
+    })
+  | (IslandMutationResult & {
       kind: 'unsupported';
-      changed: boolean;
       status: IslandShellStatus | undefined;
       reason: string;
-    }
-  | {
+    })
+  | (IslandMutationResult & {
       kind: 'blocked';
-      changed: boolean;
       status: IslandShellStatus | undefined;
       reason: string;
-    };
+    });
 
 export type IslandUiRestoreSupervisionResult =
   | (IslandShellCleanupSummary & {
       kind: 'restored' | 'already-classic';
     })
-  | {
+  | (IslandShellCleanupSummary & {
       kind: 'permission-required';
-      changed: IslandShellCleanupSummary['changed'];
-      restoredAppRoots: IslandShellCleanupSummary['restoredAppRoots'];
-      failedAppRoots: IslandShellCleanupSummary['failedAppRoots'];
-      quarantinedRecords: IslandShellCleanupSummary['quarantinedRecords'];
-      enumerationFailure?: IslandShellCleanupSummary['enumerationFailure'];
       reason: string;
-    }
-  | {
+    })
+  | (IslandShellCleanupSummary & {
       kind: 'blocked';
-      changed: IslandShellCleanupSummary['changed'];
-      restoredAppRoots: IslandShellCleanupSummary['restoredAppRoots'];
-      failedAppRoots: IslandShellCleanupSummary['failedAppRoots'];
-      quarantinedRecords: IslandShellCleanupSummary['quarantinedRecords'];
-      enumerationFailure?: IslandShellCleanupSummary['enumerationFailure'];
       reason: string;
-    };
+    });
 
 export type IslandUiSupervisorStatus = IslandShellStatus & {
   writeAccess: IslandShellWriteAccess | undefined;
+  recommendedAction: IslandUiRecommendedAction;
 };
+
+export type IslandUiRecommendedAction =
+  | 'none'
+  | 'apply'
+  | 'repair'
+  | 'restore'
+  | 'prune-missing'
+  | 'fix-permissions'
+  | 'manual-recovery';
 
 export function seedIslandDesiredThemeSupervised(options: {
   appRoot: string;
@@ -88,16 +86,45 @@ export async function applyIslandUiSupervised(options: {
   registryHome?: string;
 }): Promise<IslandUiApplySupervisionResult> {
   const readiness = await readIslandShellApplyReadiness(options);
+  const noMutation = islandMutationFacts();
+
+  if (readiness.kind === 'permission-required') {
+    return {
+      kind: 'permission-required',
+      ...noMutation,
+      status: readiness.status,
+      writeAccess: readiness.writeAccess,
+      reason: readiness.reason,
+    };
+  }
+
+  if (readiness.kind === 'unsupported' || readiness.kind === 'blocked') {
+    const transaction = readiness.status?.transaction;
+    return {
+      kind: readiness.kind,
+      ...islandMutationFacts({
+        externalDrift: transaction?.kind === 'external-drift',
+        incompleteRecovery:
+          transaction?.kind === 'unsupported' ||
+          transaction?.kind === 'corrupt' ||
+          transaction?.kind === 'external-drift' ||
+          transaction?.kind === 'unavailable',
+      }),
+      status: readiness.status,
+      reason: readiness.reason,
+    };
+  }
 
   try {
     const result = await applyIslandShell(options);
 
     return {
       kind: result.changed ? 'applied' : 'already-current',
-      changed: result.changed,
+      ...result,
       status: result.status,
     } as IslandUiApplySupervisionResult;
   } catch (error) {
+    if (isIslandLockLifecycleFailure(error)) throw error;
     const failure = describeIslandShellFailure(error);
     const failureStatus = readIslandShellFailureStatus(error) ?? readiness.status;
 
@@ -107,7 +134,7 @@ export async function applyIslandUiSupervised(options: {
 
       return {
         kind: 'permission-required',
-        changed: failure.changed,
+        ...failure,
         status,
         writeAccess,
         reason: failure.reason,
@@ -117,7 +144,7 @@ export async function applyIslandUiSupervised(options: {
     if (failure.code === 'unsupported') {
       return {
         kind: 'unsupported',
-        changed: failure.changed,
+        ...failure,
         status: failureStatus,
         reason: failure.reason,
       };
@@ -125,7 +152,7 @@ export async function applyIslandUiSupervised(options: {
 
     return {
       kind: 'blocked',
-      changed: failure.changed,
+      ...failure,
       status: failureStatus,
       reason: failure.reason,
     };
@@ -168,7 +195,10 @@ export async function restoreIslandUiSupervised(options?: {
 
 export type IslandUiSupervisorInventory = {
   statuses: IslandUiSupervisorStatus[];
-  registryDiagnostics: string[];
+  registryDiagnostics: Array<{
+    reason: string;
+    recommendedAction: 'manual-recovery';
+  }>;
 };
 
 export async function readIslandUiSupervisorStatuses(options?: {
@@ -190,14 +220,60 @@ export async function readIslandUiSupervisorStatuses(options?: {
       writeAccess = undefined;
     }
 
-    supervisorStatuses.push({
+    const statusWithAccess = {
       ...status,
       writeAccess,
+    };
+    supervisorStatuses.push({
+      ...statusWithAccess,
+      recommendedAction: recommendIslandUiAction(statusWithAccess),
     });
   }
 
   return {
     statuses: supervisorStatuses,
-    registryDiagnostics: inventory.registryDiagnostics,
+    registryDiagnostics: inventory.registryDiagnostics.map((reason) => ({
+      reason,
+      recommendedAction: 'manual-recovery',
+    })),
   };
+}
+
+function recommendIslandUiAction(
+  status: IslandShellStatus & { writeAccess: IslandShellWriteAccess | undefined }
+): IslandUiRecommendedAction {
+  if (status.transaction.kind === 'unsupported') return 'manual-recovery';
+  if (
+    status.transaction.kind === 'corrupt' ||
+    status.transaction.kind === 'external-drift' ||
+    status.transaction.kind === 'unavailable'
+  ) {
+    return 'manual-recovery';
+  }
+
+  if (status.classification === 'missing') return status.registered ? 'prune-missing' : 'none';
+  if (status.registrationState === 'corrupt') return 'restore';
+
+  const desired = typeof status.desiredThemeId === 'string';
+  if (status.classification === 'permission-denied' || status.writeAccess?.writable === false) {
+    return desired || status.managed || status.active || status.registered
+      ? 'fix-permissions'
+      : 'none';
+  }
+
+  if (desired) {
+    if (status.classification === 'patched') return 'none';
+    if (
+      status.classification === 'broken-backup' ||
+      status.classification === 'checksum-mismatch' ||
+      status.classification === 'transaction-pending'
+    ) {
+      return 'repair';
+    }
+    return 'apply';
+  }
+
+  return status.managed || status.active || status.classification === 'transaction-pending'
+    ? 'restore'
+    : 'none';
 }

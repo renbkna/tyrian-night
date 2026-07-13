@@ -14,7 +14,6 @@ import {
   TYRIAN_MARKER_START,
   WORKBENCH_CHECKSUM_KEY,
   WORKBENCH_CSS_LINK,
-  buildIslandMigrationLockPath,
   buildIslandRegistryLockPath,
   buildIslandRootLockPath,
   buildIslandPatchPaths,
@@ -28,12 +27,17 @@ import {
   type IslandPatchPaths,
 } from './islandPatchContract.js';
 import { rollbackFailedFileTransactionCore } from './islandFileTransactionCore.js';
-import { withIslandProcessLock } from './islandProcessLock.js';
+import { isIslandLockLifecycleFailure, withIslandProcessLock } from './islandProcessLock.js';
 import {
   IslandRegistryQuarantineError,
   moveRegistryRecordToQuarantineCore,
 } from './islandRegistryMutationCore.js';
-import { didIslandMutationChange } from './islandSupervisorCore.js';
+import {
+  islandMutationFacts,
+  mergeIslandMutationFacts,
+  readIslandMutationFacts,
+  type IslandMutationFacts,
+} from './islandSupervisorCore.js';
 
 const TYRIAN_STYLESHEET_HREF_SOURCE = String.raw`(?:["'](?:[^"']*\/)?${escapeRegExp(ISLAND_CSS_FILE_NAME)}(?:[?#][^"']*)?["']|(?:[^\s"'=<>\x60]*\/)?${escapeRegExp(ISLAND_CSS_FILE_NAME)}(?:[?#][^\s"'=<>\x60]*)?)`;
 const TYRIAN_STYLESHEET_LINK_SOURCE = String.raw`<link\b[^>]*\bhref\s*=\s*${TYRIAN_STYLESHEET_HREF_SOURCE}[^>]*>`;
@@ -68,12 +72,15 @@ export type IslandShellStatus = {
     | 'clean'
     | 'patched'
     | 'managed-only'
+    | 'transaction-pending'
+    | 'transaction-blocked'
     | 'missing'
     | 'permission-denied'
     | 'broken-backup'
     | 'checksum-mismatch';
   verificationPassed: boolean;
   canSelfHeal: boolean;
+  transaction: IslandTransactionHealth;
   restoreProof: 'none' | 'manifest-v3-backup-pair' | 'strip-tyrian-block';
   workbenchChecksum: string | undefined;
   productWorkbenchChecksum: string | undefined;
@@ -91,8 +98,36 @@ export type IslandShellStatus = {
   issues: string[];
 };
 
-export type IslandShellResult = {
-  changed: boolean;
+export type IslandTransactionHealth =
+  | {
+      kind: 'clean';
+      recoverability: 'none';
+    }
+  | {
+      kind: 'recoverable';
+      recoverability: 'automatic';
+      journalPath: string;
+      version: 3;
+      phase: 'preparing' | 'prepared' | 'committing' | 'verified';
+      reason: string;
+    }
+  | {
+      kind: 'unsupported';
+      recoverability: 'manual';
+      journalPath: string;
+      version: 1 | 2;
+      reason: string;
+    }
+  | {
+      kind: 'corrupt' | 'external-drift' | 'unavailable';
+      recoverability: 'manual';
+      journalPath: string;
+      reason: string;
+    };
+
+export type IslandMutationResult = IslandMutationFacts & { changed: boolean };
+
+export type IslandShellResult = IslandMutationResult & {
   active: boolean;
   status: IslandShellStatus;
 };
@@ -102,27 +137,49 @@ export type IslandShellFailureCode = 'permission-required' | 'unsupported' | 'co
 export class IslandShellFailure extends Error {
   readonly code: IslandShellFailureCode;
   readonly changed: boolean;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery: boolean;
 
   constructor(
     code: IslandShellFailureCode,
     message: string,
-    options?: ErrorOptions & { changed?: boolean }
+    options?: ErrorOptions & { mutation?: Partial<IslandMutationFacts> }
   ) {
     super(message, options);
     this.name = 'IslandShellFailure';
     this.code = code;
-    this.changed = options?.changed ?? false;
+    const mutation = islandMutationFacts(options?.mutation);
+    this.changed = mutation.changed;
+    this.desiredStateChanged = mutation.desiredStateChanged;
+    this.registryChanged = mutation.registryChanged;
+    this.physicalChanged = mutation.physicalChanged;
+    this.externalDrift = mutation.externalDrift;
+    this.incompleteRecovery = mutation.incompleteRecovery;
   }
 }
 
 export class IslandShellTransitionFailure extends Error {
   readonly changed: boolean;
   readonly status: IslandShellStatus | undefined;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery: boolean;
 
   constructor(error: unknown, status: IslandShellStatus | undefined) {
     super(error instanceof Error ? error.message : String(error), { cause: error });
     this.name = 'IslandShellTransitionFailure';
-    this.changed = didIslandMutationChange(error);
+    const mutation = readIslandMutationFacts(error);
+    this.changed = mutation.changed;
+    this.desiredStateChanged = mutation.desiredStateChanged;
+    this.registryChanged = mutation.registryChanged;
+    this.physicalChanged = mutation.physicalChanged;
+    this.externalDrift = mutation.externalDrift;
+    this.incompleteRecovery = mutation.incompleteRecovery;
     this.status = status;
   }
 }
@@ -131,16 +188,26 @@ export type IslandShellFailureDescription = {
   code: IslandShellFailureCode;
   changed: boolean;
   reason: string;
+  desiredStateChanged: boolean;
+  registryChanged: boolean;
+  physicalChanged: boolean;
+  externalDrift: boolean;
+  incompleteRecovery: boolean;
+  causes: Array<{ code: IslandShellFailureCode; reason: string }>;
 };
 
 export function describeIslandShellFailure(error: unknown): IslandShellFailureDescription {
   const typedFailure = findIslandShellFailure(error);
+  const mutation = readIslandMutationFacts(error);
+  const causes = collectIslandFailureCauses(error);
+  const reason = causes.map((cause) => cause.reason).join(' | ');
 
   if (typedFailure !== undefined) {
     return {
       code: typedFailure.code,
-      changed: didIslandMutationChange(error),
-      reason: error instanceof Error ? error.message : typedFailure.message,
+      ...mutation,
+      reason: reason || typedFailure.message,
+      causes,
     };
   }
 
@@ -148,8 +215,9 @@ export function describeIslandShellFailure(error: unknown): IslandShellFailureDe
 
   return {
     code: permissionError === undefined ? 'blocked' : 'permission-required',
-    changed: didIslandMutationChange(error),
-    reason: error instanceof Error ? error.message : String(error),
+    ...mutation,
+    reason: reason || (error instanceof Error ? error.message : String(error)),
+    causes,
   };
 }
 
@@ -160,21 +228,32 @@ export function readIslandShellFailureStatus(error: unknown): IslandShellStatus 
 }
 
 export class IslandPartialMutationError extends Error {
-  readonly changed = true;
+  readonly changed: boolean;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery: boolean;
 
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, mutation: Partial<IslandMutationFacts>, options?: ErrorOptions) {
     super(message, options);
     this.name = 'IslandPartialMutationError';
+    const combined = mergeIslandMutationFacts(mutation, readIslandMutationFacts(options?.cause));
+    this.changed = combined.changed;
+    this.desiredStateChanged = combined.desiredStateChanged;
+    this.registryChanged = combined.registryChanged;
+    this.physicalChanged = combined.physicalChanged;
+    this.externalDrift = combined.externalDrift;
+    this.incompleteRecovery = combined.incompleteRecovery;
   }
 }
 
 export type IslandDesiredSeedResult = {
   kind: 'seeded' | 'existing';
   desiredThemeId: string | null;
-};
+} & IslandMutationResult;
 
-export type IslandShellCleanupSummary = {
-  changed: boolean;
+export type IslandShellCleanupSummary = IslandMutationResult & {
   restoredAppRoots: string[];
   failedAppRoots: Array<{
     appRoot: string;
@@ -353,65 +432,78 @@ export async function applyIslandShell(options: {
   const canonicalOptions = { ...options, appRoot };
   await fs.access(getPatchPaths(appRoot).workbenchDirPath);
 
-  return withIslandRootLock(appRoot, canonicalOptions, async () => {
-    await readManagedAppRootsForMutationStrict(canonicalOptions);
-    const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
-    if (registration.kind === 'corrupt') {
-      throw new IslandShellFailure('corrupt', registration.reason);
-    }
-    const payload = await buildApplyPayload(canonicalOptions);
-    const { paths } = payload;
-    const recordChanged = await publishManagedRootRecord(
-      appRoot,
-      payload.desiredThemeId,
-      canonicalOptions
-    );
-
-    let physicalChanged: boolean;
-    try {
-      physicalChanged = await commitFileTransaction(
-        paths.transactionJournalPath,
-        appRoot,
-        [
-          buildApplyMutation(payload, paths.backupHtmlPath, payload.baseHtml),
-          buildApplyMutation(payload, paths.backupProductJsonPath, payload.baseProductJson),
-          buildApplyMutation(payload, paths.islandCssPath, payload.cssSource),
-          buildApplyMutation(payload, paths.manifestPath, payload.manifest),
-          buildApplyMutation(payload, paths.workbenchHtmlPath, payload.patchedHtml),
-          buildApplyMutation(payload, paths.productJsonPath, payload.patchedProductJson),
-        ],
-        async () => {
-          await verifyAppliedShell(paths, appRoot, payload.desiredThemeId);
-          const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
-
-          if (
-            registration.kind !== 'valid' ||
-            registration.record.desiredThemeId !== payload.desiredThemeId
-          ) {
-            throw new Error(
-              'Tyrian Night verification failed: app root was not registered after apply.'
-            );
-          }
-        }
-      );
-    } catch (error) {
-      if (recordChanged) {
-        throw new IslandPartialMutationError(
-          `Tyrian desired style was published, but physical apply failed: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
-        );
+  return withIslandRootLock(
+    appRoot,
+    canonicalOptions,
+    async (initializationChanged, recoveryPhysicalChanged) => {
+      await readManagedAppRootsForMutationStrict(canonicalOptions);
+      const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
+      if (registration.kind === 'corrupt') {
+        throw new IslandShellFailure('corrupt', registration.reason);
       }
-      throw error;
-    }
+      const payload = await buildApplyPayload(canonicalOptions);
+      const { paths } = payload;
+      const recordChanged = await publishManagedRootRecord(
+        appRoot,
+        payload.desiredThemeId,
+        canonicalOptions
+      );
 
-    const status = await readIslandShellStatusUnlocked(canonicalOptions);
+      let physicalChanged: boolean;
+      try {
+        physicalChanged = await commitFileTransaction(
+          paths.transactionJournalPath,
+          appRoot,
+          [
+            buildApplyMutation(payload, paths.backupHtmlPath, payload.baseHtml),
+            buildApplyMutation(payload, paths.backupProductJsonPath, payload.baseProductJson),
+            buildApplyMutation(payload, paths.islandCssPath, payload.cssSource),
+            buildApplyMutation(payload, paths.manifestPath, payload.manifest),
+            buildApplyMutation(payload, paths.workbenchHtmlPath, payload.patchedHtml),
+            buildApplyMutation(payload, paths.productJsonPath, payload.patchedProductJson),
+          ],
+          async () => {
+            await verifyAppliedShell(paths, appRoot, payload.desiredThemeId);
+            const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
 
-    return {
-      changed: recordChanged || physicalChanged,
-      active: true,
-      status,
-    };
-  });
+            if (
+              registration.kind !== 'valid' ||
+              registration.record.desiredThemeId !== payload.desiredThemeId
+            ) {
+              throw new Error(
+                'Tyrian Night verification failed: app root was not registered after apply.'
+              );
+            }
+          }
+        );
+      } catch (error) {
+        if (recordChanged || initializationChanged) {
+          throw new IslandPartialMutationError(
+            `Tyrian desired style was published, but physical apply failed: ${error instanceof Error ? error.message : String(error)}`,
+            {
+              desiredStateChanged: recordChanged,
+              registryChanged: recordChanged || initializationChanged,
+            },
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+
+      const status = await readIslandShellStatusUnlocked(canonicalOptions);
+
+      return {
+        ...islandMutationFacts({
+          desiredStateChanged: recordChanged,
+          registryChanged: recordChanged || initializationChanged,
+          physicalChanged: physicalChanged || recoveryPhysicalChanged,
+        }),
+        active: true,
+        status,
+      };
+    },
+    () => assertIslandApplyReady(canonicalOptions)
+  );
 }
 
 export async function readIslandShellApplyReadiness(options: {
@@ -422,13 +514,42 @@ export async function readIslandShellApplyReadiness(options: {
 }): Promise<IslandShellApplyReadiness> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
+  return readIslandShellApplyReadinessUnlocked(canonicalOptions);
+}
+
+async function readIslandShellApplyReadinessUnlocked(options: {
+  appRoot: string;
+  cssSourcePath: string;
+  themeVersion: string;
+  registryHome?: string;
+}): Promise<IslandShellApplyReadiness> {
+  const { appRoot } = options;
   let status: IslandShellStatus | undefined;
   let writeAccess: IslandShellWriteAccess | undefined;
 
   try {
-    status = await readIslandShellStatus(canonicalOptions);
-    writeAccess = await readIslandShellWriteAccess(canonicalOptions);
-    const payload = await buildApplyPayload(canonicalOptions);
+    await readManagedAppRootsReadOnly(options, {
+      roots: [],
+      registryDiagnostics: [],
+      tolerateDiagnostics: false,
+    });
+    status = await readIslandShellStatusUnlocked(options);
+    writeAccess = await readIslandShellWriteAccess(options);
+    if (
+      status.transaction.kind === 'unsupported' ||
+      status.transaction.kind === 'corrupt' ||
+      status.transaction.kind === 'external-drift' ||
+      status.transaction.kind === 'unavailable'
+    ) {
+      return {
+        kind: status.transaction.kind === 'unsupported' ? 'unsupported' : 'blocked',
+        appRoot,
+        status,
+        writeAccess,
+        reason: status.transaction.reason,
+      };
+    }
+    const payload = await buildApplyPayload(options);
     const changed =
       status.registrationState !== 'valid' ||
       status.desiredThemeId !== payload.desiredThemeId ||
@@ -454,8 +575,8 @@ export async function readIslandShellApplyReadiness(options: {
     };
   } catch (error) {
     if (isPermissionError(error)) {
-      status ??= await readIslandShellStatus(canonicalOptions);
-      writeAccess ??= await readIslandShellWriteAccess(canonicalOptions);
+      status ??= await readIslandShellStatusUnlocked(options);
+      writeAccess ??= await readIslandShellWriteAccess(options);
 
       return {
         kind: 'permission-required',
@@ -479,6 +600,34 @@ export async function readIslandShellApplyReadiness(options: {
       reason: failure.reason,
     };
   }
+}
+
+async function assertIslandApplyReady(options: {
+  appRoot: string;
+  cssSourcePath: string;
+  themeVersion: string;
+  registryHome?: string;
+}): Promise<void> {
+  const readiness = await readIslandShellApplyReadinessUnlocked(options);
+  if (readiness.kind === 'ready') return;
+  throw new IslandShellFailure(
+    readiness.kind === 'permission-required'
+      ? 'permission-required'
+      : readiness.kind === 'unsupported'
+        ? 'unsupported'
+        : 'blocked',
+    readiness.reason,
+    {
+      mutation: {
+        externalDrift: readiness.status?.transaction.kind === 'external-drift',
+        incompleteRecovery:
+          readiness.status?.transaction.kind === 'unsupported' ||
+          readiness.status?.transaction.kind === 'corrupt' ||
+          readiness.status?.transaction.kind === 'external-drift' ||
+          readiness.status?.transaction.kind === 'unavailable',
+      },
+    }
+  );
 }
 
 export async function readIslandShellWriteAccess(options: {
@@ -526,7 +675,6 @@ export async function readIslandShellWriteAccess(options: {
       paths.backupProductJsonPath,
       paths.transactionJournalPath,
       getManagedRootRecordPath(appRoot, options),
-      buildRegistryTransactionJournalPath(appRoot, options),
     ].map((filePath) => ({
       path: filePath,
       existingMode: fsConstants.R_OK,
@@ -582,32 +730,44 @@ export async function restoreIslandShell(options: {
   const canonicalOptions = { ...options, appRoot };
   await fs.access(getPatchPaths(appRoot).workbenchDirPath);
 
-  return withIslandRootLock(appRoot, canonicalOptions, async () => {
-    const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
-    const state = await inspectIslandRoot(appRoot, registration);
-    const plan = buildRestorePlan(state);
-    const recordChanged = await publishManagedRootRecord(appRoot, null, canonicalOptions);
-    let physicalChanged: boolean;
-    try {
-      physicalChanged = await commitRestorePlan(state, plan, canonicalOptions);
-    } catch (error) {
-      if (recordChanged) {
-        throw new IslandPartialMutationError(
-          `Tyrian disabled state was published, but physical restore failed: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
-        );
+  return withIslandRootLock(
+    appRoot,
+    canonicalOptions,
+    async (initializationChanged, recoveryPhysicalChanged) => {
+      const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
+      const state = await inspectIslandRoot(appRoot, registration, canonicalOptions);
+      const plan = buildRestorePlan(state);
+      const recordChanged = await publishManagedRootRecord(appRoot, null, canonicalOptions);
+      let physicalChanged: boolean;
+      try {
+        physicalChanged = await commitRestorePlan(state, plan, canonicalOptions);
+      } catch (error) {
+        if (recordChanged || initializationChanged) {
+          throw new IslandPartialMutationError(
+            `Tyrian disabled state was published, but physical restore failed: ${error instanceof Error ? error.message : String(error)}`,
+            {
+              desiredStateChanged: recordChanged,
+              registryChanged: recordChanged || initializationChanged,
+            },
+            { cause: error }
+          );
+        }
+        throw error;
       }
-      throw error;
+
+      const status = await readIslandShellStatusUnlocked(canonicalOptions);
+
+      return {
+        ...islandMutationFacts({
+          desiredStateChanged: recordChanged,
+          registryChanged: recordChanged || initializationChanged,
+          physicalChanged: physicalChanged || recoveryPhysicalChanged,
+        }),
+        active: false,
+        status,
+      };
     }
-
-    const status = await readIslandShellStatusUnlocked(canonicalOptions);
-
-    return {
-      changed: recordChanged || physicalChanged,
-      active: false,
-      status,
-    };
-  });
+  );
 }
 
 export async function seedIslandDesiredTheme(options: {
@@ -626,23 +786,43 @@ export async function seedIslandDesiredTheme(options: {
   const canonicalOptions = { ...options, appRoot };
   await fs.access(getPatchPaths(appRoot).workbenchDirPath);
 
-  return withIslandRootLock(appRoot, canonicalOptions, async () => {
-    const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
+  return withIslandRootLock(
+    appRoot,
+    canonicalOptions,
+    async (initializationChanged, recoveryPhysicalChanged) => {
+      const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
 
-    if (registration.kind === 'valid') {
+      if (registration.kind === 'valid') {
+        return {
+          kind: 'existing',
+          desiredThemeId: registration.record.desiredThemeId,
+          ...islandMutationFacts({
+            registryChanged: initializationChanged,
+            physicalChanged: recoveryPhysicalChanged,
+          }),
+        };
+      }
+
+      if (registration.kind === 'corrupt') {
+        throw new IslandShellFailure('corrupt', registration.reason);
+      }
+
+      const recordChanged = await publishManagedRootRecord(
+        appRoot,
+        options.desiredThemeId,
+        canonicalOptions
+      );
       return {
-        kind: 'existing',
-        desiredThemeId: registration.record.desiredThemeId,
+        kind: 'seeded',
+        desiredThemeId: options.desiredThemeId,
+        ...islandMutationFacts({
+          desiredStateChanged: recordChanged,
+          registryChanged: recordChanged || initializationChanged,
+          physicalChanged: recoveryPhysicalChanged,
+        }),
       };
     }
-
-    if (registration.kind === 'corrupt') {
-      throw new IslandShellFailure('corrupt', registration.reason);
-    }
-
-    await publishManagedRootRecord(appRoot, options.desiredThemeId, canonicalOptions);
-    return { kind: 'seeded', desiredThemeId: options.desiredThemeId };
-  });
+  );
 }
 
 export async function restoreAllIslandShells(options?: {
@@ -650,7 +830,10 @@ export async function restoreAllIslandShells(options?: {
   registryHome?: string;
 }): Promise<IslandShellCleanupSummary> {
   const listing = await listIslandShellRoots(options, { mode: 'restore' });
-  let changed = listing.registryChanged || listing.enumerationFailure?.changed === true;
+  let mutation = mergeIslandMutationFacts(
+    islandMutationFacts({ registryChanged: listing.registryChanged }),
+    listing.enumerationFailure
+  );
   const restoredAppRoots: string[] = [];
   const failedAppRoots: IslandShellCleanupSummary['failedAppRoots'] = [];
 
@@ -661,26 +844,25 @@ export async function restoreAllIslandShells(options?: {
         registryHome: options?.registryHome,
       });
 
-      if (result.changed) {
-        changed = true;
-      }
+      mutation = mergeIslandMutationFacts(mutation, result);
 
       restoredAppRoots.push(appRoot.appRoot);
     } catch (error) {
-      if (didIslandMutationChange(error)) {
-        changed = true;
-      }
+      if (isIslandLockLifecycleFailure(error)) throw error;
+      mutation = mergeIslandMutationFacts(mutation, readIslandMutationFacts(error));
       if (isFileNotFoundError(error)) {
         try {
           const cleanup = await removeMissingManagedAppRoot(appRoot, options);
-          changed = cleanup.changed || changed;
+          mutation = mergeIslandMutationFacts(
+            mutation,
+            islandMutationFacts({ registryChanged: cleanup.changed })
+          );
           if (cleanup.quarantinePath !== undefined) {
             listing.quarantinedRecords.push(cleanup.quarantinePath);
           }
         } catch (cleanupError) {
-          if (didIslandMutationChange(cleanupError)) {
-            changed = true;
-          }
+          if (isIslandLockLifecycleFailure(cleanupError)) throw cleanupError;
+          mutation = mergeIslandMutationFacts(mutation, readIslandMutationFacts(cleanupError));
           if (cleanupError instanceof IslandRegistryQuarantineError) {
             listing.quarantinedRecords.push(cleanupError.quarantinePath);
           }
@@ -704,7 +886,7 @@ export async function restoreAllIslandShells(options?: {
   }
 
   return {
-    changed,
+    ...mutation,
     restoredAppRoots,
     failedAppRoots,
     quarantinedRecords: listing.quarantinedRecords,
@@ -745,7 +927,7 @@ async function removeMissingManagedAppRoot(
         );
         return { changed: true, quarantinePath };
       } else {
-        await removeFileDurably(recordPath);
+        await removeFileDurably(recordPath, { registryChanged: true });
       }
       return { changed: true };
     }
@@ -754,7 +936,7 @@ async function removeMissingManagedAppRoot(
     if (record.appRoot !== candidate.appRoot) {
       throw new Error(`Tyrian managed app root record does not own '${candidate.appRoot}'.`);
     }
-    await removeFileDurably(recordPath);
+    await removeFileDurably(recordPath, { registryChanged: true });
     return { changed: true };
   });
 }
@@ -772,10 +954,13 @@ async function readIslandShellStatusUnlocked(options: {
   registryHome?: string;
 }): Promise<IslandShellStatus> {
   let registration: ManagedRootRegistration = { kind: 'absent' };
+  let transaction: IslandTransactionHealth | undefined;
 
   try {
     registration = await readManagedAppRootRegistration(options.appRoot, options);
-    return (await inspectIslandRoot(options.appRoot, registration)).status;
+    const journalPath = getPatchPaths(options.appRoot).transactionJournalPath;
+    transaction = await inspectIslandTransactionHealth(journalPath, options.appRoot, options);
+    return (await inspectIslandRoot(options.appRoot, registration, options, transaction)).status;
   } catch (error) {
     const registered = registration.kind !== 'absent';
 
@@ -790,6 +975,12 @@ async function readIslandShellStatusUnlocked(options: {
         classification: 'permission-denied',
         verificationPassed: false,
         canSelfHeal: false,
+        transaction: transaction ?? {
+          kind: 'unavailable',
+          recoverability: 'manual',
+          journalPath: getPatchPaths(options.appRoot).transactionJournalPath,
+          reason: 'Tyrian could not inspect transaction evidence due to permissions.',
+        },
         restoreProof: 'none',
         workbenchChecksum: undefined,
         productWorkbenchChecksum: undefined,
@@ -799,6 +990,15 @@ async function readIslandShellStatusUnlocked(options: {
     }
 
     if (isFileNotFoundError(error)) {
+      const visibleTransaction: IslandTransactionHealth = transaction ?? {
+        kind: 'clean',
+        recoverability: 'none',
+      };
+      const transactionBlocked =
+        visibleTransaction.kind === 'unsupported' ||
+        visibleTransaction.kind === 'corrupt' ||
+        visibleTransaction.kind === 'external-drift' ||
+        visibleTransaction.kind === 'unavailable';
       return {
         appRoot: options.appRoot,
         desiredThemeId: readDesiredThemeId(registration),
@@ -806,14 +1006,22 @@ async function readIslandShellStatusUnlocked(options: {
         active: false,
         managed: false,
         registered,
-        classification: 'missing',
+        classification: transactionBlocked
+          ? 'transaction-blocked'
+          : visibleTransaction.kind === 'recoverable'
+            ? 'transaction-pending'
+            : 'missing',
         verificationPassed: false,
-        canSelfHeal: registered,
+        canSelfHeal: registered || visibleTransaction.kind === 'recoverable',
+        transaction: visibleTransaction,
         restoreProof: 'none',
         workbenchChecksum: undefined,
         productWorkbenchChecksum: undefined,
         receipt: undefined,
-        issues: ['Tyrian could not find the registered VS Code installation files.'],
+        issues: [
+          'Tyrian could not find the registered VS Code installation files.',
+          ...(visibleTransaction.kind === 'clean' ? [] : [visibleTransaction.reason]),
+        ],
       };
     }
 
@@ -860,11 +1068,16 @@ async function readStatusesForRoots(
 
 async function inspectIslandRoot(
   appRoot: string,
-  registration: ManagedRootRegistration
+  registration: ManagedRootRegistration,
+  environment?: IslandShellEnvironment,
+  knownTransaction?: IslandTransactionHealth
 ): Promise<IslandRootState> {
   const registered = registration.kind !== 'absent';
   const desiredThemeId = readDesiredThemeId(registration);
   const paths = getPatchPaths(appRoot);
+  const transaction =
+    knownTransaction ??
+    (await inspectIslandTransactionHealth(paths.transactionJournalPath, appRoot, environment));
   const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
   const backupHtml = await readTextFileIfExists(paths.backupHtmlPath);
@@ -926,6 +1139,10 @@ async function inspectIslandRoot(
       manifest.desiredThemeId !== desiredThemeId);
   const hasTyrianEvidence = active || hasTyrianSidecars;
 
+  if (transaction.kind !== 'clean') {
+    issues.push(transaction.reason);
+  }
+
   if (active) {
     issues.push('Tyrian workbench patch evidence is present.');
   }
@@ -986,7 +1203,16 @@ async function inspectIslandRoot(
 
   let classification: IslandShellStatus['classification'] = 'clean';
 
-  if (brokenBackup) {
+  if (
+    transaction.kind === 'corrupt' ||
+    transaction.kind === 'unsupported' ||
+    transaction.kind === 'external-drift' ||
+    transaction.kind === 'unavailable'
+  ) {
+    classification = 'transaction-blocked';
+  } else if (transaction.kind === 'recoverable') {
+    classification = 'transaction-pending';
+  } else if (brokenBackup) {
     classification = 'broken-backup';
   } else if (!checksumMatches) {
     classification = 'checksum-mismatch';
@@ -1039,10 +1265,12 @@ async function inspectIslandRoot(
       classification,
       verificationPassed,
       canSelfHeal:
+        classification === 'transaction-pending' ||
         classification === 'managed-only' ||
         (hasTyrianEvidence &&
           (classification === 'broken-backup' || classification === 'checksum-mismatch')),
       restoreProof,
+      transaction,
       workbenchChecksum,
       productWorkbenchChecksum,
       receipt,
@@ -1179,10 +1407,11 @@ async function listIslandShellRoots(
   const registryDiagnostics: string[] = [];
   const quarantinedRecords: string[] = [];
   const registeredRoots: RootCandidate[] = [];
+  let initializationChanged = false;
 
   try {
     if (mode === 'restore') {
-      await initializeManagedRootsForMutation(options);
+      initializationChanged = await initializeManagedRootsForMutation(options);
       await readManagedAppRootsForRestore(options, {
         roots: registeredRoots,
         registryDiagnostics,
@@ -1196,6 +1425,7 @@ async function listIslandShellRoots(
       });
     }
   } catch (error) {
+    if (isIslandLockLifecycleFailure(error)) throw error;
     if (mode === 'restore') {
       enumerationFailure = describeIslandShellFailure(error);
     } else if (mode === 'diagnostic-read') {
@@ -1222,7 +1452,7 @@ async function listIslandShellRoots(
   return {
     roots: existingRoots,
     registryDiagnostics,
-    registryChanged: quarantinedRecords.length > 0,
+    registryChanged: initializationChanged || quarantinedRecords.length > 0,
     quarantinedRecords,
     ...(enumerationFailure !== undefined ? { enumerationFailure } : {}),
   };
@@ -1695,11 +1925,19 @@ async function publishManagedRootRecord(
   desiredThemeId: string | null,
   environment?: IslandShellEnvironment
 ): Promise<boolean> {
-  return withRegistryLock(environment, async () => {
+  const publication = await withRegistryLock(environment, async () => {
     const recordPath = getManagedRootRecordPath(appRoot, environment);
     const content = serializeManagedRootRecord(appRoot, desiredThemeId);
-    return writeIfChanged(recordPath, content);
+    const changed = await writeIfChanged(recordPath, content, {
+      desiredStateChanged: true,
+      registryChanged: true,
+    });
+    return islandMutationFacts({
+      desiredStateChanged: changed,
+      registryChanged: changed,
+    });
   });
+  return publication.changed;
 }
 
 async function withRegistryLock<T>(
@@ -1707,14 +1945,37 @@ async function withRegistryLock<T>(
   action: () => Promise<T>
 ): Promise<T> {
   const directoryPath = getManagedRootsDirectoryPath(environment);
-  await fs.mkdir(directoryPath, { recursive: true });
-  const registryHome = await fs.realpath(path.dirname(path.dirname(directoryPath)));
+  const registryHome = await canonicalizeFuturePath(path.dirname(path.dirname(directoryPath)));
   return withIslandProcessLock(buildIslandRegistryLockPath(registryHome), action);
+}
+
+async function canonicalizeFuturePath(filePath: string): Promise<string> {
+  let existingPath = path.resolve(filePath);
+  const suffix: string[] = [];
+
+  while ((await lstatIfExists(existingPath)) === undefined) {
+    const parentPath = path.dirname(existingPath);
+    if (parentPath === existingPath) break;
+    suffix.unshift(path.basename(existingPath));
+    existingPath = parentPath;
+  }
+
+  return path.join(await fs.realpath(existingPath), ...suffix);
 }
 
 async function initializeManagedRootsForMutation(
   environment?: IslandShellEnvironment
-): Promise<string> {
+): Promise<boolean> {
+  const initialization = await withRegistryLock(environment, async () => {
+    const changed = await initializeManagedRootsForMutationUnlocked(environment);
+    return islandMutationFacts({ registryChanged: changed });
+  });
+  return initialization.registryChanged;
+}
+
+async function initializeManagedRootsForMutationUnlocked(
+  environment?: IslandShellEnvironment
+): Promise<boolean> {
   const directoryPath = getManagedRootsDirectoryPath(environment);
   const directoryStats = await lstatIfExists(directoryPath);
 
@@ -1722,30 +1983,33 @@ async function initializeManagedRootsForMutation(
     throw new Error(`Tyrian managed app roots path is not a directory at '${directoryPath}'.`);
   }
 
+  const directoryExisted = directoryStats !== undefined;
   await fs.mkdir(directoryPath, { recursive: true });
-  const registryHome = await fs.realpath(path.dirname(path.dirname(directoryPath)));
-  await withIslandProcessLock(buildIslandMigrationLockPath(registryHome), async () => {
-    await retireLegacyManagedRoots(environment);
-  });
-  return directoryPath;
-}
-
-async function retireLegacyManagedRoots(environment?: IslandShellEnvironment): Promise<void> {
-  return withRegistryLock(environment, () => retireLegacyManagedRootsUnlocked(environment));
+  const retirementPath = buildLegacyRetirementMarkerPath(environment?.registryHome);
+  const retiredContent = await readTextFileIfExists(retirementPath);
+  if (retiredContent !== undefined) {
+    validateLegacyRetirementMarker(retiredContent, retirementPath);
+    return !directoryExisted;
+  }
+  const retired = await retireLegacyManagedRootsUnlocked(environment);
+  return !directoryExisted || retired;
 }
 
 async function retireLegacyManagedRootsUnlocked(
   environment?: IslandShellEnvironment
-): Promise<void> {
+): Promise<boolean> {
   const legacyPath = getLegacyManagedRootsRegistryPath(environment);
   const migrationPath = `${legacyPath}.migrating`;
   const retirementPath = buildLegacyRetirementMarkerPath(environment?.registryHome);
   const retiredContent = await readTextFileIfExists(retirementPath);
+  let changed = false;
 
   if (retiredContent !== undefined) {
     validateLegacyRetirementMarker(retiredContent, retirementPath);
-    await Promise.all([deleteIfExists(legacyPath), deleteIfExists(migrationPath)]);
-    return;
+    for (const retiredPath of [legacyPath, migrationPath]) {
+      changed = (await deleteIfExists(retiredPath)) || changed;
+    }
+    return changed;
   }
 
   const legacySnapshots = await Promise.all([
@@ -1770,7 +2034,10 @@ async function retireLegacyManagedRootsUnlocked(
     const currentContent = await readTextFileIfExists(recordPath);
 
     if (currentContent === undefined) {
-      await writeIfChanged(recordPath, serializeLegacyManagedRootRecord(appRoot));
+      changed =
+        (await writeIfChanged(recordPath, serializeLegacyManagedRootRecord(appRoot), {
+          registryChanged: true,
+        })) || changed;
       continue;
     }
 
@@ -1780,11 +2047,18 @@ async function retireLegacyManagedRootsUnlocked(
     }
   }
 
-  await writeDurableJsonFile(retirementPath, {
-    version: 1,
-    retiredAt: new Date().toISOString(),
-  });
-  await Promise.all([deleteIfExists(legacyPath), deleteIfExists(migrationPath)]);
+  if (retiredContent === undefined) {
+    await writeIfChanged(
+      retirementPath,
+      JSON.stringify({ version: 1, retiredAt: new Date().toISOString() }, null, 2).concat('\n'),
+      { registryChanged: true }
+    );
+    changed = true;
+  }
+  for (const retiredPath of [legacyPath, migrationPath]) {
+    changed = (await deleteIfExists(retiredPath)) || changed;
+  }
+  return changed;
 }
 
 async function readManagedAppRootsForMutationStrict(
@@ -1924,7 +2198,16 @@ async function readManagedRootRecordsFromDirectory(
 
   for (const entry of entries) {
     if (entry.name.startsWith('.tyrian-night-') && entry.name.endsWith('.tmp')) continue;
-    if (/^\.tyrian-night-journal-[0-9a-f]{64}\.json$/u.test(entry.name)) continue;
+    if (/^\.tyrian-night-journal-[0-9a-f]{64}\.json$/u.test(entry.name)) {
+      const reason = `Tyrian found an unsupported legacy registry transaction journal at '${path.join(directoryPath, entry.name)}' and left it untouched for manual recovery.`;
+      if (mode === 'diagnostic') {
+        accumulator.registryDiagnostics.push(reason);
+        continue;
+      }
+      throw new IslandShellFailure('unsupported', reason, {
+        mutation: { incompleteRecovery: true },
+      });
+    }
 
     const recordPath = path.join(directoryPath, entry.name);
     const validRecordName = /^[0-9a-f]{64}\.json$/u.test(entry.name);
@@ -2420,45 +2703,29 @@ async function assertPreparedMutationGeneration(mutation: PreparedFileMutation):
 async function rollbackFileTransaction(
   journalPath: string,
   journal: FileTransactionJournal
-): Promise<void> {
-  if (journal.phase === 'preparing' || (journal.version === 3 && journal.phase === 'prepared')) {
+): Promise<boolean> {
+  if (journal.version !== 3) {
+    throw new IslandShellFailure(
+      'unsupported',
+      `Tyrian transaction journal version ${journal.version} lacks target-generation evidence and was left untouched at '${journalPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+
+  if (journal.phase === 'preparing' || journal.phase === 'prepared') {
     await removeJournalBeforeTemporaryFiles(journalPath, journal);
-    return;
+    return false;
   }
 
-  if (journal.version === 3) {
-    await rollbackVersion3FileTransaction(journalPath, journal);
-    return;
-  }
-
-  for (const entry of journal.entries.toReversed()) {
-    if (entry.existed) {
-      const backupStats = await lstatIfExists(entry.backupPath);
-      if (backupStats === undefined || !backupStats.isFile() || backupStats.isSymbolicLink()) {
-        throw new Error(
-          `Tyrian file transaction recovery has no trustworthy backup at '${entry.backupPath}'.`
-        );
-      }
-
-      const restorePath = transactionSiblingPath(entry.filePath, journal.id, 'restore');
-      await fs.copyFile(entry.backupPath, restorePath);
-      await syncFile(restorePath);
-      await fs.rename(restorePath, entry.filePath);
-    } else {
-      await fs.rm(entry.filePath, { force: true });
-    }
-  }
-
-  await syncDirectories(journal.entries.map(({ filePath }) => path.dirname(filePath)));
-
-  await removeJournalBeforeTemporaryFiles(journalPath, journal);
+  return rollbackVersion3FileTransaction(journalPath, journal);
 }
 
 async function rollbackVersion3FileTransaction(
   journalPath: string,
   journal: FileTransactionJournal
-): Promise<void> {
+): Promise<boolean> {
   const failures: unknown[] = [];
+  let physicalChanged = false;
 
   for (const entry of journal.entries.toReversed()) {
     try {
@@ -2468,7 +2735,8 @@ async function rollbackVersion3FileTransaction(
       if (currentChecksum !== entry.desiredChecksum) {
         throw new IslandShellFailure(
           'blocked',
-          `Tyrian transaction recovery found external drift at '${entry.filePath}' and left it untouched.`
+          `Tyrian transaction recovery found external drift at '${entry.filePath}' and left it untouched.`,
+          { mutation: { externalDrift: true, incompleteRecovery: true } }
         );
       }
 
@@ -2494,9 +2762,11 @@ async function rollbackVersion3FileTransaction(
         await syncFile(restorePath);
         await assertRecoveryTargetGeneration(entry);
         await fs.rename(restorePath, entry.filePath);
+        physicalChanged = true;
       } else {
         await assertRecoveryTargetGeneration(entry);
         await fs.rm(entry.filePath, { force: true });
+        physicalChanged = true;
       }
     } catch (error) {
       failures.push(error);
@@ -2516,11 +2786,29 @@ async function rollbackVersion3FileTransaction(
       `Tyrian transaction recovery could not safely restore every target: ${failures
         .map((failure) => (failure instanceof Error ? failure.message : String(failure)))
         .join(' ')}`,
-      { cause: new AggregateError(failures), changed: true }
+      {
+        cause: new AggregateError(failures),
+        mutation: mergeIslandMutationFacts(
+          ...failures.map((failure) => readIslandMutationFacts(failure)),
+          { physicalChanged, incompleteRecovery: true }
+        ),
+      }
     );
   }
 
-  await removeJournalBeforeTemporaryFiles(journalPath, journal);
+  try {
+    await removeJournalBeforeTemporaryFiles(journalPath, journal);
+  } catch (cleanupError) {
+    const cleanupFailure = describeIslandShellFailure(cleanupError);
+    throw new IslandShellFailure(cleanupFailure.code, cleanupFailure.reason, {
+      cause: cleanupError,
+      mutation: mergeIslandMutationFacts(readIslandMutationFacts(cleanupError), {
+        physicalChanged,
+        incompleteRecovery: true,
+      }),
+    });
+  }
+  return physicalChanged;
 }
 
 async function assertRecoveryTargetGeneration(
@@ -2567,7 +2855,7 @@ async function removeJournalBeforeTemporaryFiles(
   journalPath: string,
   journal: FileTransactionJournal
 ): Promise<void> {
-  await removeFileDurably(journalPath);
+  await removeFileDurably(journalPath, { incompleteRecovery: true });
 
   for (const entry of journal.entries) {
     for (const temporaryPath of [entry.stagedPath, entry.backupPath]) {
@@ -2611,33 +2899,49 @@ function transactionSiblingPath(
 async function withIslandRootLock<T>(
   appRoot: string,
   environment: IslandShellEnvironment,
-  action: () => Promise<T>
+  action: (initializationChanged: boolean, recoveryPhysicalChanged: boolean) => Promise<T>,
+  readinessGate?: () => Promise<void>
 ): Promise<T> {
-  await initializeManagedRootsForMutation(environment);
-  return withIslandProcessLock(buildIslandRootLockPath(appRoot), () =>
-    withRegistryLock(environment, async () => {
+  return withIslandProcessLock(buildIslandRootLockPath(appRoot), async () => {
+    await readinessGate?.();
+    let initializationChanged = false;
+    let recoveryPhysicalChanged = false;
+    try {
+      const initialization = await withRegistryLock(environment, async () => {
+        await readinessGate?.();
+        const changed = await initializeManagedRootsForMutationUnlocked(environment);
+        return islandMutationFacts({ registryChanged: changed });
+      });
+      initializationChanged = initialization.registryChanged;
+      recoveryPhysicalChanged = await recoverRootFileTransactions(appRoot, environment);
+      return await action(initializationChanged, recoveryPhysicalChanged);
+    } catch (error) {
+      let status: IslandShellStatus | undefined;
+
       try {
-        await recoverRootFileTransactions(appRoot, environment);
-        return await action();
-      } catch (error) {
-        let status: IslandShellStatus | undefined;
-
-        try {
-          status = await readIslandShellStatusUnlocked({ ...environment, appRoot });
-        } catch {
-          status = undefined;
-        }
-
-        throw new IslandShellTransitionFailure(error, status);
+        status = await readIslandShellStatusUnlocked({ ...environment, appRoot });
+      } catch {
+        status = undefined;
       }
-    })
-  );
+
+      const transition = new IslandShellTransitionFailure(error, status);
+      if (!initializationChanged && !recoveryPhysicalChanged) throw transition;
+      throw new IslandPartialMutationError(
+        `Tyrian durable state changed before the root transition failed: ${transition.message}`,
+        {
+          registryChanged: initializationChanged,
+          physicalChanged: recoveryPhysicalChanged,
+        },
+        { cause: transition }
+      );
+    }
+  });
 }
 
 async function recoverRootFileTransactions(
   appRoot: string,
   environment: IslandShellEnvironment
-): Promise<void> {
+): Promise<boolean> {
   const paths = getPatchPaths(appRoot);
   const recordPath = getManagedRootRecordPath(appRoot, environment);
   const allowedTargets = new Set([
@@ -2650,37 +2954,157 @@ async function recoverRootFileTransactions(
     recordPath,
   ]);
 
-  await recoverFileTransaction(paths.transactionJournalPath, allowedTargets, appRoot);
-  await recoverFileTransaction(
-    buildRegistryTransactionJournalPath(appRoot, environment),
-    new Set([recordPath]),
-    appRoot
-  );
+  return recoverFileTransaction(paths.transactionJournalPath, allowedTargets, appRoot);
 }
 
 async function recoverFileTransaction(
   journalPath: string,
   allowedTargets: Set<string>,
   appRoot: string
-): Promise<void> {
+): Promise<boolean> {
   const journalStats = await lstatIfExists(journalPath);
   if (journalStats !== undefined && (!journalStats.isFile() || journalStats.isSymbolicLink())) {
-    throw new Error(`Tyrian file transaction journal is not a regular file at '${journalPath}'.`);
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
   }
   const content = await readTextFileIfExists(journalPath);
 
   if (content === undefined) {
-    return;
+    return false;
   }
 
-  const journal = parseFileTransactionJournal(content, journalPath, allowedTargets, appRoot);
+  let journal: FileTransactionJournal;
+  try {
+    journal = parseFileTransactionJournal(content, journalPath, allowedTargets, appRoot);
+  } catch (error) {
+    throw new IslandShellFailure(
+      'corrupt',
+      error instanceof Error ? error.message : String(error),
+      { cause: error, mutation: { incompleteRecovery: true } }
+    );
+  }
+
+  if (journal.version !== 3) {
+    throw new IslandShellFailure(
+      'unsupported',
+      `Tyrian transaction journal version ${journal.version} lacks target-generation evidence and was left untouched at '${journalPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
 
   if (journal.phase === 'verified') {
     await finishVerifiedFileTransaction(journalPath, journal);
-    return;
+    return false;
   }
 
-  await rollbackFileTransaction(journalPath, journal);
+  return rollbackFileTransaction(journalPath, journal);
+}
+
+async function inspectIslandTransactionHealth(
+  journalPath: string,
+  appRoot: string,
+  environment?: IslandShellEnvironment
+): Promise<IslandTransactionHealth> {
+  const journalStats = await lstatIfExists(journalPath);
+  if (journalStats === undefined) return { kind: 'clean', recoverability: 'none' };
+  if (!journalStats.isFile() || journalStats.isSymbolicLink()) {
+    return {
+      kind: 'corrupt',
+      recoverability: 'manual',
+      journalPath,
+      reason: `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
+    };
+  }
+
+  let journal: FileTransactionJournal;
+  try {
+    const paths = getPatchPaths(appRoot);
+    journal = parseFileTransactionJournal(
+      await fs.readFile(journalPath, 'utf8'),
+      journalPath,
+      new Set([
+        paths.workbenchHtmlPath,
+        paths.productJsonPath,
+        paths.islandCssPath,
+        paths.manifestPath,
+        paths.backupHtmlPath,
+        paths.backupProductJsonPath,
+        getManagedRootRecordPath(appRoot, environment),
+      ]),
+      appRoot
+    );
+  } catch (error) {
+    if (isPermissionError(error)) throw error;
+    return {
+      kind: 'corrupt',
+      recoverability: 'manual',
+      journalPath,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  if (journal.version !== 3) {
+    return {
+      kind: 'unsupported',
+      recoverability: 'manual',
+      journalPath,
+      version: journal.version,
+      reason: `Tyrian transaction journal version ${journal.version} lacks target-generation evidence and was left untouched at '${journalPath}'.`,
+    };
+  }
+
+  if (journal.phase === 'committing') {
+    for (const entry of journal.entries) {
+      let currentChecksum: string | null;
+      try {
+        currentChecksum = checksumOrNull(await readTransactionTarget(entry.filePath));
+      } catch (error) {
+        return {
+          kind: 'corrupt',
+          recoverability: 'manual',
+          journalPath,
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
+      if (currentChecksum !== entry.originalChecksum && currentChecksum !== entry.desiredChecksum) {
+        return {
+          kind: 'external-drift',
+          recoverability: 'manual',
+          journalPath,
+          reason: `Tyrian transaction recovery found external drift at '${entry.filePath}' and will leave it untouched.`,
+        };
+      }
+
+      if (currentChecksum === entry.desiredChecksum && entry.existed) {
+        const backupStats = await lstatIfExists(entry.backupPath);
+        if (
+          backupStats === undefined ||
+          !backupStats.isFile() ||
+          backupStats.isSymbolicLink() ||
+          checksumOrNull(await fs.readFile(entry.backupPath, 'utf8')) !== entry.originalChecksum
+        ) {
+          return {
+            kind: 'corrupt',
+            recoverability: 'manual',
+            journalPath,
+            reason: `Tyrian file transaction recovery has no trustworthy backup at '${entry.backupPath}'.`,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    kind: 'recoverable',
+    recoverability: 'automatic',
+    journalPath,
+    version: 3,
+    phase: journal.phase,
+    reason: `Tyrian transaction journal is pending automatic ${journal.phase === 'verified' ? 'cleanup' : 'recovery'} at '${journalPath}'.`,
+  };
 }
 
 async function tryReadFileTransactionJournal(
@@ -2689,14 +3113,26 @@ async function tryReadFileTransactionJournal(
 ): Promise<FileTransactionJournal | undefined> {
   const journalStats = await lstatIfExists(journalPath);
   if (journalStats !== undefined && (!journalStats.isFile() || journalStats.isSymbolicLink())) {
-    throw new Error(`Tyrian file transaction journal is not a regular file at '${journalPath}'.`);
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
   }
   const content = await readTextFileIfExists(journalPath);
   if (content === undefined) {
     return undefined;
   }
 
-  return parseFileTransactionJournal(content, journalPath, undefined, appRoot);
+  try {
+    return parseFileTransactionJournal(content, journalPath, undefined, appRoot);
+  } catch (error) {
+    throw new IslandShellFailure(
+      'corrupt',
+      error instanceof Error ? error.message : String(error),
+      { cause: error, mutation: { incompleteRecovery: true } }
+    );
+  }
 }
 
 function parseFileTransactionJournal(
@@ -2772,17 +3208,6 @@ function parseFileTransactionJournal(
   return parsed as FileTransactionJournal;
 }
 
-function buildRegistryTransactionJournalPath(
-  appRoot: string,
-  environment?: IslandShellEnvironment
-): string {
-  const recordPath = getManagedRootRecordPath(appRoot, environment);
-  return path.join(
-    path.dirname(recordPath),
-    `.tyrian-night-journal-${path.basename(recordPath, '.json')}.json`
-  );
-}
-
 function readDesiredThemeId(registration: ManagedRootRegistration): string | null | undefined {
   return registration.kind === 'valid' ? registration.record.desiredThemeId : undefined;
 }
@@ -2841,7 +3266,7 @@ async function writeDurableTextFile(filePath: string, content: string): Promise<
       const failure = describeIslandShellFailure(error);
       primaryFailure = new IslandShellFailure(failure.code, failure.reason, {
         cause: error,
-        changed: true,
+        mutation: { incompleteRecovery: true },
       });
     } else {
       primaryFailure = error;
@@ -2862,7 +3287,7 @@ async function writeDurableTextFile(filePath: string, content: string): Promise<
       const failure = describeIslandShellFailure(cleanupFailure);
       throw new IslandShellFailure(failure.code, failure.reason, {
         cause: cleanupFailure,
-        changed: true,
+        mutation: { incompleteRecovery: true },
       });
     }
 
@@ -2896,7 +3321,10 @@ async function syncDirectories(directoryPaths: string[]): Promise<void> {
   }
 }
 
-async function removeFileDurably(filePath: string): Promise<boolean> {
+async function removeFileDurably(
+  filePath: string,
+  mutation: Partial<IslandMutationFacts> = {}
+): Promise<boolean> {
   try {
     await fs.unlink(filePath);
   } catch (error) {
@@ -2910,26 +3338,39 @@ async function removeFileDurably(filePath: string): Promise<boolean> {
     const failure = describeIslandShellFailure(error);
     throw new IslandShellFailure(failure.code, failure.reason, {
       cause: error,
-      changed: true,
+      mutation: mergeIslandMutationFacts(mutation, { incompleteRecovery: true }),
     });
   }
 
   return true;
 }
 
-async function writeIfChanged(filePath: string, content: string): Promise<boolean> {
+async function writeIfChanged(
+  filePath: string,
+  content: string,
+  mutation: Partial<IslandMutationFacts> = {}
+): Promise<boolean> {
   const currentContent = await readTextFileIfExists(filePath);
 
   if (currentContent === content) {
     return false;
   }
 
-  await writeDurableTextFile(filePath, content);
+  try {
+    await writeDurableTextFile(filePath, content);
+  } catch (error) {
+    if ((await readTextFileIfExists(filePath)) !== content) throw error;
+    throw new IslandPartialMutationError(
+      `Tyrian durable publication changed '${filePath}' but did not complete cleanly.`,
+      mutation,
+      { cause: error }
+    );
+  }
   return true;
 }
 
 async function deleteIfExists(filePath: string): Promise<boolean> {
-  return removeFileDurably(filePath);
+  return removeFileDurably(filePath, { registryChanged: true });
 }
 
 async function readTextFileIfExists(filePath: string): Promise<string | undefined> {
@@ -2998,6 +3439,56 @@ function findNodeError(
       ? candidate
       : undefined
   );
+}
+
+function collectIslandFailureCauses(
+  error: unknown
+): Array<{ code: IslandShellFailureCode; reason: string }> {
+  const pending = [error];
+  const visited = new Set<unknown>();
+  const causes: Array<{ code: IslandShellFailureCode; reason: string }> = [];
+  const seen = new Set<string>();
+
+  while (pending.length > 0 && causes.length < 8) {
+    const candidate = pending.shift();
+    if (candidate === undefined || visited.has(candidate)) continue;
+    visited.add(candidate);
+
+    const children: unknown[] = [];
+    if (candidate instanceof AggregateError) children.push(...candidate.errors);
+    if (candidate instanceof Error && candidate.cause !== undefined) children.push(candidate.cause);
+    pending.push(...children);
+
+    if (!(candidate instanceof Error)) {
+      if (children.length === 0) {
+        const reason = String(candidate);
+        if (!seen.has(reason)) {
+          causes.push({ code: 'blocked', reason });
+          seen.add(reason);
+        }
+      }
+      continue;
+    }
+
+    const ownsActionableContext =
+      candidate instanceof IslandShellFailure ||
+      candidate instanceof IslandPartialMutationError ||
+      candidate.name === 'IslandLockReleaseError' ||
+      candidate.name === 'IslandLockActionReleaseError' ||
+      children.length === 0;
+    if (!ownsActionableContext || seen.has(candidate.message)) continue;
+
+    const code =
+      candidate instanceof IslandShellFailure
+        ? candidate.code
+        : isPermissionError(candidate)
+          ? 'permission-required'
+          : 'blocked';
+    causes.push({ code, reason: candidate.message });
+    seen.add(candidate.message);
+  }
+
+  return causes;
 }
 
 function findNestedError<T>(

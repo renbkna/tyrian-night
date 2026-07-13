@@ -194,7 +194,7 @@ test('legacy desired state is retained until the shared shell migration commits'
   globalStateStore.set(LEGACY_ISLAND_UI_ENABLED_KEY, true);
   queuedSpawnResponses.push({
     kind: 'permission-required',
-    changed: true,
+    ...mutationFacts(),
     status: fakeIslandStatus('clean'),
     writeAccess: {
       writable: false,
@@ -258,7 +258,7 @@ test('activation restores current physical evidence when no desired record exist
       desiredThemeId: undefined,
       registrationState: 'absent',
     },
-    { changed: false, active: false }
+    { ...mutationFacts(), active: false }
   );
 
   const { activate } = await import('../apps/vscode/src/extension');
@@ -334,6 +334,45 @@ test('activation blocks an unavailable desired style instead of deleting shared 
   expect(informationMessages.at(-1)?.[0]).toContain('desires unavailable style');
 });
 
+test('repair preserves an unavailable shared desired style instead of falling back to the window theme', async () => {
+  globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
+  const repairCommand = await activateAndGetRepairCommand();
+  resetObservations();
+  queuedSpawnResponses.push({
+    ...fakeIslandStatus('broken-backup'),
+    desiredThemeId: 'retired-tyrian-style.css',
+    active: true,
+    managed: true,
+    registered: true,
+  });
+
+  await repairCommand();
+
+  expect(spawnCalls.map((call) => call.args[1])).toEqual(['status']);
+  expect(informationMessages.at(-1)?.[0]).toContain('desires unavailable style');
+  expect(warningMessages).toEqual([]);
+});
+
+test('activation surfaces a typed incomplete reconciliation result', async () => {
+  globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
+  queuedSpawnResponses.push(
+    { ...fakeIslandStatus('patched'), desiredThemeId: 'tyrian-night.css' },
+    {
+      kind: 'blocked',
+      ...mutationFacts({ incompleteRecovery: true }),
+      status: fakeIslandStatus('transaction-blocked'),
+      reason: 'pending transaction requires manual recovery',
+    }
+  );
+
+  const { activate } = await import('../apps/vscode/src/extension');
+  await activate(createExtensionContext());
+
+  expect(spawnCalls.map((call) => call.args[1])).toEqual(['status', 'apply-supervised']);
+  expect(informationMessages.at(-1)?.[0]).toContain('startup reconciliation is blocked');
+  expect(informationMessages.at(-1)?.[0]).toContain('manual recovery');
+});
+
 test('restore completes through the supervisor without extra prompts', async () => {
   const { activate } = await import('../apps/vscode/src/extension');
   await activate(createExtensionContext());
@@ -344,7 +383,7 @@ test('restore completes through the supervisor without extra prompts', async () 
   resetObservations();
   queuedSpawnResponses.push({
     kind: 'restored',
-    changed: true,
+    ...mutationFacts({ physicalChanged: true }),
     restoredAppRoots: ['/test-vscode-app-root'],
     failedAppRoots: [],
   });
@@ -356,6 +395,25 @@ test('restore completes through the supervisor without extra prompts', async () 
   expect(globalStateUpdates.some(([key]) => key === ISLAND_UI_CONFIG_KEY)).toBe(false);
 });
 
+test('restore does not request reload for desired-state and registry changes without physical change', async () => {
+  const { activate } = await import('../apps/vscode/src/extension');
+  await activate(createExtensionContext());
+  const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
+  resetObservations();
+  queuedSpawnResponses.push({
+    kind: 'restored',
+    ...mutationFacts({ desiredStateChanged: true, registryChanged: true }),
+    restoredAppRoots: ['/test-vscode-app-root'],
+    failedAppRoots: [],
+    quarantinedRecords: [],
+  });
+
+  await restoreCommand?.();
+
+  expect(informationMessages.at(-1)?.[0]).toBe('Tyrian Night: Classic UI is already active.');
+  expect(informationMessages.some((message) => message.includes('Reload Window'))).toBe(false);
+});
+
 test('repair Island UI handles permission-required supervisor result through Doctor', async () => {
   const repairCommand = await activateAndGetRepairCommand();
   resetObservations();
@@ -364,7 +422,7 @@ test('repair Island UI handles permission-required supervisor result through Doc
     fakeIslandStatus('clean'),
     {
       kind: 'permission-required',
-      changed: true,
+      ...mutationFacts(),
       status: fakeIslandStatus('clean'),
       writeAccess: {
         writable: false,
@@ -410,7 +468,7 @@ test('permission-required Island UI prompt can open the public setup guidance', 
     },
     {
       kind: 'permission-required',
-      changed: true,
+      ...mutationFacts(),
       status: fakeIslandStatus('clean'),
       writeAccess: {
         writable: false,
@@ -439,7 +497,7 @@ test('permission-required restore routes only to setup guidance, Doctor, or dism
   queuedWarningResponses.push('Later');
   queuedSpawnResponses.push({
     kind: 'permission-required',
-    changed: true,
+    ...mutationFacts({ physicalChanged: true }),
     restoredAppRoots: [],
     failedAppRoots: [
       {
@@ -492,14 +550,21 @@ test('Doctor reports unidentifiable registry data without mutating it', async ()
   resetObservations();
   queuedSpawnResponses.push({
     statuses: [],
-    registryDiagnostics: ['/state/broken.json: invalid JSON'],
+    registryDiagnostics: [
+      {
+        reason: '/state/broken.json: invalid JSON',
+        recommendedAction: 'manual-recovery',
+      },
+    ],
   });
 
   await doctor?.();
 
   const content = (openedDocuments.at(-1) as { content?: string } | undefined)?.content;
   expect(content).toContain('Registry diagnostic: /state/broken.json: invalid JSON');
-  expect(content).toContain('Recommended action: Restore Classic UI');
+  expect(content).toContain(
+    'Recommended action: Inspect and recover transaction evidence manually'
+  );
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['status-all-supervised']);
 });
 
@@ -577,13 +642,13 @@ function defaultCliResult(args: string[]): unknown {
     case 'apply-supervised':
       return {
         kind: 'already-current',
-        changed: false,
+        ...mutationFacts(),
         status: fakeIslandStatus('patched'),
       };
     case 'restore-supervised':
       return {
         kind: 'already-classic',
-        changed: false,
+        ...mutationFacts(),
         restoredAppRoots: [],
         failedAppRoots: [],
       };
@@ -606,10 +671,32 @@ function defaultCliResult(args: string[]): unknown {
     case 'seed-desired-supervised':
       return { kind: 'seeded', desiredThemeId: 'tyrian-night.css' };
     case 'restore':
-      return { changed: false, active: false };
+      return { ...mutationFacts(), active: false };
     default:
-      return { changed: false, restoredAppRoots: [], failedAppRoots: [] };
+      return { ...mutationFacts(), restoredAppRoots: [], failedAppRoots: [] };
   }
+}
+
+function mutationFacts(
+  facts: Partial<{
+    desiredStateChanged: boolean;
+    registryChanged: boolean;
+    physicalChanged: boolean;
+    externalDrift: boolean;
+    incompleteRecovery: boolean;
+  }> = {}
+) {
+  const result = {
+    desiredStateChanged: facts.desiredStateChanged ?? false,
+    registryChanged: facts.registryChanged ?? false,
+    physicalChanged: facts.physicalChanged ?? false,
+    externalDrift: facts.externalDrift ?? false,
+    incompleteRecovery: facts.incompleteRecovery ?? false,
+  };
+  return {
+    ...result,
+    changed: result.desiredStateChanged || result.registryChanged || result.physicalChanged,
+  };
 }
 
 function fakeIslandStatus(classification: string): {
@@ -622,6 +709,15 @@ function fakeIslandStatus(classification: string): {
   classification: string;
   verificationPassed: boolean;
   canSelfHeal: boolean;
+  transaction: { kind: 'clean'; recoverability: 'none' };
+  recommendedAction:
+    | 'none'
+    | 'apply'
+    | 'repair'
+    | 'restore'
+    | 'prune-missing'
+    | 'fix-permissions'
+    | 'manual-recovery';
   restoreProof: 'none' | 'manifest-v3-backup-pair' | 'strip-tyrian-block';
   workbenchChecksum: string;
   productWorkbenchChecksum: string;
@@ -638,6 +734,13 @@ function fakeIslandStatus(classification: string): {
     classification,
     verificationPassed: classification === 'clean' || classification === 'patched',
     canSelfHeal: false,
+    transaction: { kind: 'clean', recoverability: 'none' },
+    recommendedAction:
+      classification === 'broken-backup'
+        ? 'restore'
+        : classification === 'transaction-blocked'
+          ? 'manual-recovery'
+          : 'none',
     restoreProof: 'none',
     workbenchChecksum: 'test-workbench-hash',
     productWorkbenchChecksum: 'test-workbench-hash',

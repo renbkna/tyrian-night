@@ -9,18 +9,36 @@ export type IslandProcessFailureEnvelope = {
   version: 1;
   code: 'permission-required' | 'unsupported' | 'corrupt' | 'blocked';
   changed: boolean;
+  desiredStateChanged: boolean;
+  registryChanged: boolean;
+  physicalChanged: boolean;
+  externalDrift: boolean;
+  incompleteRecovery: boolean;
   reason: string;
+  causes: Array<{ code: IslandProcessFailureEnvelope['code']; reason: string }>;
 };
 
 export class IslandProcessFailure extends Error {
   readonly code: IslandProcessFailureEnvelope['code'];
   readonly changed: boolean;
+  readonly desiredStateChanged: boolean;
+  readonly registryChanged: boolean;
+  readonly physicalChanged: boolean;
+  readonly externalDrift: boolean;
+  readonly incompleteRecovery: boolean;
+  readonly causes: IslandProcessFailureEnvelope['causes'];
 
   constructor(failure: IslandProcessFailureEnvelope) {
     super(failure.reason);
     this.name = 'IslandProcessFailure';
     this.code = failure.code;
     this.changed = failure.changed;
+    this.desiredStateChanged = failure.desiredStateChanged;
+    this.registryChanged = failure.registryChanged;
+    this.physicalChanged = failure.physicalChanged;
+    this.externalDrift = failure.externalDrift;
+    this.incompleteRecovery = failure.incompleteRecovery;
+    this.causes = failure.causes;
   }
 }
 
@@ -94,8 +112,29 @@ export function parseIslandProcessFailure(output: string): IslandProcessFailure 
         candidate.code ?? ''
       ) ||
       typeof candidate.changed !== 'boolean' ||
+      typeof candidate.desiredStateChanged !== 'boolean' ||
+      typeof candidate.registryChanged !== 'boolean' ||
+      typeof candidate.physicalChanged !== 'boolean' ||
+      typeof candidate.externalDrift !== 'boolean' ||
+      typeof candidate.incompleteRecovery !== 'boolean' ||
+      candidate.changed !==
+        (candidate.desiredStateChanged || candidate.registryChanged || candidate.physicalChanged) ||
       typeof candidate.reason !== 'string' ||
-      candidate.reason.length === 0
+      candidate.reason.length === 0 ||
+      !Array.isArray(candidate.causes) ||
+      candidate.causes.length > 8 ||
+      candidate.causes.some(
+        (cause) =>
+          typeof cause !== 'object' ||
+          cause === null ||
+          !('code' in cause) ||
+          !['permission-required', 'unsupported', 'corrupt', 'blocked'].includes(
+            typeof cause.code === 'string' ? cause.code : ''
+          ) ||
+          !('reason' in cause) ||
+          typeof cause.reason !== 'string' ||
+          cause.reason.length === 0
+      )
     ) {
       return undefined;
     }

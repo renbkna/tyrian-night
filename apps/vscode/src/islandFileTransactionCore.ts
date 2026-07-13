@@ -1,5 +1,10 @@
 export class IslandFileTransactionPartialMutationError extends AggregateError {
   readonly changed = true;
+  readonly desiredStateChanged = false;
+  readonly registryChanged = false;
+  readonly physicalChanged = true;
+  readonly externalDrift = false;
+  readonly incompleteRecovery = true;
   readonly transactionError: unknown;
   readonly rollbackError: unknown;
 

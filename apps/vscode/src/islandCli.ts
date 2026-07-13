@@ -67,11 +67,15 @@ async function main(): Promise<void> {
       );
       return;
     case 'restore-all':
-      writeJson(
-        await restoreAllIslandShells({
+      {
+        const result = await restoreAllIslandShells({
           preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-        })
-      );
+        });
+        writeJson(result);
+        if (result.failedAppRoots.length > 0 || result.enumerationFailure !== undefined) {
+          process.exitCode = 2;
+        }
+      }
       return;
     case 'status':
       writeJson(

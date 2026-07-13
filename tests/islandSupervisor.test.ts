@@ -5,12 +5,13 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
-import { applyIslandShell } from '../apps/vscode/src/islandShell';
+import { applyIslandShell, describeIslandShellFailure } from '../apps/vscode/src/islandShell';
 import {
   IslandFileTransactionPartialMutationError,
   rollbackFailedFileTransactionCore,
 } from '../apps/vscode/src/islandFileTransactionCore';
 import { IslandRegistryQuarantineError } from '../apps/vscode/src/islandRegistryMutationCore';
+import { withIslandProcessLock } from '../apps/vscode/src/islandProcessLock';
 import { didIslandMutationChange } from '../apps/vscode/src/islandSupervisorCore';
 import {
   applyIslandUiSupervised,
@@ -21,6 +22,10 @@ import {
   WORKBENCH_CHECKSUM_KEY,
   WORKBENCH_CSS_LINK,
   buildIslandPatchPaths,
+  buildIslandRegistryLockPath,
+  buildIslandRootLockPath,
+  buildLegacyManagedRootsRegistryPath,
+  buildLegacyRetirementMarkerPath,
   buildManagedRootRecordPath,
   buildManagedRootsDirectoryPath,
 } from '../apps/vscode/src/islandPatchContract';
@@ -222,9 +227,33 @@ test('typed core partial failures preserve supervisor changed classification', a
   expect(didIslandMutationChange(new Error('unchanged failure'))).toBe(false);
   expect(
     didIslandMutationChange(
-      new AggregateError([Object.assign(new Error('nested mutation'), { changed: true })])
+      new AggregateError([Object.assign(new Error('nested mutation'), { physicalChanged: true })])
     )
   ).toBe(true);
+});
+
+test('public failure normalization preserves both actionable aggregate causes', async () => {
+  let failure: unknown;
+  try {
+    await rollbackFailedFileTransactionCore({
+      transactionError: new Error('rename failed at workbench.html'),
+      physicalMutationAttempted: true,
+      rollback: async () => {
+        throw new Error('rollback backup missing at workbench.backup.html');
+      },
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  expect(describeIslandShellFailure(failure)).toMatchObject({
+    physicalChanged: true,
+    incompleteRecovery: true,
+    causes: expect.arrayContaining([
+      { code: 'blocked', reason: 'rename failed at workbench.html' },
+      { code: 'blocked', reason: 'rollback backup missing at workbench.backup.html' },
+    ]),
+  });
 });
 
 test('supervised apply converts a read-only app root into permission-required', async () => {
@@ -260,6 +289,123 @@ test('supervised apply converts a read-only app root into permission-required', 
     await fs.chmod(workbenchPath, 0o644);
     await fs.chmod(productPath, 0o644);
   }
+});
+
+test('non-ready supervised apply returns before legacy registry migration', async () => {
+  const appRoot = await createAppRoot('readonly-no-migration');
+  const cssSource = await writeCssSource('readonly-no-migration.css');
+  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
+  const retirementPath = buildLegacyRetirementMarkerPath(registryHome);
+  const paths = buildIslandPatchPaths(appRoot);
+  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+  await fs.writeFile(
+    legacyPath,
+    JSON.stringify({ version: 1, appRoots: [appRoot] }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  try {
+    await fs.chmod(paths.workbenchDirPath, 0o555);
+    await fs.chmod(paths.workbenchHtmlPath, 0o444);
+    await fs.chmod(paths.productJsonPath, 0o444);
+    await expect(
+      applyIslandUiSupervised({
+        appRoot,
+        cssSourcePath: cssSource,
+        themeVersion: 'test',
+        registryHome,
+      })
+    ).resolves.toMatchObject({
+      kind: 'permission-required',
+      changed: false,
+      desiredStateChanged: false,
+      registryChanged: false,
+      physicalChanged: false,
+    });
+    expect((await fs.stat(legacyPath)).isFile()).toBe(true);
+    await expect(fs.stat(retirementPath)).rejects.toThrow();
+    await expect(fs.stat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
+  } finally {
+    await fs.chmod(paths.workbenchDirPath, 0o755);
+    await fs.chmod(paths.workbenchHtmlPath, 0o644);
+    await fs.chmod(paths.productJsonPath, 0o644);
+  }
+});
+
+test('lock-held readiness revalidation precedes every registry initialization mutation', async () => {
+  const appRoot = await createAppRoot('readiness-flip-before-init');
+  const cssSource = await writeCssSource('readiness-flip-before-init.css');
+  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
+  const retirementPath = buildLegacyRetirementMarkerPath(registryHome);
+  const managedDirectory = buildManagedRootsDirectoryPath(registryHome);
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  const legacyContent = JSON.stringify({ version: 1, appRoots: [appRoot] }, null, 2).concat('\n');
+  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+  await fs.writeFile(legacyPath, legacyContent, 'utf8');
+
+  let releaseRegistryLock!: () => void;
+  let registryLockAcquired!: () => void;
+  const registryLockReady = new Promise<void>((resolve) => {
+    registryLockAcquired = resolve;
+  });
+  const releaseRegistry = new Promise<void>((resolve) => {
+    releaseRegistryLock = resolve;
+  });
+  const registryHolder = withIslandProcessLock(
+    buildIslandRegistryLockPath(registryHome),
+    async () => {
+      registryLockAcquired();
+      await releaseRegistry;
+    }
+  );
+  await registryLockReady;
+
+  const apply = applyIslandUiSupervised({
+    appRoot,
+    cssSourcePath: cssSource,
+    themeVersion: 'test',
+    registryHome,
+  });
+
+  try {
+    await waitForPath(buildIslandRootLockPath(appRoot));
+    await fs.rm(cssSource);
+  } finally {
+    releaseRegistryLock();
+  }
+
+  await expect(apply).resolves.toMatchObject({
+    kind: 'blocked',
+    changed: false,
+    registryChanged: false,
+  });
+  await registryHolder;
+  expect(await fs.readFile(legacyPath, 'utf8')).toBe(legacyContent);
+  await expect(fs.stat(managedDirectory)).rejects.toThrow();
+  await expect(fs.stat(retirementPath)).rejects.toThrow();
+  await expect(fs.stat(recordPath)).rejects.toThrow();
+});
+
+test('missing registered roots receive a typed prune recommendation before permission advice', async () => {
+  const appRoot = path.join(testRoot, 'missing-recommendation');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(
+    recordPath,
+    JSON.stringify({ version: 2, appRoot, desiredThemeId: null }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readIslandUiSupervisorStatuses({ registryHome })).resolves.toMatchObject({
+    statuses: [
+      {
+        appRoot,
+        classification: 'missing',
+        recommendedAction: 'prune-missing',
+        writeAccess: { writable: false },
+      },
+    ],
+  });
 });
 
 test('supervisor reports physical write access without deciding desired-state policy', async () => {
@@ -405,7 +551,7 @@ test('mixed permission and non-permission restore failures are blocked, not perm
         },
         {
           appRoot: corruptRoot,
-          code: 'blocked',
+          code: 'corrupt',
           reason: expect.stringContaining('journal is invalid JSON'),
         },
       ]),
@@ -432,7 +578,8 @@ test('missing-root registry cleanup failures are returned and classified', async
     await fs.chmod(registryDirectory, 0o555);
     await expect(restoreIslandUiSupervised({ registryHome })).resolves.toMatchObject({
       kind: 'permission-required',
-      changed: false,
+      changed: true,
+      registryChanged: true,
       failedAppRoots: [
         {
           appRoot,
@@ -498,4 +645,20 @@ function transactionTemporaryPath(
 
 function sha256Base64(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
+}
+
+async function waitForPath(filePath: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+
+  while (Date.now() < deadline) {
+    try {
+      await fs.stat(filePath);
+      return;
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  throw new Error(`Timed out waiting for '${filePath}'.`);
 }

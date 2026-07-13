@@ -32,8 +32,7 @@ export const QUARANTINED_ROOTS_DIRECTORY_NAME = 'quarantined-managed-app-roots';
 export const LEGACY_RETIREMENT_FILE_NAME = 'managed-app-roots.retired.json';
 export const LEGACY_MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
 export const ISLAND_ROOT_LOCK_NAME = '.tyrian-night.lock';
-export const ISLAND_REGISTRY_LOCK_NAME = 'managed-app-roots.lock';
-export const ISLAND_MIGRATION_LOCK_NAME = 'legacy-managed-app-roots.lock';
+export const ISLAND_REGISTRY_LOCK_NAME = 'tyrian-night-managed-app-roots';
 
 export const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 export const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
@@ -110,12 +109,9 @@ export function buildIslandRootLockPath(appRoot: string): string {
   return path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH, ISLAND_ROOT_LOCK_NAME);
 }
 
-export function buildIslandMigrationLockPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, ISLAND_MIGRATION_LOCK_NAME);
-}
-
 export function buildIslandRegistryLockPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, ISLAND_REGISTRY_LOCK_NAME);
+  const identity = crypto.createHash('sha256').update(registryHome, 'utf8').digest('hex');
+  return path.join(os.tmpdir(), `.${ISLAND_REGISTRY_LOCK_NAME}-${identity}.lock`);
 }
 
 export function isIslandManifestV3Shape(
