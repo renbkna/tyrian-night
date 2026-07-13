@@ -8,7 +8,8 @@ injects Tyrian palette and shape tokens into `/* TYRIAN_GENERATED_TOKENS */` for
 generated styles under `desktop/kde/union/css/styles/*/style.css`.
 
 Keep generated color values out of this template. Use `--tyrian-*` variables so the
-palette continues to come from `source/themes/`.
+palette values continue to come from `source/themes/`; role membership is owned by
+`source/themeRoleContract.json`.
 
 Source CSS may use local `@import` rules. Generated KDE output is flattened and
 must not import Breeze, `kcolorscheme`, external paths, or runtime CSS files.

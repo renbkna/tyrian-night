@@ -8,7 +8,17 @@ KDE uses these generated files for the Tyrian rice:
 - `union/css/styles/*/style.css` are generated Tyrian Union CSS application-style packages from `source/union-css/index.css`.
 
 Tyrian owns these package files directly. They do not require a local Monochrome
-theme package or any other third-party base theme at install time.
+theme package or any other third-party base theme at install time. Their colors
+are projected directly from neutral roles in `source/themes/`, not from a VS Code theme.
+Papirus supplies the icon policy: light themes use `Papirus` and dark themes use
+`Papirus-Dark`.
+
+On a clean checkout, materialize the generated desktop assets before following
+the manual copy commands:
+
+```sh
+bun run build:desktop-themes
+```
 
 Install the Night color scheme by copying or symlinking
 `desktop/kde/color-schemes/TyrianNight.colors` into `~/.local/share/color-schemes/`, then
@@ -26,16 +36,17 @@ Install the Night Plasma package by copying or symlinking
 plasma-apply-desktoptheme TyrianNight
 ```
 
-Install the look-and-feel package by copying or symlinking
+Install the look-and-feel package by copying (Plasma 6 does not load global
+themes through symlinks)
 `desktop/kde/plasma/look-and-feel/TyrianNight` into
 `~/.local/share/plasma/look-and-feel/`. The live installer and rice command do
 these package installs automatically.
 
 Union CSS packages are kept as Plasma 6.7 tech-preview assets only. The live
 installer leaves KDE on Breeze application style, removes the old persisted
-`QT_QUICK_CONTROLS_STYLE=org.kde.union` env file, and clears already-imported
-user-session Union overrides when `systemctl` and
-`dbus-update-activation-environment` are available. To test Union manually,
+`QT_QUICK_CONTROLS_STYLE=org.kde.union` env file, and does not mutate the live
+D-Bus/session environment. Restart the user session after migration, or clear
+an already-imported override manually before testing. To test Union manually,
 install your distro's `union` package, copy or symlink
 `/usr/share/union/css/defaults` into `~/.local/share/union/css/defaults`, copy
 or symlink the packaged Union base style directories

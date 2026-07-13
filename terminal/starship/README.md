@@ -2,6 +2,12 @@
 
 Starship controls the prompt. `terminal/starship/tyrian-night.toml` uses a Tyrian prompt layout and includes named palettes for Night, Nocturne, Night Old, Abyss, and Dawn.
 
+From a clean checkout, materialize the generated terminal assets first:
+
+```sh
+bun run build:terminal-themes
+```
+
 Use it directly:
 
 ```fish

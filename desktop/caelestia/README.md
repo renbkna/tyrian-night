@@ -1,24 +1,36 @@
 # Tyrian Night for Caelestia
 
 Caelestia uses Material-style color tokens plus terminal palette tokens. Tyrian
-generates those tokens from the same source theme JSON files used by the editor,
-Ghostty, Foot, fish, Starship, Zed, and KDE outputs.
+generates them directly from the neutral role contract in `source/themes/`.
 
 Generated outputs:
 
 - `schemes/tyrian/*/*.txt` is the Caelestia scheme registry layout.
 - `state/*.scheme.json` is a direct current-scheme state file.
-- `hypr/*.conf` is the Hyprland variable file Caelestia sources.
+- `hypr/*.lua` and `hypr/*.conf` are the current and legacy Hyprland variable modules.
 
-For a user-level live install, consume the Night files like this:
+On a clean checkout, materialize these generated assets first:
 
 ```sh
-install -Dm644 desktop/caelestia/state/tyrian-night.scheme.json "$HOME/.local/state/caelestia/scheme.json"
-install -Dm644 desktop/caelestia/hypr/tyrian-night.conf "$HOME/.config/hypr/scheme/current.conf"
+bun run build:desktop-themes
 ```
 
-That keeps Caelestia's shell/layout/widget logic intact while replacing its
-current colors with Tyrian-owned colors.
+For a user-level live install, use Tyrian's transactional publisher:
+
+```sh
+node scripts/installLiveTyrian.mjs --apply
+```
+
+The installer atomically replaces Caelestia's watched `scheme.json`, the current
+Hyprland scheme, and terminal sequences. It selects `current.lua` when the active
+Hyprland configuration is `hyprland.lua`, otherwise it publishes legacy
+`current.conf`. Even `--link` leaves those runtime targets as regular files;
+only stable assets are linked to the repository.
+
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` are resolved once by the
+installer. The defaults below are examples; non-default roots receive the same
+relative Caelestia paths. Roots outside the destination home are rejected because
+the durable recovery record cannot safely authorize an unrelated filesystem tree.
 
 For a packaged system install, copy the `schemes/tyrian/` tree into Caelestia's
 scheme data directory so `caelestia scheme set` can select Tyrian by name:
@@ -36,7 +48,8 @@ re-ships `data/schemes/` and removes the copied `tyrian/` tree, so
 tyrian` will fail with `FileNotFoundError` / `ValueError("Invalid scheme
 name")` until the copy is re-run. The live install (state file above) is
 unaffected and the shell keeps rendering Tyrian colors either way, since
-Quickshell reads colors directly from `~/.local/state/caelestia/scheme.json`.
+Quickshell reads colors directly from
+`${XDG_STATE_HOME:-$HOME/.local/state}/caelestia/scheme.json`.
 
 ## Wallpaper
 

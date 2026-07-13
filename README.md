@@ -2,13 +2,11 @@
 
 A deep, ultra-saturated visual system built on color science and exported across editors, terminals, desktop shell colors, and the installable rice profile. Main editor text and syntax colors are tuned for WCAG AA contrast while quieter UI chrome stays intentionally lower contrast.
 
-![Theme Preview](assets/preview.png)
-
 ## Features
 
-- **Single visual source** — `source/themes/` defines Tyrian Abyss, Night, Nocturne, Night Old, and Dawn for every consumer
+- **Single visual source** — validated neutral UI, syntax, effect, and ANSI roles define every consumer without borrowing another application's schema
 - **WCAG AA tuned across the family** — Abyss, Night, Nocturne, Night Old, and Dawn keep AAA main text and AA syntax contrast
-- **Perceptually distinct core palette** — advertised syntax roles are separated by CIEDE2000 ΔE > 12
+- **Perceptually audited core palette** — syntax separation is measured with OKLab distance plus pair-specific hue and lightness guards
 - **True dark backgrounds** — Abyss starts at `#030207` and Night at `#0C0C0C`, optimized for OLED and dim environments
 - **Full semantic highlighting** — declared natively, no configuration needed
 - **Universal language support** — works with any TextMate grammar
@@ -18,14 +16,15 @@ A deep, ultra-saturated visual system built on color science and exported across
 
 This repo defines the Tyrian Night visual identity and exports it everywhere I use a computer.
 
-- `source/themes/` owns theme identity and palette data; `source/themeCatalog.json` owns ordered membership and default roles.
-- `apps/vscode/` owns the VS Code extension runtime and Island UI assets.
+- `source/themeRoleContract.json` owns role membership; `source/themes/` owns each theme's neutral UI, syntax, effect, ANSI, and isolated VS Code values; `source/themeCatalog.json` owns ordered theme membership and defaults.
+- `scripts/projections/` owns consumer key and grammar mappings; generated consumers never become palette inputs.
+- `apps/vscode/` owns the VS Code extension runtime, generated VS Code themes, and Island UI assets.
 - `apps/zed/` owns the Zed theme extension.
 - `terminal/` owns Ghostty, Foot, fish, Starship, and Fastfetch outputs.
 - `desktop/` owns KDE Plasma and Caelestia outputs.
 - `rice/` owns the captured portable layout and wallpaper profile.
 - `scripts/` owns generators, live install, and rice install logic.
-- `assets/` owns shared preview/icon assets.
+- `assets/` owns the marketplace icon and the selected-mode preview source.
 
 ## VS Code Installation
 
@@ -132,7 +131,7 @@ Tyrian Night also ships repo-local companion configs for terminal tools:
 - `terminal/starship/` controls the prompt layout and prompt colors.
 - `terminal/fastfetch/` controls the startup system summary.
 
-These assets are generated from `source/themes/` so the Tyrian palette remains the source of truth.
+These assets are generated directly from neutral roles in `source/themes/`; terminal output does not read the generated VS Code themes.
 
 ## Desktop Companion Configs
 
@@ -142,7 +141,7 @@ Tyrian also owns desktop rice outputs:
 - `source/union-css/` contains the editable modular Union CSS rice source; the generator injects Tyrian palette tokens and flattens it.
 - `desktop/caelestia/` contains generated Caelestia scheme, state, and Hyprland color files.
 
-These files keep Tyrian as the palette and rice source of truth while KDE and Caelestia only provide the runtime that loads the installed files.
+These files are generated directly from neutral roles. Tyrian remains the palette and rice source of truth while KDE and Caelestia only provide the runtime that loads the installed files.
 
 For a local machine install, preview the live changes first:
 
@@ -160,7 +159,9 @@ The default install copies Tyrian-owned assets and generated configs into
 `~/.local/share/tyrian-night/`, then writes the live terminal, KDE, and Caelestia config targets to use that installed copy.
 The entrypoint prepares ignored generated runtime assets first, so it works from a clean checkout. The apply is filesystem-transactional and restores the exact prior files and directory absence on failure. It does not mutate the current systemd, D-Bus, or Plasma process state; restart affected applications or start a new desktop session after a style-only install. Backups are written under `~/.local/state/tyrian-night/backups/`. After a normal install, the
 cloned repo can be moved or deleted. Use `--link` only for local theme development when you want
-live app files to follow edits inside the repo:
+stable live assets to follow edits inside the repo. Watched runtime state such as Caelestia's
+`scheme.json`, Hyprland's current scheme, and terminal sequences remains regular files and is
+published with atomic replacement so readers never observe a partial generation:
 
 ```sh
 node scripts/installLiveTyrian.mjs --apply --link
