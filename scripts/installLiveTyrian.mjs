@@ -1,6 +1,7 @@
 // @ts-check
 
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,7 +43,7 @@ import {
 } from './terminalThemes.mjs';
 import { readThemeSources } from './themeSources.mjs';
 
-const repoRoot = process.cwd();
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const home = os.homedir();
 const LIVE_INSTALL_LOCK_RELATIVE_PATH = '.tyrian-night-live-install.lock';
 const LIVE_INSTALL_TRANSACTION_RELATIVE_PATH =
@@ -61,13 +62,19 @@ const RELEASED_THEME_SLUGS = [
   'tyrian-abyss',
   'tyrian-dawn',
 ];
+const LIVE_INSTALL_TARGETS = new Set(['plasma', 'caelestia']);
+const HYPRLAND_MODES = new Set(['lua', 'legacy']);
 /** @type {Map<string, { depth: number; owner: 'live' | 'rice' | 'layout'; targetPaths: string[] }>} */
 const activeHomeTransactions = new Map();
 
 /**
  * @typedef {'copy' | 'link'} InstallMode
+ * @typedef {'plasma' | 'caelestia'} LiveInstallTarget
+ * @typedef {'lua' | 'legacy'} HyprlandMode
+ * @typedef {(command: string, args: string[], options?: import('node:child_process').ExecFileSyncOptions) => Buffer | string} CommandRunner
  * @typedef {{ source: string; target: string }} CopyRoot
  * @typedef {{
+ *   target: LiveInstallTarget;
  *   mode: InstallMode;
  *   apply: boolean;
  *   repoRoot: string;
@@ -84,22 +91,23 @@ const activeHomeTransactions = new Map();
  *   terminalThemeSlugs: string[];
  *   livePaths: Record<string, string>;
  *   sourcePaths: Record<string, string>;
- *   legacyPaths: string[];
- *   ownedPaths: string[];
+ *   legacyPaths: LiveOwnedRegistry;
+ *   commonOwnedPaths: string[];
+ *   targetOwnedPaths: string[];
  *   ownershipManifestPath: string;
  *   migrationRetirementPath: string;
  *   touchedPaths: string[];
- *   hyprlandMode: 'lua' | 'legacy';
+ *   hyprlandMode?: HyprlandMode;
  * }} LiveInstallPlan
  * @typedef {{
- *   caelestiaSequences: string;
  *   fishStartupConfig: string;
  *   footConfig: string;
  *   ghosttyConfig: string;
- *   screenLockerConfig: string;
- *   kdeglobals: string;
- *   plasmarc: string;
- * }} PreparedLiveInstall
+ * }} PreparedCommonInstall
+ * @typedef {{ target: 'plasma'; screenLockerConfig: string; kdeglobals: string; plasmarc: string }} PreparedPlasmaInstall
+ * @typedef {{ target: 'caelestia'; caelestiaSequences: string }} PreparedCaelestiaInstall
+ * @typedef {{ common: PreparedCommonInstall; desktop: PreparedPlasmaInstall | PreparedCaelestiaInstall }} PreparedLiveInstall
+ * @typedef {{ common: string[]; plasma: string[]; caelestia: string[] }} LiveOwnedRegistry
  * @typedef {{ backupRoot: string; rollback: () => void }} LiveInstallReceipt
  */
 
@@ -112,14 +120,21 @@ const MATERIALIZED_INSTALL_DIRECTORIES = new Set([
  * Materialize the generated assets consumed by the install contract. This belongs
  * to the CLI boundary so a clean checkout never depends on ignored build output.
  *
- * @param {string} [root]
- * @param {{ home?: string; link?: boolean }} [options]
+ * @param {string} root
+ * @param {{ home?: string; link?: boolean; target: LiveInstallTarget; hyprlandMode?: HyprlandMode; runCommand?: CommandRunner }} options
  * @returns {void}
  */
-export function prepareLiveInstallRepository(root = repoRoot, options = {}) {
+export function prepareLiveInstallRepository(root, options) {
   const physicalRoot = resolvePathIdentity(root);
   const userHome = resolvePathIdentity(options.home ?? home);
-  const plan = buildLiveInstallPlan({ repoRoot: physicalRoot, home: userHome, link: options.link });
+  const plan = buildLiveInstallPlan({
+    repoRoot: physicalRoot,
+    home: userHome,
+    link: options.link,
+    target: options.target,
+    hyprlandMode: options.hyprlandMode,
+    runCommand: options.runCommand,
+  });
 
   assertRepositoryIndependentOfTargets(physicalRoot, buildPlanMutationTargets(plan));
   preflightGeneratedRepository(physicalRoot);
@@ -132,10 +147,15 @@ export function prepareLiveInstallRepository(root = repoRoot, options = {}) {
  * ancestor before either generator receives write authority.
  *
  * @param {string} root
- * @returns {void}
+ * @returns {Array<{ path: string; content: string }>}
  */
 function preflightGeneratedRepository(root) {
   assertRegularPathUnder(root, path.join(root, 'package.json'), 'package.json');
+  assertRegularPathUnder(
+    root,
+    path.join(root, 'apps/desktop/package.json'),
+    'apps/desktop/package.json'
+  );
   const catalogPath = path.join(root, 'source/themeCatalog.json');
   assertRegularPathUnder(root, catalogPath, 'source/themeCatalog.json');
   const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
@@ -159,6 +179,8 @@ function preflightGeneratedRepository(root) {
   for (const asset of assets) {
     assertGeneratedOutputAncestors(root, asset.path);
   }
+
+  return assets;
 }
 
 /**
@@ -250,12 +272,13 @@ function assertGeneratedOutputAncestors(root, relativeOutput) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; target: LiveInstallTarget; hyprlandMode?: HyprlandMode; runCommand?: CommandRunner }} options
  * @returns {LiveInstallPlan}
  */
-export function buildLiveInstallPlan(options = {}) {
+export function buildLiveInstallPlan(options) {
   const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
   const userHome = resolvePathIdentity(options.home ?? home);
+  const target = requireLiveInstallTarget(options.target);
   const xdgRoots = resolveXdgRoots(
     userHome,
     options.environment ?? (options.home === undefined ? process.env : {})
@@ -264,9 +287,25 @@ export function buildLiveInstallPlan(options = {}) {
   const installRoot = path.join(userHome, TYRIAN_INSTALL_HOME);
   const stagingRoot = options.stagingRoot ?? buildUnusedInstallStagingRoot(installRoot);
   const sourceRoot = mode === 'link' ? root : installRoot;
-  const hyprlandMode = selectHyprlandMode(xdgRoots.configRoot);
+  if (
+    target === 'caelestia' &&
+    options.hyprlandMode === undefined &&
+    options.runCommand === undefined &&
+    userHome !== resolvePathIdentity(home)
+  ) {
+    throw new Error(
+      'Cannot infer Hyprland mode for a different destination home; pass hyprlandMode "lua" or "legacy"'
+    );
+  }
+  const hyprlandMode =
+    target === 'caelestia'
+      ? selectHyprlandMode(options.hyprlandMode, options.runCommand ?? execFileSync)
+      : undefined;
+  if (target === 'plasma' && options.hyprlandMode !== undefined) {
+    throw new Error('Hyprland mode is only valid for the Caelestia target');
+  }
   const livePaths = buildLivePaths(xdgRoots, hyprlandMode);
-  const legacyPaths = buildLegacyPaths(userHome);
+  const legacyPaths = buildLegacyPaths(userHome, xdgRoots);
   const sourcePaths = buildSourcePaths(sourceRoot, hyprlandMode);
   const terminalThemeSlugs = readThemeSources(root).map((source) => source.slug);
   const materializedPaths = buildMaterializedInstallPaths(terminalThemeSlugs);
@@ -279,14 +318,21 @@ export function buildLiveInstallPlan(options = {}) {
       : [
           {
             source: path.join(root, FASTFETCH_IMAGE_ASSET_PATH),
-            target: path.join(xdgRoots.dataRoot, 'caelestia/fastfetch/tyrian-fetch.webp'),
+            target: path.join(installRoot, FASTFETCH_IMAGE_ASSET_PATH),
           },
           {
             source: path.join(root, 'assets/wallpaper-tyrian.png'),
             target: path.join(installRoot, 'assets/wallpaper-tyrian.png'),
           },
         ];
-  const liveOwnedPaths = buildLiveOwnedPaths(livePaths, terminalThemeSlugs);
+  const commonOwnedPaths = buildCommonOwnedPaths(
+    livePaths,
+    terminalThemeSlugs,
+    mode,
+    installRoot,
+    materializedRoots
+  );
+  const targetOwnedPaths = buildTargetOwnedPaths(target, livePaths, hyprlandMode);
   const ownershipManifestPath = path.join(userHome, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH);
   const migrationRetirementPath = path.join(
     userHome,
@@ -294,6 +340,7 @@ export function buildLiveInstallPlan(options = {}) {
   );
 
   return {
+    target,
     mode,
     apply: options.apply ?? false,
     repoRoot: root,
@@ -311,16 +358,11 @@ export function buildLiveInstallPlan(options = {}) {
     sourcePaths,
     terminalThemeSlugs,
     legacyPaths,
-    ownedPaths: [
-      ...new Set([
-        ...(mode === 'copy' ? [installRoot] : []),
-        ...materializedRoots.map(({ target }) => target),
-        ...liveOwnedPaths,
-      ]),
-    ],
+    commonOwnedPaths,
+    targetOwnedPaths,
     ownershipManifestPath,
     migrationRetirementPath,
-    touchedPaths: liveOwnedPaths,
+    touchedPaths: [...commonOwnedPaths, ...targetOwnedPaths],
     hyprlandMode,
   };
 }
@@ -364,10 +406,10 @@ function buildMaterializedInstallPaths(themeSlugs) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; target: LiveInstallTarget; hyprlandMode?: HyprlandMode; runCommand?: CommandRunner; testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} options
  * @returns {LiveInstallReceipt | undefined}
  */
-export function installLiveTyrian(options = {}) {
+export function installLiveTyrian(options) {
   const plan = buildLiveInstallPlan(options);
 
   assertRepositoryIndependentOfTargets(plan.repoRoot, buildPlanMutationTargets(plan));
@@ -377,14 +419,39 @@ export function installLiveTyrian(options = {}) {
     [plan.stagingRoot, plan.backupRoot],
     'Live install transaction container'
   );
+  if (!plan.apply) {
+    return installLiveTyrianOwned(plan, options);
+  }
+
   return withLiveInstallLock(plan.home, () => installLiveTyrianOwned(plan, options));
+}
+
+/**
+ * Recover an interrupted live filesystem transaction under the same lock as apply.
+ * Preview never calls this capability.
+ *
+ * @param {{ home?: string }} [options]
+ * @returns {'none' | 'committed' | 'rolledBack'}
+ */
+export function recoverLiveTyrian(options = {}) {
+  const userHome = resolvePathIdentity(options.home ?? home);
+
+  return withLiveInstallLock(
+    userHome,
+    () => {
+      const outcome = recoverHomeFilesystemTransaction(userHome);
+      console.log(`Tyrian live recovery completed (filesystem outcome: ${outcome}).`);
+      return outcome;
+    },
+    { recoverBeforeAction: false }
+  );
 }
 
 /**
  * @template T
  * @param {string} requestedHome
  * @param {() => T} action
- * @param {{ allowPlasmaRecovery?: boolean }} [options]
+ * @param {{ allowPlasmaRecovery?: boolean; recoverBeforeAction?: boolean }} [options]
  * @returns {T}
  */
 export function withLiveInstallLock(requestedHome, action, options = {}) {
@@ -407,7 +474,11 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
         );
       }
 
-      if (!activeHomeTransactions.has(userHome) && !options.allowPlasmaRecovery) {
+      if (
+        !activeHomeTransactions.has(userHome) &&
+        !options.allowPlasmaRecovery &&
+        options.recoverBeforeAction !== false
+      ) {
         recoverHomeFilesystemTransaction(userHome);
       }
 
@@ -625,19 +696,19 @@ function canonicalizeOwnedHomePaths(userHome, targetPaths) {
  * @returns {LiveInstallReceipt | undefined}
  */
 function installLiveTyrianOwned(plan, options) {
-  const prepared = prepareLiveInstall(plan);
-  const { desiredOwnedPaths, staleOwnedPaths, targetPaths } =
+  const prepared = plan.apply ? prepareLiveInstall(plan) : prepareLiveInstallPreview(plan);
+  const { desiredOwnedRegistry, staleOwnedPaths, targetPaths } =
     resolveLiveInstallTransactionScope(plan);
 
   if (!plan.apply) {
     materializeSourceRoot(plan);
     cleanupStaleOwnedPaths(plan, staleOwnedPaths);
-    installTerminalLayer(plan, prepared);
-    installDesktopLayer(plan, prepared);
-    publishLiveOwnedPaths(plan, desiredOwnedPaths);
+    installTerminalLayer(plan, prepared.common);
+    installTargetLayer(plan, prepared.desktop);
+    publishLiveOwnedPaths(plan, desiredOwnedRegistry);
     publishLiveMigrationRetirement(plan);
     console.log(
-      `Dry run complete. Re-run with --apply to ${plan.mode === 'link' ? 'link live config to the repo' : `copy Tyrian into ${plan.installRoot}`}.`
+      `Dry run complete for ${plan.target}. Re-run with --apply --target=${plan.target} to ${plan.mode === 'link' ? 'link live config to the repo' : `copy Tyrian into ${plan.installRoot}`}.`
     );
     return undefined;
   }
@@ -659,9 +730,9 @@ function installLiveTyrianOwned(plan, options) {
       }
 
       cleanupStaleOwnedPaths(plan, staleOwnedPaths);
-      installTerminalLayer(plan, prepared);
-      installDesktopLayer(plan, prepared);
-      publishLiveOwnedPaths(plan, desiredOwnedPaths);
+      installTerminalLayer(plan, prepared.common);
+      installTargetLayer(plan, prepared.desktop);
+      publishLiveOwnedPaths(plan, desiredOwnedRegistry);
       publishLiveMigrationRetirement(plan);
     }
   );
@@ -686,16 +757,32 @@ export function readLiveInstallTransactionTargets(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @returns {{ desiredOwnedPaths: string[]; staleOwnedPaths: string[]; targetPaths: string[] }}
+ * @returns {{ desiredOwnedRegistry: LiveOwnedRegistry; staleOwnedPaths: string[]; targetPaths: string[] }}
  */
 function resolveLiveInstallTransactionScope(plan) {
-  const previousOwnedPaths = readLiveOwnedPaths(plan);
-  const desiredOwnedPaths = [...new Set(plan.ownedPaths)];
-  const desiredOwnedPathSet = new Set(desiredOwnedPaths);
-  const staleOwnedPaths = previousOwnedPaths.filter(
+  const previousOwnedRegistry = readLiveOwnedRegistry(plan);
+  const desiredOwnedRegistry = {
+    common: [...new Set(plan.commonOwnedPaths)],
+    plasma:
+      plan.target === 'plasma' ? [...new Set(plan.targetOwnedPaths)] : previousOwnedRegistry.plasma,
+    caelestia:
+      plan.target === 'caelestia'
+        ? [...new Set(plan.targetOwnedPaths)]
+        : previousOwnedRegistry.caelestia,
+  };
+  assertLiveOwnedRegistry(plan, desiredOwnedRegistry);
+
+  const previousActivePaths = [
+    ...previousOwnedRegistry.common,
+    ...previousOwnedRegistry[plan.target],
+  ];
+  const desiredActivePaths = [...desiredOwnedRegistry.common, ...desiredOwnedRegistry[plan.target]];
+  const staleOwnedPaths = previousActivePaths.filter(
     (ownedPath) =>
-      !desiredOwnedPathSet.has(ownedPath) &&
-      !desiredOwnedPaths.some((desiredPath) => isSameOrDescendant(ownedPath, desiredPath))
+      !desiredActivePaths.some(
+        (desiredPath) =>
+          isSameOrDescendant(ownedPath, desiredPath) || isSameOrDescendant(desiredPath, ownedPath)
+      )
   );
 
   const targetPaths = [
@@ -717,7 +804,7 @@ function resolveLiveInstallTransactionScope(plan) {
   );
 
   return {
-    desiredOwnedPaths,
+    desiredOwnedRegistry,
     staleOwnedPaths,
     targetPaths,
   };
@@ -725,18 +812,24 @@ function resolveLiveInstallTransactionScope(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @returns {string[]}
+ * @returns {LiveOwnedRegistry}
  */
-function readLiveOwnedPaths(plan) {
+function readLiveOwnedRegistry(plan) {
   if (!exists(plan.ownershipManifestPath)) {
-    if (isLiveMigrationRetired(plan)) return [];
+    if (isLiveMigrationRetired(plan)) {
+      return { common: [], plasma: [], caelestia: [] };
+    }
 
-    return [
-      ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.ghosttyThemes, slug)),
-      ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.footThemes, `${slug}.ini`)),
-      path.join(plan.configRoot, 'ghostty/ghostty.css'),
-      ...plan.legacyPaths,
-    ];
+    return {
+      common: [
+        ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.ghosttyThemes, slug)),
+        ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.footThemes, `${slug}.ini`)),
+        path.join(plan.configRoot, 'ghostty/ghostty.css'),
+        ...plan.legacyPaths.common,
+      ].filter(exists),
+      plasma: plan.legacyPaths.plasma.filter(exists),
+      caelestia: plan.legacyPaths.caelestia.filter(exists),
+    };
   }
 
   const stats = fs.lstatSync(plan.ownershipManifestPath);
@@ -745,15 +838,53 @@ function readLiveOwnedPaths(plan) {
   }
 
   const candidate = JSON.parse(fs.readFileSync(plan.ownershipManifestPath, 'utf8'));
-  if (
-    candidate?.version !== 1 ||
-    candidate.owner !== 'Tyrian Night live install' ||
-    !Array.isArray(candidate.paths)
-  ) {
+  if (candidate?.owner !== 'Tyrian Night live install') {
     throw new Error('Live install ownership manifest is corrupt');
   }
 
-  const ownedPaths = /** @type {unknown[]} */ (candidate.paths).map((relativePath) => {
+  /** @type {LiveOwnedRegistry} */
+  let registry;
+  if (candidate.version === 1 && Array.isArray(candidate.paths)) {
+    registry = { common: [], plasma: [], caelestia: [] };
+    for (const ownedPath of decodeLiveOwnedPaths(plan, candidate.paths)) {
+      const profile = classifyLiveOwnedPath(plan, ownedPath);
+      if (profile === undefined) {
+        throw new Error(
+          `Live install ownership manifest contains an unowned path: ${path.relative(plan.home, ownedPath)}`
+        );
+      }
+      registry[profile].push(ownedPath);
+    }
+  } else if (
+    candidate.version === 2 &&
+    candidate.profiles !== null &&
+    typeof candidate.profiles === 'object' &&
+    Object.keys(candidate.profiles).toSorted().join(',') === 'caelestia,common,plasma' &&
+    Array.isArray(candidate.profiles.common) &&
+    Array.isArray(candidate.profiles.plasma) &&
+    Array.isArray(candidate.profiles.caelestia)
+  ) {
+    registry = {
+      common: decodeLiveOwnedPaths(plan, candidate.profiles.common, 'common'),
+      plasma: decodeLiveOwnedPaths(plan, candidate.profiles.plasma, 'plasma'),
+      caelestia: decodeLiveOwnedPaths(plan, candidate.profiles.caelestia, 'caelestia'),
+    };
+  } else {
+    throw new Error('Live install ownership manifest is corrupt');
+  }
+
+  assertLiveOwnedRegistry(plan, registry);
+  return registry;
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {unknown[]} relativePaths
+ * @param {keyof LiveOwnedRegistry} [expectedProfile]
+ * @returns {string[]}
+ */
+function decodeLiveOwnedPaths(plan, relativePaths, expectedProfile) {
+  return relativePaths.map((relativePath) => {
     if (
       typeof relativePath !== 'string' ||
       relativePath.length === 0 ||
@@ -763,21 +894,52 @@ function readLiveOwnedPaths(plan) {
     }
 
     const ownedPath = path.resolve(plan.home, relativePath);
-    if (
-      relativePath !== path.relative(plan.home, ownedPath) ||
-      !isAllowedLiveOwnedPath(plan, ownedPath)
-    ) {
+    const profile = classifyLiveOwnedPath(plan, ownedPath);
+    if (relativePath !== path.relative(plan.home, ownedPath) || profile === undefined) {
       throw new Error(`Live install ownership manifest contains an unowned path: ${relativePath}`);
+    }
+    if (expectedProfile !== undefined && profile !== expectedProfile) {
+      throw new Error(
+        `Live install ownership manifest assigns ${relativePath} to ${expectedProfile}, not ${profile}`
+      );
     }
 
     return ownedPath;
   });
+}
 
-  if (new Set(ownedPaths).size !== ownedPaths.length) {
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {LiveOwnedRegistry} registry
+ * @returns {void}
+ */
+function assertLiveOwnedRegistry(plan, registry) {
+  const entries = /** @type {Array<[keyof LiveOwnedRegistry, string]>} */ (
+    Object.entries(registry).flatMap(([profile, ownedPaths]) =>
+      ownedPaths.map((ownedPath) => [profile, ownedPath])
+    )
+  );
+  const uniquePaths = new Set(entries.map(([, ownedPath]) => ownedPath));
+  if (uniquePaths.size !== entries.length) {
     throw new Error('Live install ownership manifest contains duplicate paths');
   }
 
-  return admitOwnedPaths(plan.home, ownedPaths, 'Live install ownership manifest');
+  for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
+    const [leftProfile, leftPath] = entries[leftIndex];
+    if (classifyLiveOwnedPath(plan, leftPath) !== leftProfile) {
+      throw new Error(`Live install ownership registry contains an invalid ${leftProfile} path`);
+    }
+
+    for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
+      const [rightProfile, rightPath] = entries[rightIndex];
+      if (
+        leftProfile !== rightProfile &&
+        (isSameOrDescendant(leftPath, rightPath) || isSameOrDescendant(rightPath, leftPath))
+      ) {
+        throw new Error('Live install ownership profiles overlap');
+      }
+    }
+  }
 }
 
 /**
@@ -806,17 +968,36 @@ function isLiveMigrationRetired(plan) {
 /**
  * @param {LiveInstallPlan} plan
  * @param {string} ownedPath
- * @returns {boolean}
+ * @returns {keyof LiveOwnedRegistry | undefined}
  */
-function isAllowedLiveOwnedPath(plan, ownedPath) {
-  if (isSameOrDescendant(plan.installRoot, ownedPath)) return true;
-  if (plan.ownedPaths.includes(ownedPath)) return true;
-
+function classifyLiveOwnedPath(plan, ownedPath) {
+  if (isSameOrDescendant(plan.installRoot, ownedPath)) return 'common';
+  if (plan.commonOwnedPaths.includes(ownedPath)) return 'common';
+  if (plan.legacyPaths.common.includes(ownedPath)) return 'common';
+  if (plan.legacyPaths.plasma.includes(ownedPath)) return 'plasma';
+  if (plan.legacyPaths.caelestia.includes(ownedPath)) return 'caelestia';
+  if (ownedPath === path.join(plan.configRoot, 'ghostty/ghostty.css')) return 'common';
   const ghosttyRelative = path.relative(plan.livePaths.ghosttyThemes, ownedPath);
-  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(ghosttyRelative)) return true;
+  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(ghosttyRelative)) return 'common';
 
   const footRelative = path.relative(plan.livePaths.footThemes, ownedPath);
-  return /^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*\.ini$/u.test(footRelative);
+  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*\.ini$/u.test(footRelative)) return 'common';
+
+  if (buildTargetOwnedPaths('plasma', plan.livePaths, undefined).includes(ownedPath)) {
+    return 'plasma';
+  }
+  if (
+    [
+      plan.livePaths.caelestiaSchemeState,
+      plan.livePaths.caelestiaSequences,
+      plan.livePaths.hyprCurrentLua,
+      plan.livePaths.hyprCurrentLegacy,
+    ].includes(ownedPath)
+  ) {
+    return 'caelestia';
+  }
+
+  return undefined;
 }
 
 /**
@@ -834,18 +1015,22 @@ function cleanupStaleOwnedPaths(plan, staleOwnedPaths) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @param {string[]} ownedPaths
+ * @param {LiveOwnedRegistry} registry
  * @returns {void}
  */
-function publishLiveOwnedPaths(plan, ownedPaths) {
-  const relativePaths = ownedPaths
-    .map((ownedPath) => path.relative(plan.home, ownedPath))
-    .toSorted();
+function publishLiveOwnedPaths(plan, registry) {
+  assertLiveOwnedRegistry(plan, registry);
+  const relativeProfiles = Object.fromEntries(
+    Object.entries(registry).map(([profile, ownedPaths]) => [
+      profile,
+      ownedPaths.map((ownedPath) => path.relative(plan.home, ownedPath)).toSorted(),
+    ])
+  );
   const content = `${JSON.stringify(
     {
-      version: 1,
+      version: 2,
       owner: 'Tyrian Night live install',
-      paths: relativePaths,
+      profiles: relativeProfiles,
     },
     null,
     2
@@ -1137,23 +1322,69 @@ function resolveXdgRoots(userHome, environment) {
 }
 
 /**
- * Caelestia follows the active Hyprland configuration syntax. Lua wins when
- * both files exist because current Hyprland/Caelestia loads hyprland.lua.
- *
- * @param {string} configRoot
- * @returns {'lua' | 'legacy'}
+ * @param {unknown} target
+ * @returns {LiveInstallTarget}
  */
-function selectHyprlandMode(configRoot) {
-  return exists(path.join(configRoot, 'hypr/hyprland.lua')) ? 'lua' : 'legacy';
+function requireLiveInstallTarget(target) {
+  if (typeof target !== 'string' || !LIVE_INSTALL_TARGETS.has(target)) {
+    throw new Error('Tyrian desktop install requires target "plasma" or "caelestia"');
+  }
+
+  return /** @type {LiveInstallTarget} */ (target);
+}
+
+/**
+ * Caelestia follows the provider owned by the active Hyprland instance. An
+ * offline install has no truthful provider observation and must name its mode.
+ *
+ * @param {HyprlandMode | undefined} requestedMode
+ * @param {CommandRunner} runCommand
+ * @returns {HyprlandMode}
+ */
+function selectHyprlandMode(requestedMode, runCommand) {
+  if (requestedMode !== undefined) {
+    if (!HYPRLAND_MODES.has(requestedMode)) {
+      throw new Error('Hyprland mode must be "lua" or "legacy"');
+    }
+
+    return requestedMode;
+  }
+
+  let status;
+  try {
+    status = JSON.parse(
+      String(
+        runCommand('hyprctl', ['-j', 'status'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      )
+    );
+  } catch (cause) {
+    throw new Error(
+      'Cannot determine the active Hyprland config provider; run inside the target Hyprland session or pass --hyprland-mode=lua|legacy',
+      { cause }
+    );
+  }
+
+  const provider = status?.configProvider;
+  if (provider === 'lua') return 'lua';
+  if (provider === 'hyprlang') return 'legacy';
+
+  throw new Error(
+    `Unsupported Hyprland config provider ${JSON.stringify(provider)}; pass --hyprland-mode=lua|legacy only if that provider consumes the matching Caelestia projection`
+  );
 }
 
 /**
  * @param {{ configRoot: string; dataRoot: string; stateRoot: string }} xdgRoots
- * @param {'lua' | 'legacy'} hyprlandMode
+ * @param {HyprlandMode | undefined} hyprlandMode
  * @returns {Record<string, string>}
  */
 function buildLivePaths(xdgRoots, hyprlandMode) {
   const { configRoot, dataRoot, stateRoot } = xdgRoots;
+  const hyprCurrentLua = path.join(configRoot, 'hypr/scheme/current.lua');
+  const hyprCurrentLegacy = path.join(configRoot, 'hypr/scheme/current.conf');
 
   return {
     ghosttyConfig: path.join(configRoot, 'ghostty/config'),
@@ -1162,8 +1393,6 @@ function buildLivePaths(xdgRoots, hyprlandMode) {
     footThemes: path.join(configRoot, 'foot/themes'),
     fishStartupConfig: path.join(configRoot, 'fish/conf.d/tyrian-night.fish'),
     fishGreeting: path.join(configRoot, 'fish/functions/fish_greeting.fish'),
-    fastfetchConfig: path.join(dataRoot, 'caelestia/fastfetch/config.jsonc'),
-    starshipConfig: path.join(dataRoot, 'caelestia/starship.toml'),
     kdeglobals: path.join(configRoot, 'kdeglobals'),
     plasmarc: path.join(configRoot, 'plasmarc'),
     screenLockerConfig: path.join(configRoot, 'kscreenlockerrc'),
@@ -1172,38 +1401,49 @@ function buildLivePaths(xdgRoots, hyprlandMode) {
     lookAndFeelTyrian: path.join(dataRoot, 'plasma/look-and-feel/TyrianNight'),
     caelestiaSchemeState: path.join(stateRoot, 'caelestia/scheme.json'),
     caelestiaSequences: path.join(stateRoot, 'caelestia/sequences.txt'),
-    hyprCurrentScheme: path.join(
-      configRoot,
-      `hypr/scheme/current.${hyprlandMode === 'lua' ? 'lua' : 'conf'}`
-    ),
+    hyprCurrentLua,
+    hyprCurrentLegacy,
+    hyprCurrentScheme:
+      hyprlandMode === 'lua' ? hyprCurrentLua : hyprlandMode === 'legacy' ? hyprCurrentLegacy : '',
   };
 }
 
 /**
  * @param {string} userHome
- * @returns {string[]}
+ * @param {{ configRoot: string; dataRoot: string; stateRoot: string }} xdgRoots
+ * @returns {LiveOwnedRegistry}
  */
-function buildLegacyPaths(userHome) {
+function buildLegacyPaths(userHome, xdgRoots) {
   const fastfetchRoot = path.join(userHome, '.local/share/caelestia/fastfetch');
   const legacyFishRoot = path.join(userHome, '.local/share/caelestia/fish');
 
-  return [
-    path.join(legacyFishRoot, 'config.fish'),
-    path.join(legacyFishRoot, 'functions/fish_greeting.fish'),
-    path.join(fastfetchRoot, 'sewerslvt.gif'),
-    path.join(fastfetchRoot, 'tyrian-logo.png'),
-    path.join(fastfetchRoot, 'tyrian-fetch.webp'),
-    path.join(userHome, '.local/share/union/css/styles/TyrianNight'),
-    path.join(userHome, '.config/environment.d/tyrian-union.conf'),
-  ];
+  return {
+    common: [],
+    plasma: [
+      path.join(userHome, '.local/share/union/css/styles/TyrianNight'),
+      path.join(userHome, '.config/environment.d/tyrian-union.conf'),
+    ],
+    caelestia: [
+      path.join(legacyFishRoot, 'config.fish'),
+      path.join(legacyFishRoot, 'functions/fish_greeting.fish'),
+      path.join(fastfetchRoot, 'sewerslvt.gif'),
+      path.join(fastfetchRoot, 'tyrian-logo.png'),
+      path.join(fastfetchRoot, 'tyrian-fetch.webp'),
+      path.join(xdgRoots.dataRoot, 'caelestia/fastfetch/config.jsonc'),
+      path.join(xdgRoots.dataRoot, 'caelestia/starship.toml'),
+    ],
+  };
 }
 
 /**
  * @param {string} sourceRoot
- * @param {'lua' | 'legacy'} hyprlandMode
+ * @param {HyprlandMode | undefined} hyprlandMode
  * @returns {Record<string, string>}
  */
 function buildSourcePaths(sourceRoot, hyprlandMode) {
+  const hyprCurrentLua = path.join(sourceRoot, 'desktop/caelestia/hypr/tyrian-night.lua');
+  const hyprCurrentLegacy = path.join(sourceRoot, 'desktop/caelestia/hypr/tyrian-night.conf');
+
   return {
     fishGreeting: path.join(sourceRoot, 'terminal/fish/functions/fish_greeting.fish'),
     fastfetchConfig: path.join(sourceRoot, 'terminal/fastfetch/tyrian-night.jsonc'),
@@ -1214,34 +1454,59 @@ function buildSourcePaths(sourceRoot, hyprlandMode) {
     plasmaTyrianThemeRoot: path.join(sourceRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrianRoot: path.join(sourceRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
     caelestiaSchemeState: path.join(sourceRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
-    hyprCurrentScheme: path.join(
-      sourceRoot,
-      `desktop/caelestia/hypr/tyrian-night.${hyprlandMode === 'lua' ? 'lua' : 'conf'}`
-    ),
+    hyprCurrentLua,
+    hyprCurrentLegacy,
+    hyprCurrentScheme:
+      hyprlandMode === 'lua' ? hyprCurrentLua : hyprlandMode === 'legacy' ? hyprCurrentLegacy : '',
   };
 }
 
 /**
  * @param {Record<string, string>} livePaths
  * @param {string[]} themeSlugs
+ * @param {InstallMode} mode
+ * @param {string} installRoot
+ * @param {CopyRoot[]} materializedRoots
  * @returns {string[]}
  */
-function buildLiveOwnedPaths(livePaths, themeSlugs) {
+function buildCommonOwnedPaths(livePaths, themeSlugs, mode, installRoot, materializedRoots) {
   return [
-    livePaths.ghosttyConfig,
-    ...themeSlugs.map((slug) => path.join(livePaths.ghosttyThemes, slug)),
-    livePaths.footConfig,
-    ...themeSlugs.map((slug) => path.join(livePaths.footThemes, `${slug}.ini`)),
-    livePaths.fishStartupConfig,
-    livePaths.fishGreeting,
-    livePaths.fastfetchConfig,
-    livePaths.starshipConfig,
-    livePaths.kdeglobals,
-    livePaths.plasmarc,
-    livePaths.screenLockerConfig,
-    livePaths.kdeTyrianScheme,
-    livePaths.plasmaTyrianTheme,
-    livePaths.lookAndFeelTyrian,
+    ...new Set([
+      ...(mode === 'copy' ? [installRoot] : []),
+      ...materializedRoots.map(({ target }) => target),
+      livePaths.ghosttyConfig,
+      ...themeSlugs.map((slug) => path.join(livePaths.ghosttyThemes, slug)),
+      livePaths.footConfig,
+      ...themeSlugs.map((slug) => path.join(livePaths.footThemes, `${slug}.ini`)),
+      livePaths.fishStartupConfig,
+      livePaths.fishGreeting,
+    ]),
+  ];
+}
+
+/**
+ * @param {LiveInstallTarget} target
+ * @param {Record<string, string>} livePaths
+ * @param {HyprlandMode | undefined} hyprlandMode
+ * @returns {string[]}
+ */
+function buildTargetOwnedPaths(target, livePaths, hyprlandMode) {
+  if (target === 'plasma') {
+    return [
+      livePaths.kdeglobals,
+      livePaths.plasmarc,
+      livePaths.screenLockerConfig,
+      livePaths.kdeTyrianScheme,
+      livePaths.plasmaTyrianTheme,
+      livePaths.lookAndFeelTyrian,
+    ];
+  }
+
+  if (hyprlandMode === undefined || livePaths.hyprCurrentScheme === '') {
+    throw new Error('Caelestia install plan is missing its Hyprland projection mode');
+  }
+
+  return [
     livePaths.caelestiaSchemeState,
     livePaths.caelestiaSequences,
     livePaths.hyprCurrentScheme,
@@ -1269,6 +1534,15 @@ function buildPlanMutationTargets(plan) {
  * @returns {void}
  */
 function validateInstallSources(plan) {
+  return validateInstallSourcesWithGenerated(plan, new Set());
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {Set<string>} generatedPaths
+ * @returns {void}
+ */
+function validateInstallSourcesWithGenerated(plan, generatedPaths) {
   const relativeSourcePaths = [
     ...plan.materializedPaths,
     'source/themeCatalog.json',
@@ -1283,6 +1557,11 @@ function validateInstallSources(plan) {
     const relativePath = relativeSourcePaths[index];
 
     if (!exists(sourcePath)) {
+      const generated =
+        generatedPaths.has(relativePath) ||
+        [...generatedPaths].some((generatedPath) => generatedPath.startsWith(`${relativePath}/`));
+
+      if (generated) continue;
       throw new Error(`Missing Tyrian install source: ${installSourceLabel(plan, sourcePath)}`);
     }
 
@@ -1403,6 +1682,30 @@ function isSameOrDescendant(ancestor, candidate) {
 function prepareLiveInstall(plan) {
   validateInstallSources(plan);
 
+  const common = {
+    fishStartupConfig: buildFishStartupConfig({
+      repoRoot: plan.repoRoot,
+      tyrianRoot: plan.sourceRoot,
+    }),
+    footConfig: buildFootConfig({
+      repoRoot: plan.repoRoot,
+      themeDirectory: plan.livePaths.footThemes,
+    }),
+    ghosttyConfig: buildGhosttyConfig({ repoRoot: plan.repoRoot }),
+  };
+
+  if (plan.target === 'caelestia') {
+    return {
+      common,
+      desktop: {
+        target: 'caelestia',
+        caelestiaSequences: buildCaelestiaSequences(
+          path.join(plan.repoRoot, 'desktop/caelestia/state/tyrian-night.scheme.json')
+        ),
+      },
+    };
+  }
+
   const screenLockerContent = exists(plan.livePaths.screenLockerConfig)
     ? fs.readFileSync(plan.livePaths.screenLockerConfig, 'utf8')
     : '';
@@ -1414,36 +1717,60 @@ function prepareLiveInstall(plan) {
     : '';
 
   return {
-    caelestiaSequences: buildCaelestiaSequences(
-      path.join(plan.repoRoot, 'desktop/caelestia/state/tyrian-night.scheme.json')
-    ),
-    fishStartupConfig: buildFishStartupConfig({
-      repoRoot: plan.repoRoot,
-      tyrianRoot: plan.sourceRoot,
-    }),
-    footConfig: buildFootConfig({
-      repoRoot: plan.repoRoot,
-      themeDirectory: plan.livePaths.footThemes,
-    }),
-    ghosttyConfig: buildGhosttyConfig({ repoRoot: plan.repoRoot }),
-    kdeglobals: patchIniSection(
-      patchIniSection(kdeglobalsContent, 'KDE', {
-        LookAndFeelPackage: 'TyrianNight',
-        widgetStyle: 'Breeze',
-      }),
-      'General',
-      { ColorScheme: 'TyrianNight' }
-    ),
-    plasmarc: patchIniSection(plasmarcContent, 'Theme', { name: 'TyrianNight' }),
-    screenLockerConfig: patchIniSection(
-      screenLockerContent,
-      'Greeter][Wallpaper][org.kde.image][General',
-      {
-        Image: plan.sourcePaths.wallpaper,
-        PreviewImage: plan.sourcePaths.wallpaper,
-      }
-    ),
+    common,
+    desktop: {
+      target: 'plasma',
+      kdeglobals: patchIniSection(
+        patchIniSection(kdeglobalsContent, 'KDE', {
+          LookAndFeelPackage: 'TyrianNight',
+          widgetStyle: 'Breeze',
+        }),
+        'General',
+        { ColorScheme: 'TyrianNight' }
+      ),
+      plasmarc: patchIniSection(plasmarcContent, 'Theme', { name: 'TyrianNight' }),
+      screenLockerConfig: patchIniSection(
+        screenLockerContent,
+        'Greeter][Wallpaper][org.kde.image][General',
+        {
+          Image: plan.sourcePaths.wallpaper,
+          PreviewImage: plan.sourcePaths.wallpaper,
+        }
+      ),
+    },
   };
+}
+
+/**
+ * Validate generator inputs and planned source ownership without publishing
+ * generated assets or reading content that is only needed by apply.
+ *
+ * @param {LiveInstallPlan} plan
+ * @returns {PreparedLiveInstall}
+ */
+function prepareLiveInstallPreview(plan) {
+  const generatedPaths = new Set(
+    preflightGeneratedRepository(plan.repoRoot).map(({ path: generatedPath }) => generatedPath)
+  );
+  validateInstallSourcesWithGenerated(plan, generatedPaths);
+
+  const common = {
+    fishStartupConfig: '',
+    footConfig: '',
+    ghosttyConfig: '',
+  };
+
+  return plan.target === 'plasma'
+    ? {
+        common,
+        desktop: {
+          target: 'plasma',
+          screenLockerConfig: '',
+          kdeglobals: '',
+          plasmarc: '',
+        },
+      }
+    : { common, desktop: { target: 'caelestia', caelestiaSequences: '' } };
 }
 
 /**
@@ -1482,7 +1809,7 @@ function materializeSourceRoot(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @param {PreparedLiveInstall} prepared
+ * @param {PreparedCommonInstall} prepared
  * @returns {void}
  */
 function installTerminalLayer(plan, prepared) {
@@ -1504,22 +1831,46 @@ function installTerminalLayer(plan, prepared) {
 
   writeFile(plan, plan.livePaths.fishStartupConfig, prepared.fishStartupConfig);
   installManagedPath(plan, plan.sourcePaths.fishGreeting, plan.livePaths.fishGreeting);
-  installManagedPath(plan, plan.sourcePaths.fastfetchConfig, plan.livePaths.fastfetchConfig);
-  installManagedPath(plan, plan.sourcePaths.starshipConfig, plan.livePaths.starshipConfig);
 }
 
 /**
  * @param {LiveInstallPlan} plan
- * @param {PreparedLiveInstall} prepared
+ * @param {PreparedPlasmaInstall | PreparedCaelestiaInstall} prepared
  * @returns {void}
  */
-function installDesktopLayer(plan, prepared) {
+function installTargetLayer(plan, prepared) {
+  if (plan.target !== prepared.target) {
+    throw new Error('Prepared desktop target does not match the live install plan');
+  }
+
+  if (prepared.target === 'plasma') {
+    installPlasmaLayer(plan, prepared);
+    return;
+  }
+
+  installCaelestiaLayer(plan, prepared);
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {PreparedPlasmaInstall} prepared
+ * @returns {void}
+ */
+function installPlasmaLayer(plan, prepared) {
   installManagedPath(plan, plan.sourcePaths.kdeTyrianScheme, plan.livePaths.kdeTyrianScheme);
   installPlasmaDesktopTheme(plan);
   installLookAndFeelPackage(plan);
   writeFile(plan, plan.livePaths.kdeglobals, prepared.kdeglobals);
   writeFile(plan, plan.livePaths.plasmarc, prepared.plasmarc);
   writeFile(plan, plan.livePaths.screenLockerConfig, prepared.screenLockerConfig);
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {PreparedCaelestiaInstall} prepared
+ * @returns {void}
+ */
+function installCaelestiaLayer(plan, prepared) {
   publishRuntimeFile(
     plan,
     plan.sourcePaths.caelestiaSchemeState,
@@ -1717,13 +2068,28 @@ function escapeRegExp(value) {
  * @returns {void}
  */
 function main() {
-  const args = parseFlags(process.argv.slice(2), ['--apply', '--link']);
+  const args = parseLiveInstallArguments(process.argv.slice(2));
 
-  prepareLiveInstallRepository(repoRoot, { home, link: args.has('--link') });
-  installLiveTyrian({
-    apply: args.has('--apply'),
-    link: args.has('--link'),
-  });
+  if (args.recover) {
+    if (args.apply || args.link || args.target !== undefined || args.hyprlandMode !== undefined) {
+      throw new Error('Tyrian live recovery cannot be combined with install options.');
+    }
+
+    recoverLiveTyrian();
+    return;
+  }
+
+  const target = requireLiveInstallTarget(args.target);
+  const installOptions = {
+    apply: args.apply,
+    link: args.link,
+    target,
+    hyprlandMode: args.hyprlandMode,
+  };
+  if (args.apply) {
+    prepareLiveInstallRepository(repoRoot, { home, ...installOptions });
+  }
+  installLiveTyrian(installOptions);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
@@ -1732,19 +2098,37 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
 
 /**
  * @param {string[]} argv
- * @param {string[]} allowedFlags
- * @returns {Set<string>}
+ * @returns {{ apply: boolean; link: boolean; recover: boolean; target?: LiveInstallTarget; hyprlandMode?: HyprlandMode }}
  */
-function parseFlags(argv, allowedFlags) {
-  const allowed = new Set(allowedFlags);
-  const parsed = new Set();
+function parseLiveInstallArguments(argv) {
+  /** @type {{ apply: boolean; link: boolean; recover: boolean; target?: LiveInstallTarget; hyprlandMode?: HyprlandMode }} */
+  const parsed = { apply: false, link: false, recover: false };
+  const seen = new Set();
 
-  for (const flag of argv) {
-    if (!allowed.has(flag)) {
-      throw new Error(`Unknown Tyrian live install flag '${flag}'.`);
+  for (const argument of argv) {
+    const optionName = argument.split('=', 1)[0];
+    if (seen.has(optionName)) {
+      throw new Error(`Duplicate Tyrian live install option '${optionName}'.`);
     }
+    seen.add(optionName);
 
-    parsed.add(flag);
+    if (argument === '--apply') {
+      parsed.apply = true;
+    } else if (argument === '--link') {
+      parsed.link = true;
+    } else if (argument === '--recover') {
+      parsed.recover = true;
+    } else if (argument.startsWith('--target=')) {
+      parsed.target = requireLiveInstallTarget(argument.slice('--target='.length));
+    } else if (argument.startsWith('--hyprland-mode=')) {
+      const mode = argument.slice('--hyprland-mode='.length);
+      if (!HYPRLAND_MODES.has(mode)) {
+        throw new Error('Hyprland mode must be "lua" or "legacy"');
+      }
+      parsed.hyprlandMode = /** @type {HyprlandMode} */ (mode);
+    } else {
+      throw new Error(`Unknown Tyrian live install option '${argument}'.`);
+    }
   }
 
   return parsed;

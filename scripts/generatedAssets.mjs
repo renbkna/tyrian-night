@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * @typedef {{ path: string; content: string }} GeneratedAsset
+ * @typedef {{ path: string; content: string | Uint8Array }} GeneratedAsset
  * @typedef {{ directory: string; match?: RegExp }} GeneratedOwnership
  */
 
@@ -51,7 +51,7 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
       const absolutePath = path.join(repoRoot, filePath);
       assertNoGeneratedPathSymlink(repoRoot, filePath);
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-      fs.writeFileSync(absolutePath, content, 'utf8');
+      fs.writeFileSync(absolutePath, content);
     }
 
     return [];
@@ -64,7 +64,11 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
     assertNoGeneratedPathSymlink(repoRoot, filePath);
 
     try {
-      if (fs.readFileSync(absolutePath, 'utf8') !== content) {
+      const current = fs.readFileSync(absolutePath);
+      const expectedContent =
+        typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
+
+      if (!current.equals(expectedContent)) {
         stalePaths.push(filePath);
       }
     } catch (error) {

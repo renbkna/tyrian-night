@@ -9,6 +9,7 @@ import {
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
 import type { IslandShellStatus } from './islandShell.js';
+import { isIslandApplyPlatformSupported } from './islandPlatform.js';
 import type {
   IslandUiApplySupervisionResult as IslandApplyResult,
   IslandUiRestoreSupervisionResult as IslandRestoreResult,
@@ -21,7 +22,8 @@ const OPEN_DOCTOR_ACTION = 'Open Doctor';
 const TRUST_DOCS_ACTION = 'Why This Is Needed';
 const LATER_ACTION = 'Later';
 const PERMISSION_ACTIONS = [TRUST_DOCS_ACTION, OPEN_DOCTOR_ACTION, LATER_ACTION] as const;
-const ISLAND_UI_TRUST_DOCS_URL = 'https://github.com/renbkna/tyrian-night#island-ui';
+const ISLAND_UI_TRUST_DOCS_URL =
+  'https://github.com/renbkna/tyrian-night/blob/main/apps/vscode/README.md#island-ui';
 const LEGACY_ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
 const LEGACY_ISLAND_UI_CONFIG_KEY_PREFIX = 'tyrianNight.islandUi:';
 const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
@@ -116,6 +118,21 @@ function enqueueSync(task: () => Promise<void>): Promise<void> {
 }
 
 async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefined): Promise<void> {
+  if (!isIslandApplyPlatformSupported()) {
+    const status = await readCurrentIslandStatus();
+
+    if (status.registered || status.managed || status.active) {
+      await restoreCurrentIslandUi();
+    }
+
+    if (legacyMigration !== undefined) {
+      for (const key of legacyMigration.keys) {
+        await extContext.globalState.update(key, undefined);
+      }
+    }
+    return;
+  }
+
   if (legacyMigration !== undefined) {
     const desiredThemeId = getCssFileForTheme(legacyMigration.theme);
     const result = await runIslandCli<{
@@ -305,7 +322,7 @@ async function applyIslandCssFile(
     '--app-root',
     vscode.env.appRoot,
     '--css-source',
-    path.join(extContext.extensionPath, 'apps', 'vscode', 'island', cssFile),
+    path.join(extContext.extensionPath, 'island', cssFile),
     '--theme-version',
     String(extContext.extension.packageJSON.version ?? 'unknown'),
   ]);

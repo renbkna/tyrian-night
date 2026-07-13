@@ -18,38 +18,38 @@ bun run build:desktop-themes
 For a user-level live install, use Tyrian's transactional publisher:
 
 ```sh
-node scripts/installLiveTyrian.mjs --apply
+node scripts/installLiveTyrian.mjs --target=caelestia --apply
 ```
 
 The installer atomically replaces Caelestia's watched `scheme.json`, the current
-Hyprland scheme, and terminal sequences. It selects `current.lua` when the active
-Hyprland configuration is `hyprland.lua`, otherwise it publishes legacy
-`current.conf`. Even `--link` leaves those runtime targets as regular files;
-only stable assets are linked to the repository.
+Hyprland scheme, and terminal sequences. It reads `configProvider` from
+`hyprctl -j status`: `lua` publishes `current.lua`, while `hyprlang` publishes
+legacy `current.conf`. Existing config files do not decide the active provider.
+For an offline install, pass `--hyprland-mode=lua` or
+`--hyprland-mode=legacy`. Even `--link` leaves watched runtime targets as
+regular files; only stable assets are linked to the repository.
+
+These destinations and formats match the current upstream
+[Caelestia CLI publisher](https://github.com/caelestia-dots/cli/blob/main/src/caelestia/utils/theme.py),
+the shell's watched
+[`scheme.json`](https://github.com/caelestia-dots/shell/blob/main/services/Colours.qml),
+and Hyprland's reported
+[`configProvider`](https://github.com/hyprwm/Hyprland/blob/main/src/helpers/SystemInfo.cpp).
+
+This is a projection publisher for an existing Caelestia/Hyprland installation.
+It does not install either project or edit `hyprland.lua` / `hyprland.conf` to
+load Caelestia. The upstream integration must already consume the matching
+`hypr/scheme/current` module.
 
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` are resolved once by the
 installer. The defaults below are examples; non-default roots receive the same
 relative Caelestia paths. Roots outside the destination home are rejected because
 the durable recovery record cannot safely authorize an unrelated filesystem tree.
 
-For a packaged system install, copy the `schemes/tyrian/` tree into Caelestia's
-scheme data directory so `caelestia scheme set` can select Tyrian by name:
-
-```sh
-sudo cp -r desktop/caelestia/schemes/tyrian /usr/lib/python3.14/site-packages/caelestia/data/schemes/
-```
-
-Adjust the `site-packages` path to match the Python version shipped by your
-`caelestia-cli` package (`pacman -Ql caelestia-cli | grep 'data/schemes/$'`).
-
-Caveat: this directory is owned by the `caelestia-cli` package. A CLI upgrade
-re-ships `data/schemes/` and removes the copied `tyrian/` tree, so
-`caelestia scheme list --flavours` / `--modes` and `caelestia scheme set -n
-tyrian` will fail with `FileNotFoundError` / `ValueError("Invalid scheme
-name")` until the copy is re-run. The live install (state file above) is
-unaffected and the shell keeps rendering Tyrian colors either way, since
-Quickshell reads colors directly from
-`${XDG_STATE_HOME:-$HOME/.local/state}/caelestia/scheme.json`.
+The `schemes/tyrian/` tree is packaging input for distributions that choose to
+ship Tyrian in Caelestia's scheme registry. The user installer deliberately does
+not write into Python `site-packages` or another package-manager-owned directory.
+The live state publisher does not require that registry installation.
 
 ## Wallpaper
 

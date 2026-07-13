@@ -39,11 +39,12 @@ plasma-apply-desktoptheme TyrianNight
 Install the look-and-feel package by copying (Plasma 6 does not load global
 themes through symlinks)
 `desktop/kde/plasma/look-and-feel/TyrianNight` into
-`~/.local/share/plasma/look-and-feel/`. The live installer and rice command do
-these package installs automatically.
+`~/.local/share/plasma/look-and-feel/`. The explicit Plasma live profile
+(`bun run desktop:plasma:apply`) and the Plasma-only rice command do these
+package installs automatically.
 
 Union CSS packages are kept as Plasma 6.7 tech-preview assets only. The live
-installer leaves KDE on Breeze application style, removes the old persisted
+Plasma profile leaves KDE on Breeze application style, removes the old persisted
 `QT_QUICK_CONTROLS_STYLE=org.kde.union` env file, and does not mutate the live
 D-Bus/session environment. Restart the user session after migration, or clear
 an already-imported override manually before testing. To test Union manually,

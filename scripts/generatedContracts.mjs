@@ -9,6 +9,7 @@ import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const themeCatalogOutputPath = 'apps/vscode/src/generated/themeCatalog.ts';
+const vscodePackagePath = 'apps/vscode/package.json';
 const GENERATED_CONTRACT_OWNERSHIP = [{ directory: 'apps/vscode/src/generated' }];
 const PACKAGE_RUNTIME_PREFIX_FILES = ['LICENSE', 'README.md'];
 const PACKAGE_RUNTIME_SUFFIX_FILES = ['assets/icon.png', 'out/extension.js', 'out/islandCli.js'];
@@ -87,7 +88,6 @@ function formatThemeEntry(theme) {
     isDefault: ${theme.isDefault},
     vscodeUiTheme: ${formatTsString(theme.vscodeUiTheme)},
     islandCssFile: ${formatTsString(theme.islandCssFile)},
-    islandCssPath: ${formatTsString(theme.islandCssPath)},
     paletteName: ${formatTsString(theme.paletteName)},
     appearance: ${formatTsString(theme.appearance)},
   }`;
@@ -108,27 +108,27 @@ function formatTsString(value) {
  * @returns {string[]}
  */
 function syncPackageThemeContracts(root, check, sourceThemes) {
-  const packagePath = path.join(root, 'package.json');
+  const packagePath = path.join(root, vscodePackagePath);
   const packageJson =
     /** @type {{ contributes?: { themes?: VscodeThemeContribution[] }; files?: string[] }} */ (
-      readJson(root, 'package.json')
+      readJson(root, vscodePackagePath)
     );
   const expectedContributions = vscodeThemeContributions(sourceThemes);
   const expectedFiles = [
     ...PACKAGE_RUNTIME_PREFIX_FILES,
-    ...sourceThemes.map(({ islandCssPath }) => islandCssPath),
+    ...sourceThemes.map(({ islandCssFile }) => `island/${islandCssFile}`),
     ...PACKAGE_RUNTIME_SUFFIX_FILES,
-    ...sourceThemes.map(({ vscodeThemePath }) => vscodeThemePath),
+    ...sourceThemes.map(({ slug }) => `themes/${slug}.json`),
   ];
 
   if (check) {
     return [
       ...(JSON.stringify(packageJson.contributes?.themes) === JSON.stringify(expectedContributions)
         ? []
-        : ['package.json contributes.themes']),
+        : [`${vscodePackagePath} contributes.themes`]),
       ...(JSON.stringify(packageJson.files) === JSON.stringify(expectedFiles)
         ? []
-        : ['package.json files']),
+        : [`${vscodePackagePath} files`]),
     ];
   }
 

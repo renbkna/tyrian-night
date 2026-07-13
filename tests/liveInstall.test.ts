@@ -9,6 +9,7 @@ import {
   patchIniSection,
   prepareLiveInstallRepository,
   recoverHomeFilesystemTransaction,
+  recoverLiveTyrian,
   withHomeFilesystemTransaction,
 } from '../scripts/installLiveTyrian.mjs';
 import { exists, syncPathsDurably, withTokenFileLock } from '../scripts/installOps.mjs';
@@ -36,10 +37,10 @@ test('live install preparation materializes clean-checkout runtime assets', () =
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-prepare-'));
 
   try {
-    fs.copyFileSync('package.json', path.join(root, 'package.json'));
+    copyWorkspaceManifests(root);
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
 
-    prepareLiveInstallRepository(root);
+    prepareLiveInstallRepository(root, { target: 'plasma' });
 
     expect(fs.existsSync(path.join(root, 'terminal/foot/themes/tyrian-nocturne.ini'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'terminal/fastfetch/tyrian-night.jsonc'))).toBe(true);
@@ -56,6 +57,28 @@ test('live install preparation materializes clean-checkout runtime assets', () =
   }
 });
 
+test('live preview is observational on a clean checkout and destination home', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-preview-repo-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-preview-home-'));
+
+  try {
+    copyWorkspaceManifests(root);
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.cpSync('assets', path.join(root, 'assets'), { recursive: true });
+    const repositoryBefore = snapshotTree(root);
+    const homeBefore = snapshotTree(home);
+
+    installLiveTyrian({ repoRoot: root, home, apply: false, target: 'plasma' });
+
+    expect(snapshotTree(root)).toEqual(repositoryBefore);
+    expect(snapshotTree(home)).toEqual(homeBefore);
+    expect(fs.existsSync(path.join(home, '.tyrian-night-live-install.lock'))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('live preparation rejects an install-root alias before changing generated outputs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-prepare-alias-repo-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-prepare-alias-home-'));
@@ -68,7 +91,7 @@ test('live preparation rejects an install-root alias before changing generated o
     fs.mkdirSync(path.dirname(installRoot), { recursive: true });
     fs.symlinkSync(root, installRoot);
 
-    expect(() => prepareLiveInstallRepository(root, { home })).toThrow(
+    expect(() => prepareLiveInstallRepository(root, { home, target: 'plasma' })).toThrow(
       'repository and install root must not overlap'
     );
     expect(fs.readFileSync(outputPath, 'utf8')).toBe(originalOutput);
@@ -91,7 +114,7 @@ test('live preparation validates every output ancestor before the first generato
     fs.rmSync(invalidAncestor, { recursive: true });
     fs.writeFileSync(invalidAncestor, 'not a directory\n');
 
-    expect(() => prepareLiveInstallRepository(root, { home })).toThrow(
+    expect(() => prepareLiveInstallRepository(root, { home, target: 'plasma' })).toThrow(
       'Generator output has an invalid existing path'
     );
     expect(fs.readFileSync(earlierOutput, 'utf8')).toBe(originalOutput);
@@ -106,10 +129,12 @@ test('live installer defaults to a repo-independent materialized install root', 
   const plan = buildLiveInstallPlan({
     repoRoot,
     home: FIXTURE_HOME,
+    target: 'plasma',
   });
   const nextPlan = buildLiveInstallPlan({
     repoRoot,
     home: FIXTURE_HOME,
+    target: 'plasma',
   });
   const installRoot = `${FIXTURE_HOME}/${TYRIAN_INSTALL_HOME}`;
 
@@ -149,15 +174,22 @@ test('live installer defaults to a repo-independent materialized install root', 
     `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`
   );
   expect(plan.touchedPaths).not.toContain(`${FIXTURE_HOME}/.local/share/union/css/defaults`);
-  expect(plan.legacyPaths).toEqual([
-    `${FIXTURE_HOME}/.local/share/caelestia/fish/config.fish`,
-    `${FIXTURE_HOME}/.local/share/caelestia/fish/functions/fish_greeting.fish`,
-    `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/sewerslvt.gif`,
-    `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-logo.png`,
-    `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-fetch.webp`,
-    `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`,
-    `${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`,
-  ]);
+  expect(plan.legacyPaths).toEqual({
+    common: [],
+    plasma: [
+      `${FIXTURE_HOME}/.local/share/union/css/styles/TyrianNight`,
+      `${FIXTURE_HOME}/.config/environment.d/tyrian-union.conf`,
+    ],
+    caelestia: [
+      `${FIXTURE_HOME}/.local/share/caelestia/fish/config.fish`,
+      `${FIXTURE_HOME}/.local/share/caelestia/fish/functions/fish_greeting.fish`,
+      `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/sewerslvt.gif`,
+      `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-logo.png`,
+      `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-fetch.webp`,
+      `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/config.jsonc`,
+      `${FIXTURE_HOME}/.local/share/caelestia/starship.toml`,
+    ],
+  });
   expect(JSON.stringify(plan.sourcePaths)).not.toContain(repoRoot);
   expect(plan.backupRoot).not.toContain(repoRoot);
   expect(nextPlan.backupRoot).not.toBe(plan.backupRoot);
@@ -202,6 +234,7 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
       repoRoot: process.cwd(),
       home,
       apply: true,
+      target: 'plasma',
     });
 
     const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
@@ -224,8 +257,8 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
       'keep\n'
     );
     expect(fs.existsSync(unionEnvironment)).toBe(false);
-    expect(fs.existsSync(legacyFishConfig)).toBe(false);
-    expect(fs.existsSync(legacyFishGreeting)).toBe(false);
+    expect(fs.readFileSync(legacyFishConfig, 'utf8')).toBe('echo stale legacy\n');
+    expect(fs.readFileSync(legacyFishGreeting, 'utf8')).toContain('echo stale legacy');
     expect(fs.readFileSync(fishConfig, 'utf8')).toBe(
       buildFishStartupConfig({ repoRoot: process.cwd(), tyrianRoot: installRoot })
     );
@@ -263,20 +296,27 @@ test('live installer materializes full Tyrian rice targets without a Monochrome 
   }
 });
 
-test('live installer selects Caelestia Lua mode and honors the resolved XDG roots', () => {
+test('Caelestia target follows the active Hyprland provider and honors XDG roots', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-xdg-home-'));
   const environment = {
     XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
     XDG_DATA_HOME: path.join(home, 'xdg/data'),
     XDG_STATE_HOME: path.join(home, 'xdg/state'),
   };
-  const hyprlandConfig = path.join(environment.XDG_CONFIG_HOME, 'hypr/hyprland.lua');
+  const staleLegacyConfig = path.join(environment.XDG_CONFIG_HOME, 'hypr/hyprland.conf');
+  const runCommand = () => JSON.stringify({ configProvider: 'lua' });
 
   try {
-    fs.mkdirSync(path.dirname(hyprlandConfig), { recursive: true });
-    fs.writeFileSync(hyprlandConfig, 'require("caelestia")\n');
+    fs.mkdirSync(path.dirname(staleLegacyConfig), { recursive: true });
+    fs.writeFileSync(staleLegacyConfig, 'source = ./scheme/current.conf\n');
 
-    const plan = buildLiveInstallPlan({ repoRoot: process.cwd(), home, environment });
+    const plan = buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home,
+      environment,
+      target: 'caelestia',
+      runCommand,
+    });
     expect(plan.hyprlandMode).toBe('lua');
     expect(plan.livePaths.hyprCurrentScheme).toBe(
       path.join(environment.XDG_CONFIG_HOME, 'hypr/scheme/current.lua')
@@ -285,7 +325,14 @@ test('live installer selects Caelestia Lua mode and honors the resolved XDG root
       path.join(environment.XDG_STATE_HOME, 'caelestia/scheme.json')
     );
 
-    installLiveTyrian({ repoRoot: process.cwd(), home, environment, apply: true });
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      environment,
+      apply: true,
+      target: 'caelestia',
+      runCommand,
+    });
 
     expect(fs.readFileSync(plan.livePaths.hyprCurrentScheme, 'utf8')).toContain('return {');
     expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'hypr/scheme/current.conf'))).toBe(
@@ -294,7 +341,7 @@ test('live installer selects Caelestia Lua mode and honors the resolved XDG root
     expect(fs.existsSync(plan.livePaths.caelestiaSchemeState)).toBe(true);
     expect(
       fs.existsSync(path.join(environment.XDG_DATA_HOME, 'caelestia/fastfetch/config.jsonc'))
-    ).toBe(true);
+    ).toBe(false);
     expect(fs.existsSync(path.join(home, '.config/hypr/scheme/current.lua'))).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -307,6 +354,7 @@ test('live installer link mode is explicit and repo-dependent', () => {
     repoRoot,
     home: FIXTURE_HOME,
     link: true,
+    target: 'plasma',
   });
 
   expect(plan.mode).toBe('link');
@@ -318,9 +366,225 @@ test('live installer link mode is explicit and repo-dependent', () => {
   expect(JSON.stringify(plan.sourcePaths)).not.toContain('union');
   expect(plan.materializedRoots).toContainEqual({
     source: path.join(repoRoot, 'assets/tyrian-fetch.webp'),
-    target: `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/tyrian-fetch.webp`,
+    target: `${FIXTURE_HOME}/${TYRIAN_INSTALL_HOME}/assets/tyrian-fetch.webp`,
   });
   expect(plan.sourcePaths.wallpaper).toBe(path.join(repoRoot, 'assets/wallpaper-tyrian.png'));
+});
+
+test('live plans require one desktop target and isolate its owned projections', () => {
+  expect(() =>
+    buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home: FIXTURE_HOME,
+      target: undefined as never,
+    })
+  ).toThrow('requires target "plasma" or "caelestia"');
+
+  let providerProbeRan = false;
+  const plasma = buildLiveInstallPlan({
+    repoRoot: process.cwd(),
+    home: FIXTURE_HOME,
+    target: 'plasma',
+    runCommand: () => {
+      providerProbeRan = true;
+      throw new Error('Plasma must not inspect Hyprland');
+    },
+  });
+  const caelestia = buildLiveInstallPlan({
+    repoRoot: process.cwd(),
+    home: FIXTURE_HOME,
+    target: 'caelestia',
+    hyprlandMode: 'legacy',
+  });
+
+  expect(providerProbeRan).toBe(false);
+  expect(plasma.hyprlandMode).toBeUndefined();
+  expect(plasma.targetOwnedPaths).toContain(`${FIXTURE_HOME}/.config/kdeglobals`);
+  expect(plasma.targetOwnedPaths).not.toContain(
+    `${FIXTURE_HOME}/.local/state/caelestia/scheme.json`
+  );
+  expect(plasma.commonOwnedPaths).not.toContain(
+    `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/config.jsonc`
+  );
+  expect(caelestia.targetOwnedPaths).toContain(`${FIXTURE_HOME}/.config/hypr/scheme/current.conf`);
+  expect(caelestia.targetOwnedPaths).not.toContain(
+    `${FIXTURE_HOME}/.local/share/caelestia/fastfetch/config.jsonc`
+  );
+  expect(caelestia.targetOwnedPaths).not.toContain(`${FIXTURE_HOME}/.config/kdeglobals`);
+  expect(() =>
+    buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home: FIXTURE_HOME,
+      target: 'plasma',
+      hyprlandMode: 'lua',
+    })
+  ).toThrow('Hyprland mode is only valid for the Caelestia target');
+});
+
+test('Hyprland provider detection is authoritative and explicit mode supports offline installs', () => {
+  let observedCommand: { command: string; args: string[] } | undefined;
+  const legacy = buildLiveInstallPlan({
+    repoRoot: process.cwd(),
+    home: FIXTURE_HOME,
+    target: 'caelestia',
+    runCommand: (command, args) => {
+      observedCommand = { command, args };
+      return JSON.stringify({ configProvider: 'hyprlang' });
+    },
+  });
+
+  expect(observedCommand).toEqual({ command: 'hyprctl', args: ['-j', 'status'] });
+  expect(legacy.hyprlandMode).toBe('legacy');
+  expect(legacy.livePaths.hyprCurrentScheme).toBe(
+    `${FIXTURE_HOME}/.config/hypr/scheme/current.conf`
+  );
+  expect(() =>
+    buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home: FIXTURE_HOME,
+      target: 'caelestia',
+      runCommand: () => JSON.stringify({ configProvider: 'future-provider' }),
+    })
+  ).toThrow('Unsupported Hyprland config provider');
+  expect(() =>
+    buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home: FIXTURE_HOME,
+      target: 'caelestia',
+      runCommand: () => {
+        throw new Error('offline');
+      },
+    })
+  ).toThrow('pass --hyprland-mode=lua|legacy');
+  expect(() =>
+    buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home: FIXTURE_HOME,
+      target: 'caelestia',
+    })
+  ).toThrow('Cannot infer Hyprland mode for a different destination home');
+
+  const offline = buildLiveInstallPlan({
+    repoRoot: process.cwd(),
+    home: FIXTURE_HOME,
+    target: 'caelestia',
+    hyprlandMode: 'lua',
+    runCommand: () => {
+      throw new Error('explicit mode must not probe Hyprland');
+    },
+  });
+  expect(offline.hyprlandMode).toBe('lua');
+});
+
+test('desktop applies preserve the other target and Caelestia mode switches remove stale output', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-target-isolation-'));
+  const caelestiaState = path.join(home, '.local/state/caelestia/scheme.json');
+  const obsoleteCaelestiaFastfetch = path.join(
+    home,
+    '.local/share/caelestia/fastfetch/config.jsonc'
+  );
+  const kdeglobals = path.join(home, '.config/kdeglobals');
+
+  try {
+    fs.mkdirSync(path.dirname(caelestiaState), { recursive: true });
+    fs.mkdirSync(path.dirname(obsoleteCaelestiaFastfetch), { recursive: true });
+    fs.writeFileSync(caelestiaState, 'user-owned Caelestia state\n');
+    fs.writeFileSync(obsoleteCaelestiaFastfetch, 'obsolete Tyrian projection\n');
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      apply: true,
+      target: 'plasma',
+    });
+    expect(fs.readFileSync(caelestiaState, 'utf8')).toBe('user-owned Caelestia state\n');
+    expect(fs.readFileSync(obsoleteCaelestiaFastfetch, 'utf8')).toBe(
+      'obsolete Tyrian projection\n'
+    );
+    const plasmaGeneration = fs.readFileSync(kdeglobals, 'utf8');
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      apply: true,
+      target: 'caelestia',
+      hyprlandMode: 'legacy',
+    });
+    const legacyProjection = path.join(home, '.config/hypr/scheme/current.conf');
+    expect(fs.existsSync(legacyProjection)).toBe(true);
+    expect(fs.existsSync(obsoleteCaelestiaFastfetch)).toBe(false);
+    expect(fs.readFileSync(kdeglobals, 'utf8')).toBe(plasmaGeneration);
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      apply: true,
+      target: 'caelestia',
+      hyprlandMode: 'lua',
+    });
+    expect(fs.existsSync(legacyProjection)).toBe(false);
+    expect(fs.existsSync(path.join(home, '.config/hypr/scheme/current.lua'))).toBe(true);
+    expect(fs.readFileSync(kdeglobals, 'utf8')).toBe(plasmaGeneration);
+
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(home, '.local/state/tyrian-night/live-owned-paths.json'), 'utf8')
+    );
+    expect(manifest.version).toBe(2);
+    expect(manifest.owner).toBe('Tyrian Night live install');
+    expect(Object.keys(manifest.profiles).toSorted()).toEqual(['caelestia', 'common', 'plasma']);
+    expect(Array.isArray(manifest.profiles.common)).toBe(true);
+    expect(manifest.profiles.plasma).toContain('.config/kdeglobals');
+    expect(manifest.profiles.caelestia).toContain('.config/hypr/scheme/current.lua');
+    expect(manifest.profiles.caelestia).not.toContain('.config/hypr/scheme/current.conf');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('v1 mixed ownership migrates without deleting the unselected desktop profile', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-v1-profile-migration-'));
+  const ownershipManifest = path.join(home, '.local/state/tyrian-night/live-owned-paths.json');
+  const caelestiaState = path.join(home, '.local/state/caelestia/scheme.json');
+  const legacyProjection = path.join(home, '.config/hypr/scheme/current.conf');
+
+  try {
+    for (const filePath of [caelestiaState, legacyProjection]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `preserve:${path.basename(filePath)}\n`);
+    }
+    fs.mkdirSync(path.dirname(ownershipManifest), { recursive: true });
+    fs.writeFileSync(
+      ownershipManifest,
+      `${JSON.stringify({
+        version: 1,
+        owner: 'Tyrian Night live install',
+        paths: [
+          '.config/kdeglobals',
+          '.local/state/caelestia/scheme.json',
+          '.config/hypr/scheme/current.conf',
+        ],
+      })}\n`
+    );
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      apply: true,
+      target: 'plasma',
+    });
+
+    expect(fs.readFileSync(caelestiaState, 'utf8')).toBe('preserve:scheme.json\n');
+    expect(fs.readFileSync(legacyProjection, 'utf8')).toBe('preserve:current.conf\n');
+    const migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
+    expect(migrated.version).toBe(2);
+    expect(migrated.profiles.caelestia).toEqual([
+      '.config/hypr/scheme/current.conf',
+      '.local/state/caelestia/scheme.json',
+    ]);
+    expect(migrated.profiles.plasma).toContain('.config/kdeglobals');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('live installer validates repo sources before touching live config', () => {
@@ -340,6 +604,7 @@ test('live installer validates repo sources before touching live config', () => 
         repoRoot,
         home,
         apply: true,
+        target: 'plasma',
       })
     ).toThrow('Missing Tyrian install source: assets/tyrian-fetch.webp');
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('font-size = 99\n');
@@ -374,11 +639,12 @@ test('live installer renders from its injected repo and materializes only declar
     fs.writeFileSync(themePath, `${JSON.stringify(theme, null, 2)}\n`);
     fs.writeFileSync(path.join(repoRoot, 'terminal/ghostty/themes/tyrian-stale'), 'stale\n');
 
-    prepareLiveInstallRepository(repoRoot, { home });
+    prepareLiveInstallRepository(repoRoot, { home, target: 'plasma' });
     installLiveTyrian({
       repoRoot,
       home,
       apply: true,
+      target: 'plasma',
     });
 
     const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
@@ -422,6 +688,8 @@ test('live installer validates generated content before backup or mutation', () 
         repoRoot,
         home,
         apply: true,
+        target: 'caelestia',
+        hyprlandMode: 'lua',
       })
     ).toThrow();
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('font-size = 99\n');
@@ -452,6 +720,7 @@ test('live installer rejects wrong source types before replacing the managed run
         repoRoot,
         home,
         apply: true,
+        target: 'plasma',
       })
     ).toThrow('terminal/fish/themes/tyrian-nocturne.fish must be a file');
     expect(fs.readFileSync(markerPath, 'utf8')).toBe('existing runtime\n');
@@ -482,6 +751,8 @@ test('live installer uses a fresh backup root for repeated apply operations', ()
       repoRoot: process.cwd(),
       home,
       apply: true,
+      target: 'caelestia' as const,
+      hyprlandMode: 'legacy' as const,
     };
 
     expect(() => installLiveTyrian(options)).not.toThrow();
@@ -534,6 +805,7 @@ test('live installer rejects repository and install-root aliases before mutation
         repoRoot: sourceRoot,
         home,
         apply: true,
+        target: 'plasma',
       })
     ).toThrow('repository and install root must not overlap');
     expect(fs.realpathSync(installRoot)).toBe(fs.realpathSync(sourceRoot));
@@ -553,9 +825,9 @@ test('live installer rejects a repository inside any live destination before mut
     const packagePath = path.join(repositoryRoot, 'package.json');
     const originalPackage = fs.readFileSync(packagePath, 'utf8');
 
-    expect(() => installLiveTyrian({ repoRoot: repositoryRoot, home, apply: false })).toThrow(
-      'repository and install root must not overlap'
-    );
+    expect(() =>
+      installLiveTyrian({ repoRoot: repositoryRoot, home, apply: false, target: 'plasma' })
+    ).toThrow('repository and install root must not overlap');
     expect(fs.readFileSync(packagePath, 'utf8')).toBe(originalPackage);
     expect(fs.existsSync(path.join(repositoryRoot, 'tyrian-night'))).toBe(false);
   } finally {
@@ -579,6 +851,7 @@ test('live installer rejects a staging-container symlink before descendant write
         home,
         apply: true,
         stagingRoot,
+        target: 'plasma',
       })
     ).toThrow('must be an absent path or ordinary directory');
     expect(fs.readFileSync(path.join(externalRoot, 'sentinel'), 'utf8')).toBe('unchanged\n');
@@ -595,7 +868,7 @@ test('live ownership manifest removes catalog outputs and preserves unrelated th
 
   try {
     copyLiveInstallRepoFixture(repositoryRoot);
-    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true });
+    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
     const ghosttyAbyss = path.join(home, '.config/ghostty/themes/tyrian-abyss');
     const footAbyss = path.join(home, '.config/foot/themes/tyrian-abyss.ini');
     const unrelatedGhostty = path.join(home, '.config/ghostty/themes/custom-user-theme');
@@ -617,8 +890,8 @@ test('live ownership manifest removes catalog outputs and preserves unrelated th
       )}\n`
     );
     fs.rmSync(path.join(repositoryRoot, 'source/themes/tyrian-abyss.json'));
-    prepareLiveInstallRepository(repositoryRoot, { home });
-    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true });
+    prepareLiveInstallRepository(repositoryRoot, { home, target: 'plasma' });
+    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
 
     expect(fs.existsSync(ghosttyAbyss)).toBe(false);
     expect(fs.existsSync(footAbyss)).toBe(false);
@@ -628,7 +901,7 @@ test('live ownership manifest removes catalog outputs and preserves unrelated th
     fs.rmSync(path.join(home, '.local/state/tyrian-night/live-owned-paths.json'));
     fs.writeFileSync(ghosttyAbyss, 'user recreated after migration\n');
     fs.writeFileSync(footAbyss, 'user recreated after migration\n');
-    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true });
+    installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
 
     expect(fs.readFileSync(ghosttyAbyss, 'utf8')).toBe('user recreated after migration\n');
     expect(fs.readFileSync(footAbyss, 'utf8')).toBe('user recreated after migration\n');
@@ -660,6 +933,7 @@ test('live installer rejects recursive source symlinks before mutation', () => {
         repoRoot: root,
         home,
         apply: true,
+        target: 'plasma',
       })
     ).toThrow('must not be a symbolic link');
     expect(fs.readFileSync(liveConfig, 'utf8')).toBe('keep=true\n');
@@ -716,6 +990,8 @@ test('live installer restores exact filesystem state when a late write fails', (
           repoRoot: process.cwd(),
           home,
           apply: true,
+          target: 'caelestia',
+          hyprlandMode: 'legacy',
         })
       ).toThrow('injected late Caelestia publication failure');
     } finally {
@@ -735,24 +1011,21 @@ test('live installer restores exact filesystem state when a late write fails', (
   }
 });
 
-test('link transaction restores materialized targets outside the install root', () => {
+test('link transaction restores materialized assets when a later target write fails', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-link-scope-home-'));
-  const externalMaterializedTarget = path.join(
-    home,
-    '.local/share/caelestia/fastfetch/tyrian-fetch.webp'
-  );
+  const materializedTarget = path.join(home, TYRIAN_INSTALL_HOME, 'assets/tyrian-fetch.webp');
   const lateTarget = path.join(home, '.local/state/caelestia/scheme.json');
   const originalRename = fs.renameSync;
   const originalGeneration = Buffer.from('original external materialized generation\n');
   let lateFailureInjected = false;
 
   try {
-    fs.mkdirSync(path.dirname(externalMaterializedTarget), { recursive: true });
-    fs.writeFileSync(externalMaterializedTarget, originalGeneration);
+    fs.mkdirSync(path.dirname(materializedTarget), { recursive: true });
+    fs.writeFileSync(materializedTarget, originalGeneration);
     fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
       if (!lateFailureInjected && resolveMutationPath(newPath) === lateTarget) {
         lateFailureInjected = true;
-        expect(fs.readFileSync(externalMaterializedTarget)).not.toEqual(originalGeneration);
+        expect(fs.readFileSync(materializedTarget)).not.toEqual(originalGeneration);
         throw new Error('injected post-materialization failure');
       }
 
@@ -760,10 +1033,17 @@ test('link transaction restores materialized targets outside the install root', 
     }) as typeof fs.renameSync;
 
     expect(() =>
-      installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, link: true })
+      installLiveTyrian({
+        repoRoot: process.cwd(),
+        home,
+        apply: true,
+        link: true,
+        target: 'caelestia',
+        hyprlandMode: 'legacy',
+      })
     ).toThrow('injected post-materialization failure');
     expect(lateFailureInjected).toBe(true);
-    expect(fs.readFileSync(externalMaterializedTarget)).toEqual(originalGeneration);
+    expect(fs.readFileSync(materializedTarget)).toEqual(originalGeneration);
   } finally {
     fs.renameSync = originalRename;
     fs.rmSync(home, { recursive: true, force: true });
@@ -783,6 +1063,8 @@ test('live installer rollback removes config trees that were initially absent', 
         repoRoot: process.cwd(),
         home,
         apply: true,
+        target: 'caelestia',
+        hyprlandMode: 'legacy',
       })
     ).toThrow();
 
@@ -806,6 +1088,7 @@ test('live installer normalizes link sources to absolute physical paths', () => 
       home,
       apply: true,
       link: true,
+      target: 'plasma',
     });
 
     const linkedTheme = path.join(home, '.config/ghostty/themes/tyrian-nocturne');
@@ -816,24 +1099,15 @@ test('live installer normalizes link sources to absolute physical paths', () => 
     );
     expect(fs.lstatSync(lookAndFeel).isDirectory()).toBe(true);
     expect(fs.lstatSync(lookAndFeel).isSymbolicLink()).toBe(false);
-    for (const runtimeFile of [
-      path.join(home, '.local/state/caelestia/scheme.json'),
-      path.join(home, '.local/state/caelestia/sequences.txt'),
-      path.join(home, '.config/hypr/scheme/current.conf'),
-    ]) {
-      expect(fs.lstatSync(runtimeFile).isFile()).toBe(true);
-      expect(fs.lstatSync(runtimeFile).isSymbolicLink()).toBe(false);
-    }
-    expect(() =>
-      JSON.parse(fs.readFileSync(path.join(home, '.local/state/caelestia/scheme.json'), 'utf8'))
-    ).not.toThrow();
+    expect(fs.existsSync(path.join(home, '.local/state/caelestia/scheme.json'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.config/hypr/scheme/current.conf'))).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(aliasRoot, { force: true });
   }
 });
 
-test('live install recovers a prepared filesystem transaction after process interruption', () => {
+test('live recovery is explicit after a process interruption', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-process-recovery-'));
   const liveConfig = path.join(home, '.config/ghostty/config');
   const installMarker = path.join(home, TYRIAN_INSTALL_HOME, 'original.txt');
@@ -854,12 +1128,18 @@ test('live install recovers a prepared filesystem transaction after process inte
         home,
         apply: true,
         testInterruptAfterMutation: true,
+        target: 'plasma',
       })
     ).toThrow('Simulated interruption');
     expect(fs.existsSync(transactionPath)).toBe(true);
     expect(fs.existsSync(installMarker)).toBe(false);
+    const interruptedState = snapshotTree(home);
 
-    installLiveTyrian({ repoRoot: process.cwd(), home, apply: false });
+    installLiveTyrian({ repoRoot: process.cwd(), home, apply: false, target: 'plasma' });
+
+    expect(snapshotTree(home)).toEqual(interruptedState);
+
+    expect(recoverLiveTyrian({ home })).toBe('rolledBack');
 
     expect(fs.readFileSync(liveConfig, 'utf8')).toBe('original live config\n');
     expect(fs.readFileSync(installMarker, 'utf8')).toBe('original install root\n');
@@ -887,6 +1167,7 @@ test('live install rolls back immediately when the committed phase cannot be rec
         home,
         apply: true,
         testFailCommit: true,
+        target: 'plasma',
       })
     ).toThrow('Simulated live commit write failure');
     expect(fs.readFileSync(liveConfig, 'utf8')).toBe('original live config\n');
@@ -979,7 +1260,7 @@ test('durable path sync flushes every directory entry in a newly created chain',
   }
 });
 
-test('direct live style install refuses to bypass an unfinished Plasma lifecycle', () => {
+test('live preview observes an unfinished Plasma lifecycle while apply refuses to bypass it', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-plasma-journal-'));
   const journalPath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
 
@@ -989,11 +1270,15 @@ test('direct live style install refuses to bypass an unfinished Plasma lifecycle
       journalPath,
       `${JSON.stringify({ version: 1, owner: 'layout', initiallyActive: true })}\n`
     );
+    const interruptedState = snapshotTree(home);
 
-    expect(() => installLiveTyrian({ repoRoot: process.cwd(), home, apply: false })).toThrow(
-      'requires recovery through the rice command'
-    );
-    expect(fs.existsSync(journalPath)).toBe(true);
+    installLiveTyrian({ repoRoot: process.cwd(), home, apply: false, target: 'plasma' });
+    expect(snapshotTree(home)).toEqual(interruptedState);
+
+    expect(() =>
+      installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' })
+    ).toThrow('requires recovery through the rice command');
+    expect(snapshotTree(home)).toEqual(interruptedState);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1251,7 +1536,7 @@ test('persisted snapshot recovery rejects invented targets and invalid backup ge
   }
 });
 
-test('two repository copies serialize against one physical destination home', async () => {
+test('preview does not acquire or wait for the destination mutation lock', async () => {
   const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-lock-repo-a-'));
   const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-lock-repo-b-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-lock-destination-'));
@@ -1268,10 +1553,64 @@ test('two repository copies serialize against one physical destination home', as
         [
           "import fs from 'node:fs';",
           "const module = await import('./scripts/installLiveTyrian.mjs');",
-          'module.buildLiveInstallPlan({ repoRoot: process.env.REPO_A, home: process.env.HOME_ROOT });',
+          "module.buildLiveInstallPlan({ repoRoot: process.env.REPO_A, home: process.env.HOME_ROOT, target: 'plasma' });",
           'module.withLiveInstallLock(process.env.HOME_ROOT, () => {',
           "fs.writeFileSync(process.env.READY_PATH, 'ready');",
-          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);',
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);',
+          '});',
+        ].join(' '),
+      ],
+      env: {
+        ...process.env,
+        REPO_A: repoA,
+        HOME_ROOT: home,
+        READY_PATH: readyPath,
+      },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    const deadline = Date.now() + 1_000;
+
+    while (!fs.existsSync(readyPath) && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+
+    expect(fs.existsSync(readyPath)).toBe(true);
+    installLiveTyrian({ repoRoot: repoB, home, apply: false, target: 'plasma' });
+    expect(fs.existsSync(path.join(home, '.tyrian-night-live-install.lock'))).toBe(true);
+    holder.kill();
+    await holder.exited;
+    holder = undefined;
+  } finally {
+    holder?.kill();
+    fs.rmSync(repoA, { recursive: true, force: true });
+    fs.rmSync(repoB, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('live apply serializes against another repository copy targeting the same home', async () => {
+  const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-apply-lock-repo-a-'));
+  const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-apply-lock-repo-b-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-home-apply-lock-destination-'));
+  const readyPath = path.join(home, 'holder-ready');
+  let holder: ReturnType<typeof Bun.spawn> | undefined;
+
+  try {
+    copyLiveInstallRepoFixture(repoA);
+    copyLiveInstallRepoFixture(repoB);
+    holder = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "import fs from 'node:fs';",
+          "const module = await import('./scripts/installLiveTyrian.mjs');",
+          "module.buildLiveInstallPlan({ repoRoot: process.env.REPO_A, home: process.env.HOME_ROOT, target: 'plasma' });",
+          'module.withLiveInstallLock(process.env.HOME_ROOT, () => {',
+          "fs.writeFileSync(process.env.READY_PATH, 'ready');",
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);',
           '});',
         ].join(' '),
       ],
@@ -1293,8 +1632,8 @@ test('two repository copies serialize against one physical destination home', as
 
     expect(fs.existsSync(readyPath)).toBe(true);
     const startedAt = Date.now();
-    installLiveTyrian({ repoRoot: repoB, home, apply: false });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+    installLiveTyrian({ repoRoot: repoB, home, apply: true, target: 'plasma' });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
     await holder.exited;
   } finally {
     holder?.kill();
@@ -1320,6 +1659,7 @@ test('live installer aborts on snapshot failure before changing owned paths', ()
         repoRoot: process.cwd(),
         home,
         apply: true,
+        target: 'plasma',
       })
     ).toThrow();
     expect(fs.readFileSync(liveConfig, 'utf8')).toBe('keep=true\n');
@@ -1360,9 +1700,9 @@ test('live transaction publishes allocating ownership before backup allocation',
       return originalMkdir(directoryPath, options as fs.MakeDirectoryOptions);
     }) as typeof fs.mkdirSync;
 
-    expect(() => installLiveTyrian({ repoRoot: process.cwd(), home, apply: true })).toThrow(
-      'injected backup allocation failure'
-    );
+    expect(() =>
+      installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' })
+    ).toThrow('injected backup allocation failure');
     expect(ownershipObserved).toBe(true);
     expect(fs.existsSync(transactionPath)).toBe(false);
     expect(fs.existsSync(path.join(home, TYRIAN_INSTALL_HOME))).toBe(false);
@@ -1392,7 +1732,7 @@ test('live transaction rejects missing directory exchange before pointer or targ
         [
           "const module = await import('./scripts/installLiveTyrian.mjs');",
           'try {',
-          '  module.installLiveTyrian({ repoRoot: process.env.REPO_ROOT, home: process.env.HOME_ROOT, apply: true });',
+          "  module.installLiveTyrian({ repoRoot: process.env.REPO_ROOT, home: process.env.HOME_ROOT, apply: true, target: 'plasma' });",
           '  process.exit(2);',
           '} catch (error) {',
           '  if (!String(error).includes("mv --exchange is unavailable")) process.exit(3);',
@@ -1481,9 +1821,13 @@ async function leaveDeadTokenLock(lockPath: string): Promise<void> {
 
 function copyLiveInstallRepoFixture(targetRoot: string): void {
   const sourceRoot = process.cwd();
-  const sourcePlan = buildLiveInstallPlan({ repoRoot: sourceRoot, home: FIXTURE_HOME });
+  const sourcePlan = buildLiveInstallPlan({
+    repoRoot: sourceRoot,
+    home: FIXTURE_HOME,
+    target: 'plasma',
+  });
 
-  fs.copyFileSync(path.join(sourceRoot, 'package.json'), path.join(targetRoot, 'package.json'));
+  copyWorkspaceManifests(targetRoot);
 
   for (const { source } of sourcePlan.materializedRoots) {
     const target = path.join(targetRoot, path.relative(sourceRoot, source));
@@ -1494,4 +1838,35 @@ function copyLiveInstallRepoFixture(targetRoot: string): void {
   fs.cpSync(path.join(sourceRoot, 'source'), path.join(targetRoot, 'source'), {
     recursive: true,
   });
+}
+
+function copyWorkspaceManifests(targetRoot: string): void {
+  for (const relativePath of ['package.json', 'apps/desktop/package.json']) {
+    const targetPath = path.join(targetRoot, relativePath);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.copyFileSync(relativePath, targetPath);
+  }
+}
+
+function snapshotTree(root: string): Array<[string, string]> {
+  const snapshot: Array<[string, string]> = [];
+
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = path.relative(root, absolutePath);
+
+      if (entry.isDirectory()) {
+        snapshot.push([relativePath, 'directory']);
+        visit(absolutePath);
+      } else if (entry.isSymbolicLink()) {
+        snapshot.push([relativePath, `symlink:${fs.readlinkSync(absolutePath)}`]);
+      } else {
+        snapshot.push([relativePath, `file:${fs.readFileSync(absolutePath).toString('base64')}`]);
+      }
+    }
+  };
+
+  visit(root);
+  return snapshot;
 }

@@ -36,7 +36,7 @@ import {
   WALLPAPER_ASSET_PATH,
 } from './portableAssets.mjs';
 
-const repoRoot = process.cwd();
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const home = os.homedir();
 
 export const RICE_ROOT = 'rice';
@@ -576,6 +576,30 @@ function recoverRiceHomeState(userHome, runCommand, options = {}) {
   }
 
   return filesystemOutcome;
+}
+
+/**
+ * Recover one interrupted rice filesystem and Plasma lifecycle generation.
+ * Preview never calls this capability.
+ *
+ * @param {{ home?: string; runCommand?: CommandRunner; testInterruptAfterFilesystem?: boolean }} [options]
+ * @returns {'none' | 'committed' | 'rolledBack'}
+ */
+export function recoverRice(options = {}) {
+  const userHome = resolvePathIdentity(options.home ?? home);
+  const runCommand = options.runCommand ?? execFileSync;
+
+  return withLiveInstallLock(
+    userHome,
+    () => {
+      const outcome = recoverRiceHomeState(userHome, runCommand, {
+        testInterruptAfterFilesystem: options.testInterruptAfterFilesystem,
+      });
+      console.log(`Tyrian rice recovery completed (filesystem outcome: ${outcome}).`);
+      return outcome;
+    },
+    { allowPlasmaRecovery: true, recoverBeforeAction: false }
+  );
 }
 
 class SimulatedCommittedHandoffInterruption extends Error {
@@ -1409,6 +1433,98 @@ export function installRice(options = {}) {
     assertIndependentRoots(root, runtimeRoot, 'Rice repository and layout runtime root');
   }
 
+  const executeInstall = () => {
+    const livePlan = !layoutOnly
+      ? buildLiveInstallPlan({
+          repoRoot: root,
+          home: userHome,
+          apply,
+          link,
+          target: 'plasma',
+          environment,
+        })
+      : undefined;
+    if (withPlasmaLayout) {
+      checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
+    }
+
+    const preparedLayout = withPlasmaLayout
+      ? preparePlasmaLayoutInstallOwned({
+          repoRoot: root,
+          home: userHome,
+          runtimeRoot,
+          apply,
+          runCommand,
+          testInterruptAfterStop: options.testInterruptAfterStop,
+          testInterruptAfterRuntime: options.testInterruptAfterRuntime,
+        })
+      : undefined;
+    const runInstall = () =>
+      installRiceOwned({
+        root,
+        userHome,
+        apply,
+        withPlasmaLayout,
+        layoutOnly,
+        link,
+        environment,
+        runtimeRoot,
+        livePlan,
+        preparedLayout,
+        testInterruptAfterStyle: options.testInterruptAfterStyle,
+      });
+
+    if (!apply || !withPlasmaLayout) {
+      runInstall();
+      return;
+    }
+
+    const targetPaths = [
+      ...(livePlan
+        ? readLiveInstallTransactionTargets(livePlan)
+        : !link
+          ? [path.join(runtimeRoot, RICE_WALLPAPER_PATH)]
+          : []),
+      ...(preparedLayout?.installEntries.flatMap(({ stagedPath, targetPath }) => [
+        targetPath,
+        stagedPath,
+      ]) ?? []),
+    ];
+    const backupRoot = buildTyrianBackupRoot(userHome, 'rice-full-apply');
+
+    for (const targetPath of [...targetPaths, backupRoot]) {
+      assertIndependentRoots(root, targetPath, 'Rice repository and filesystem transaction target');
+    }
+
+    withHomeFilesystemTransaction(
+      userHome,
+      {
+        targetPaths,
+        backupRoot,
+        owner: 'rice',
+        shouldLeavePrepared: (error) =>
+          error instanceof SimulatedRiceInterruption ||
+          error instanceof SimulatedPlasmaStopInterruption ||
+          error instanceof SimulatedPlasmaRuntimeInterruption,
+        afterRollback: () => recoverPlasmaLifecycle(userHome, runCommand, 'rolledBack'),
+        afterCommit: () => {
+          if (options.testInterruptAfterCommit) {
+            throw new SimulatedRiceCommitInterruption();
+          }
+
+          finishPlasmaLifecycle(userHome);
+        },
+      },
+      runInstall
+    );
+    console.log(`Tyrian rice install complete. Backup: ${backupRoot}`);
+  };
+
+  if (!apply) {
+    executeInstall();
+    return;
+  }
+
   withLiveInstallLock(
     userHome,
     () => {
@@ -1417,93 +1533,7 @@ export function installRice(options = {}) {
       });
       withCaptureLock(root, () => {
         recoverCapturePublication(root);
-        const livePlan = !layoutOnly
-          ? buildLiveInstallPlan({
-              repoRoot: root,
-              home: userHome,
-              apply,
-              link,
-              environment,
-            })
-          : undefined;
-        if (withPlasmaLayout) {
-          checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
-        }
-
-        const preparedLayout = withPlasmaLayout
-          ? preparePlasmaLayoutInstallOwned({
-              repoRoot: root,
-              home: userHome,
-              runtimeRoot,
-              apply,
-              runCommand,
-              testInterruptAfterStop: options.testInterruptAfterStop,
-              testInterruptAfterRuntime: options.testInterruptAfterRuntime,
-            })
-          : undefined;
-        const runInstall = () =>
-          installRiceOwned({
-            root,
-            userHome,
-            apply,
-            withPlasmaLayout,
-            layoutOnly,
-            link,
-            environment,
-            runtimeRoot,
-            livePlan,
-            preparedLayout,
-            testInterruptAfterStyle: options.testInterruptAfterStyle,
-          });
-
-        if (!apply || !withPlasmaLayout) {
-          runInstall();
-          return;
-        }
-
-        const targetPaths = [
-          ...(livePlan
-            ? readLiveInstallTransactionTargets(livePlan)
-            : !link
-              ? [path.join(runtimeRoot, RICE_WALLPAPER_PATH)]
-              : []),
-          ...(preparedLayout?.installEntries.flatMap(({ stagedPath, targetPath }) => [
-            targetPath,
-            stagedPath,
-          ]) ?? []),
-        ];
-        const backupRoot = buildTyrianBackupRoot(userHome, 'rice-full-apply');
-
-        for (const targetPath of [...targetPaths, backupRoot]) {
-          assertIndependentRoots(
-            root,
-            targetPath,
-            'Rice repository and filesystem transaction target'
-          );
-        }
-
-        withHomeFilesystemTransaction(
-          userHome,
-          {
-            targetPaths,
-            backupRoot,
-            owner: 'rice',
-            shouldLeavePrepared: (error) =>
-              error instanceof SimulatedRiceInterruption ||
-              error instanceof SimulatedPlasmaStopInterruption ||
-              error instanceof SimulatedPlasmaRuntimeInterruption,
-            afterRollback: () => recoverPlasmaLifecycle(userHome, runCommand, 'rolledBack'),
-            afterCommit: () => {
-              if (options.testInterruptAfterCommit) {
-                throw new SimulatedRiceCommitInterruption();
-              }
-
-              finishPlasmaLifecycle(userHome);
-            },
-          },
-          runInstall
-        );
-        console.log(`Tyrian rice install complete. Backup: ${backupRoot}`);
+        executeInstall();
       });
     },
     { allowPlasmaRecovery: true }
@@ -1539,6 +1569,7 @@ function installRiceOwned(options) {
         home: userHome,
         apply,
         link,
+        target: 'plasma',
         environment,
         stagingRoot: livePlan?.stagingRoot,
       });
@@ -1603,6 +1634,32 @@ export function installPlasmaLayout(options = {}) {
     assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Plasma layout install');
   }
 
+  const executeInstall = () => {
+    checkRequiredCommands(
+      RICE_LAYOUT_REQUIRED_COMMANDS,
+      apply,
+      commandExists,
+      'Plasma layout install'
+    );
+    installPreparedPlasmaLayout(
+      preparePlasmaLayoutInstallOwned({
+        repoRoot: root,
+        home: userHome,
+        runtimeRoot,
+        apply,
+        runCommand,
+        testInterruptAfterStop: options.testInterruptAfterStop,
+        testInterruptAfterRuntime: options.testInterruptAfterRuntime,
+        testInterruptAfterCommit: options.testInterruptAfterCommit,
+      })
+    );
+  };
+
+  if (!apply) {
+    executeInstall();
+    return;
+  }
+
   withLiveInstallLock(
     userHome,
     () => {
@@ -1612,26 +1669,9 @@ export function installPlasmaLayout(options = {}) {
         console.log(`Recovered prior rice transaction: ${recoveryOutcome}`);
       }
 
-      checkRequiredCommands(
-        RICE_LAYOUT_REQUIRED_COMMANDS,
-        apply,
-        commandExists,
-        'Plasma layout install'
-      );
       withCaptureLock(root, () => {
         recoverCapturePublication(root);
-        installPreparedPlasmaLayout(
-          preparePlasmaLayoutInstallOwned({
-            repoRoot: root,
-            home: userHome,
-            runtimeRoot,
-            apply,
-            runCommand,
-            testInterruptAfterStop: options.testInterruptAfterStop,
-            testInterruptAfterRuntime: options.testInterruptAfterRuntime,
-            testInterruptAfterCommit: options.testInterruptAfterCommit,
-          })
-        );
+        executeInstall();
       });
     },
     { allowPlasmaRecovery: true }
@@ -2998,8 +3038,18 @@ function main() {
     '--check',
     '--layout-only',
     '--link',
+    '--recover',
     '--style-only',
   ]);
+
+  if (args.has('--recover')) {
+    if (args.size !== 1) {
+      throw new Error('Tyrian rice recovery cannot be combined with another mode.');
+    }
+
+    recoverRice();
+    return;
+  }
 
   if (args.has('--layout-only') && args.has('--style-only')) {
     throw new Error('Tyrian rice flags --layout-only and --style-only are mutually exclusive.');
@@ -3015,8 +3065,12 @@ function main() {
     return;
   }
 
-  if (!args.has('--layout-only')) {
-    prepareLiveInstallRepository(repoRoot, { home, link: args.has('--link') });
+  if (args.has('--apply') && !args.has('--layout-only')) {
+    prepareLiveInstallRepository(repoRoot, {
+      home,
+      link: args.has('--link'),
+      target: 'plasma',
+    });
   }
 
   installRice({

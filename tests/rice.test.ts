@@ -10,6 +10,7 @@ import {
   hydratePlasmaDesktopActivityIds,
   installPlasmaLayout,
   installRice,
+  recoverRice,
   RICE_LAYOUT_FILES,
   RICE_LAYOUT_REQUIRED_COMMANDS,
   RICE_MANIFEST_PATH,
@@ -407,7 +408,7 @@ test('rice capture recovery removes its bounded unpublished journal candidate', 
   }
 });
 
-test('Plasma recovery removes its bounded unpublished lifecycle candidate', () => {
+test('Plasma preview preserves recovery evidence until explicit recovery', () => {
   const root = makeTempRiceRepo();
   const home = path.join(root, 'home');
   const candidatePath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json.next');
@@ -422,9 +423,52 @@ test('Plasma recovery removes its bounded unpublished lifecycle candidate', () =
       hasCommand: () => true,
       runCommand: mockRiceRuntimeCommand,
     });
+    expect(fs.existsSync(candidatePath)).toBe(true);
+
+    recoverRice({ home, runCommand: mockRiceRuntimeCommand });
     expect(fs.existsSync(candidatePath)).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('full rice preview leaves repository and home state byte-for-byte unchanged', () => {
+  const root = makeTempRiceRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-preview-home-'));
+  const captureCandidate = path.join(root, '.tyrian-rice-capture-journal.json.next');
+  const lifecycleCandidate = path.join(
+    home,
+    '.local/state/tyrian-night/plasma-lifecycle.json.next'
+  );
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.cpSync('terminal', path.join(root, 'terminal'), { recursive: true });
+    fs.cpSync('desktop', path.join(root, 'desktop'), { recursive: true });
+    fs.cpSync('assets', path.join(root, 'assets'), { recursive: true });
+    fs.copyFileSync('package.json', path.join(root, 'package.json'));
+    fs.mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
+    fs.copyFileSync('apps/desktop/package.json', path.join(root, 'apps/desktop/package.json'));
+    fs.writeFileSync(captureCandidate, '{ incomplete');
+    fs.mkdirSync(path.dirname(lifecycleCandidate), { recursive: true });
+    fs.writeFileSync(lifecycleCandidate, '{ incomplete');
+    const repositoryBefore = snapshotTree(root);
+    const homeBefore = snapshotTree(home);
+
+    installRice({
+      repoRoot: root,
+      home,
+      apply: false,
+      link: true,
+      hasCommand: () => true,
+      runCommand: mockRiceRuntimeCommand,
+    });
+
+    expect(snapshotTree(root)).toEqual(repositoryBefore);
+    expect(snapshotTree(home)).toEqual(homeBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -776,6 +820,9 @@ test('layout-only rice interruption has one reported outer transaction and no in
       withPlasmaLayout: false,
       runCommand: mockRiceRuntimeCommand,
     });
+    expect(fs.existsSync(transactionPath)).toBe(true);
+
+    recoverRice({ home, runCommand: mockRiceRuntimeCommand });
     expect(fs.existsSync(transactionPath)).toBe(false);
   } finally {
     mockPlasmaShellActive = true;
@@ -815,7 +862,7 @@ test('style-only rice install does not require layout snapshots', () => {
   }
 });
 
-test('style-only rice carries the resolved XDG roots into the live owner', () => {
+test('style-only rice applies the Plasma profile without touching Hyprland or Caelestia', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-xdg-home-'));
   const environment = {
     XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
@@ -826,7 +873,7 @@ test('style-only rice carries the resolved XDG roots into the live owner', () =>
 
   try {
     fs.mkdirSync(path.dirname(hyprlandConfig), { recursive: true });
-    fs.writeFileSync(hyprlandConfig, 'require("caelestia")\n');
+    fs.writeFileSync(hyprlandConfig, 'user Hyprland config\n');
 
     installRice({
       repoRoot: process.cwd(),
@@ -836,15 +883,17 @@ test('style-only rice carries the resolved XDG roots into the live owner', () =>
       environment,
     });
 
-    expect(
-      fs.readFileSync(path.join(environment.XDG_CONFIG_HOME, 'hypr/scheme/current.lua'), 'utf8')
-    ).toContain('return {');
+    expect(fs.readFileSync(hyprlandConfig, 'utf8')).toBe('user Hyprland config\n');
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'kdeglobals'))).toBe(true);
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'hypr/scheme/current.lua'))).toBe(
+      false
+    );
     expect(fs.existsSync(path.join(environment.XDG_STATE_HOME, 'caelestia/scheme.json'))).toBe(
-      true
+      false
     );
     expect(
       fs.existsSync(path.join(environment.XDG_DATA_HOME, 'caelestia/fastfetch/config.jsonc'))
-    ).toBe(true);
+    ).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1694,7 +1743,7 @@ test('full rice rolls back a successful style install when layout restore fails'
   }
 });
 
-test('full rice recovers a process interruption between style and layout', () => {
+test('full rice recovery is explicit after interruption between style and layout', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-gap-recovery-'));
   const ghosttyConfig = path.join(home, '.config/ghostty/config');
   const transactionPath = path.join(
@@ -1727,6 +1776,11 @@ test('full rice recovers a process interruption between style and layout', () =>
       withPlasmaLayout: false,
       runCommand: mockRiceRuntimeCommand,
     });
+
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toBe('original style\n');
+    expect(fs.existsSync(transactionPath)).toBe(true);
+
+    recoverRice({ home, runCommand: mockRiceRuntimeCommand });
 
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
     expect(fs.existsSync(path.join(home, '.local/share/tyrian-night'))).toBe(false);
@@ -1774,6 +1828,23 @@ test('full rice restores files before restarting a shell interrupted during layo
       home,
       apply: false,
       withPlasmaLayout: false,
+      runCommand: (command, args) => {
+        if (command === 'systemctl' && args.includes('start')) {
+          expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
+          expect(fs.readFileSync(desktopPath, 'utf8')).toBe('original desktop\n');
+          expect(fs.readFileSync(shellPath, 'utf8')).toBe('original shell\n');
+        }
+
+        return mockRiceRuntimeCommand(command, args);
+      },
+    });
+
+    expect(mockPlasmaShellActive).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(true);
+    expect(fs.existsSync(lifecyclePath)).toBe(true);
+
+    recoverRice({
+      home,
       runCommand: (command, args) => {
         if (command === 'systemctl' && args.includes('start')) {
           expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
@@ -1852,6 +1923,12 @@ test('full rice crash after runtime mutation restores persisted panels and wallp
       runCommand: runtime.runCommand,
     });
 
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toBe('original style\n');
+    expect(fs.existsSync(transactionPath)).toBe(true);
+    expect(fs.existsSync(lifecyclePath)).toBe(true);
+
+    recoverRice({ home, runCommand: runtime.runCommand });
+
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('original style\n');
     expect(runtime.state.alignment).toBe('right');
     expect(runtime.state.wallpaperPath).toBe(previousWallpaper);
@@ -1922,25 +1999,16 @@ test('committed cleanup failure warns, preserves rice success, and closes on nex
     runtime.state.wallpaperPath = 'file:///tmp/committed-runtime-drift.png';
 
     expect(() =>
-      installRice({
-        repoRoot: process.cwd(),
+      recoverRice({
         home,
-        apply: false,
-        withPlasmaLayout: false,
         runCommand: runtime.runCommand,
-        testInterruptRecoveryAfterFilesystem: true,
+        testInterruptAfterFilesystem: true,
       })
     ).toThrow('Simulated interruption during the committed filesystem handoff');
     expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).phase).toBe('committed');
     expect(JSON.parse(fs.readFileSync(lifecyclePath, 'utf8')).phase).toBe('runtimeApplied');
 
-    installRice({
-      repoRoot: process.cwd(),
-      home,
-      apply: false,
-      withPlasmaLayout: false,
-      runCommand: runtime.runCommand,
-    });
+    recoverRice({ home, runCommand: runtime.runCommand });
 
     expect(runtime.state.alignment).toBe('center');
     expect(runtime.state.secondAlignment).toBe('center');
@@ -2843,6 +2911,29 @@ function makeStatefulPlasmaRuntime(previousWallpaperPath: string) {
       return mockRiceRuntimeCommand(command, args);
     },
   };
+}
+
+function snapshotTree(root: string): Array<[string, string]> {
+  const snapshot: Array<[string, string]> = [];
+
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = path.relative(root, absolutePath);
+
+      if (entry.isDirectory()) {
+        snapshot.push([relativePath, 'directory']);
+        visit(absolutePath);
+      } else if (entry.isSymbolicLink()) {
+        snapshot.push([relativePath, `symlink:${fs.readlinkSync(absolutePath)}`]);
+      } else {
+        snapshot.push([relativePath, `file:${fs.readFileSync(absolutePath).toString('base64')}`]);
+      }
+    }
+  };
+
+  visit(root);
+  return snapshot;
 }
 
 function mockRiceRuntimeCommand(command: string, args: string[]) {

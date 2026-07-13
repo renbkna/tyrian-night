@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "../../scripts/commandChecks.mjs",
+    "../../scripts/desktopThemes.mjs",
+    "../../scripts/generatedAssets.mjs",
+    "../../scripts/installLiveTyrian.mjs",
+    "../../scripts/installOps.mjs",
+    "../../scripts/portableAssets.mjs",
+    "../../scripts/rice.mjs",
+    "../../scripts/terminalThemes.mjs",
+    "../../scripts/themeDefinition.mjs",
+    "../../scripts/themeSources.mjs",
+    "../../scripts/union/**/*.mjs"
+  ]
+}

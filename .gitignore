@@ -33,6 +33,10 @@ user.settings.json
 # Build artifacts
 out/*.js
 out/*.map
+apps/vscode/out/*.js
+apps/vscode/out/*.map
+apps/vscode/LICENSE
+apps/vscode/assets/icon.png
 .vscode-test/
 
 # Generated theme/package artifacts

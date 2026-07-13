@@ -274,11 +274,11 @@ const EXPECTED_ZED_SYNTAX_CAPTURE_KEYS = [
 
 test('Zed extension manifest is theme-only and installable from the apps/zed directory', () => {
   const manifest = fs.readFileSync('apps/zed/extension.toml', 'utf8');
-  const packageJson = readJson<{ version: string }>('package.json');
+  const version = manifest.match(/^version = "([^"]+)"$/mu)?.[1];
 
   expect(manifest).toContain('id = "tyrian-night-theme"');
   expect(manifest).toContain('name = "Tyrian Night"');
-  expect(manifest).toContain(`version = "${packageJson.version}"`);
+  expect(version).toMatch(/^\d+\.\d+\.\d+$/u);
   expect(manifest).toContain('schema_version = 1');
   expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
   expect(fs.existsSync('apps/zed/Cargo.toml')).toBe(false);

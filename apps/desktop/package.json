@@ -1,0 +1,29 @@
+{
+  "name": "@tyrian-night/desktop",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "tyrianNight": {
+    "supportedPlatforms": [
+      "linux"
+    ]
+  },
+  "scripts": {
+    "plasma:preview": "node ../../scripts/installLiveTyrian.mjs --target=plasma",
+    "plasma:apply": "node ../../scripts/installLiveTyrian.mjs --target=plasma --apply",
+    "caelestia:preview": "node ../../scripts/installLiveTyrian.mjs --target=caelestia",
+    "caelestia:apply": "node ../../scripts/installLiveTyrian.mjs --target=caelestia --apply",
+    "recover": "node ../../scripts/installLiveTyrian.mjs --recover",
+    "rice": "node ../../scripts/rice.mjs",
+    "rice:apply": "node ../../scripts/rice.mjs --apply",
+    "rice:recover": "node ../../scripts/rice.mjs --recover",
+    "check": "tsc --noEmit --project tsconfig.json && node ../../scripts/rice.mjs --check"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "typescript": "^6.0.3"
+  }
+}

@@ -27,6 +27,7 @@ import {
   type IslandPatchPaths,
 } from './islandPatchContract.js';
 import { rollbackFailedFileTransactionCore } from './islandFileTransactionCore.js';
+import { readIslandApplyPlatformSupport } from './islandPlatform.js';
 import { isIslandLockLifecycleFailure, withIslandProcessLock } from './islandProcessLock.js';
 import {
   IslandRegistryQuarantineError,
@@ -428,6 +429,19 @@ export async function applyIslandShell(options: {
   themeVersion: string;
   registryHome?: string;
 }): Promise<IslandShellResult> {
+  return applyIslandShellForPlatform(options, process.platform);
+}
+
+export async function applyIslandShellForPlatform(
+  options: {
+    appRoot: string;
+    cssSourcePath: string;
+    themeVersion: string;
+    registryHome?: string;
+  },
+  platform: NodeJS.Platform
+): Promise<IslandShellResult> {
+  assertIslandApplyPlatformSupported(platform);
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   await fs.access(getPatchPaths(appRoot).workbenchDirPath);
@@ -512,6 +526,29 @@ export async function readIslandShellApplyReadiness(options: {
   themeVersion: string;
   registryHome?: string;
 }): Promise<IslandShellApplyReadiness> {
+  return readIslandShellApplyReadinessForPlatform(options, process.platform);
+}
+
+export async function readIslandShellApplyReadinessForPlatform(
+  options: {
+    appRoot: string;
+    cssSourcePath: string;
+    themeVersion: string;
+    registryHome?: string;
+  },
+  platform: NodeJS.Platform
+): Promise<IslandShellApplyReadiness> {
+  const platformSupport = readIslandApplyPlatformSupport(platform);
+  if (!platformSupport.supported) {
+    return {
+      kind: 'unsupported',
+      appRoot: options.appRoot,
+      status: undefined,
+      writeAccess: undefined,
+      reason: platformSupport.reason,
+    };
+  }
+
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   return readIslandShellApplyReadinessUnlocked(canonicalOptions);
@@ -775,6 +812,18 @@ export async function seedIslandDesiredTheme(options: {
   desiredThemeId: string;
   registryHome?: string;
 }): Promise<IslandDesiredSeedResult> {
+  return seedIslandDesiredThemeForPlatform(options, process.platform);
+}
+
+export async function seedIslandDesiredThemeForPlatform(
+  options: {
+    appRoot: string;
+    desiredThemeId: string;
+    registryHome?: string;
+  },
+  platform: NodeJS.Platform
+): Promise<IslandDesiredSeedResult> {
+  assertIslandApplyPlatformSupported(platform);
   if (!/^[a-z0-9][a-z0-9-]*\.css$/u.test(options.desiredThemeId)) {
     throw new IslandShellFailure(
       'unsupported',
@@ -823,6 +872,13 @@ export async function seedIslandDesiredTheme(options: {
       };
     }
   );
+}
+
+function assertIslandApplyPlatformSupported(platform: NodeJS.Platform): void {
+  const support = readIslandApplyPlatformSupport(platform);
+  if (!support.supported) {
+    throw new IslandShellFailure('unsupported', support.reason);
+  }
 }
 
 export async function restoreAllIslandShells(options?: {

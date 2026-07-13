@@ -1,0 +1,111 @@
+{
+  "name": "tyrian-night",
+  "displayName": "Tyrian Night",
+  "description": "Ultra-saturated Tyrian Abyss, Night, Nocturne, Night Old comparison, and Dawn themes with opt-in Linux Island UI controls",
+  "version": "2.1.1",
+  "type": "module",
+  "publisher": "renbkna",
+  "icon": "assets/icon.png",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "island/tyrian-night.css",
+    "island/tyrian-nocturne.css",
+    "island/tyrian-night-old.css",
+    "island/tyrian-abyss.css",
+    "island/tyrian-dawn.css",
+    "assets/icon.png",
+    "out/extension.js",
+    "out/islandCli.js",
+    "themes/tyrian-night.json",
+    "themes/tyrian-nocturne.json",
+    "themes/tyrian-night-old.json",
+    "themes/tyrian-abyss.json",
+    "themes/tyrian-dawn.json"
+  ],
+  "engines": {
+    "vscode": "^1.118.0",
+    "node": ">=22.19.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/renbkna/tyrian-night.git",
+    "directory": "apps/vscode"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Tyrian Night",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-night.json"
+      },
+      {
+        "label": "Tyrian Nocturne",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-nocturne.json"
+      },
+      {
+        "label": "Tyrian Night Old",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-night-old.json"
+      },
+      {
+        "label": "Tyrian Abyss",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-abyss.json"
+      },
+      {
+        "label": "Tyrian Dawn",
+        "uiTheme": "vs",
+        "path": "./themes/tyrian-dawn.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "tyrianNight.applyIslandUi",
+        "title": "Apply Island UI",
+        "category": "Tyrian Night"
+      },
+      {
+        "command": "tyrianNight.repairIslandUi",
+        "title": "Repair Island UI",
+        "category": "Tyrian Night"
+      },
+      {
+        "command": "tyrianNight.restoreClassicUi",
+        "title": "Restore Classic UI",
+        "category": "Tyrian Night"
+      },
+      {
+        "command": "tyrianNight.doctorIslandUi",
+        "title": "Doctor Island UI",
+        "category": "Tyrian Night"
+      }
+    ]
+  },
+  "scripts": {
+    "check": "tsc --noEmit --project tsconfig.json",
+    "lint": "oxlint src/ tsup.config.ts",
+    "build": "node ../../scripts/islandCss.mjs && node ../../scripts/vscodePackageAssets.mjs && tsup",
+    "watch": "tsup --watch",
+    "package": "bun run check && bun run build && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "@types/vscode": "^1.118.0",
+    "@vscode/vsce": "^3.9.1",
+    "oxlint": "^1.63.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  }
+}

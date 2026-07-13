@@ -54,7 +54,8 @@ test('desktop generation resolves catalog identity from the injected repository 
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'package.json'), '{"version":"1.0.0"}\n');
+    fs.mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'apps/desktop/package.json'), '{"version":"1.0.0"}\n');
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
     const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as Record<string, unknown>;
     theme.name = 'Injected Desktop Night';
@@ -127,7 +128,7 @@ test('Plasma desktop-theme colors consume the KDE palette without owning ColorEf
 });
 
 test('Plasma packages are full Tyrian-owned packages without a Monochrome base', () => {
-  const packageJson = readJson<{ version: string }>('package.json');
+  const packageJson = readJson<{ version: string }>('apps/desktop/package.json');
 
   for (const source of SOURCE_THEMES) {
     const schemeId = pascalSlug(source.slug);

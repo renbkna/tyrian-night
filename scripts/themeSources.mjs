@@ -203,7 +203,7 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
       paletteName: slug.replaceAll('-', '_'),
       slug,
       sourcePath: `source/themes/${slug}.json`,
-      vscodeContributionPath: `./apps/vscode/themes/${slug}.json`,
+      vscodeContributionPath: `./themes/${slug}.json`,
       vscodeThemePath: `apps/vscode/themes/${slug}.json`,
       vscodeUiTheme,
     };

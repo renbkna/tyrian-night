@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "src",
+    "tsup.config.ts",
+    "../../scripts/generatedAssets.mjs",
+    "../../scripts/generatedContracts.mjs",
+    "../../scripts/islandCss.mjs",
+    "../../scripts/themeDefinition.mjs",
+    "../../scripts/themeSources.mjs",
+    "../../scripts/vscodePackageAssets.mjs",
+    "../../scripts/vscodeThemes.mjs"
+  ]
+}

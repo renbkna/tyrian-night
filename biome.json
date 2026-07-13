@@ -19,6 +19,7 @@
       "!.machine-backups/**",
       "!.codex-logs/**",
       "!out/**",
+      "!apps/vscode/out/**",
       "!node_modules/**",
       "!*.vsix",
       "!apps/vscode/island/tyrian-*.css",

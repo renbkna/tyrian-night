@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 const VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22';
 
 export default defineConfig({
-  entry: ['apps/vscode/src/extension.ts', 'apps/vscode/src/islandCli.ts'],
+  entry: ['src/extension.ts', 'src/islandCli.ts'],
   outDir: 'out',
   format: ['esm'],
   platform: 'node',

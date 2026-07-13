@@ -268,10 +268,12 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
  * @returns {string}
  */
 function readPackageVersion(repoRoot) {
-  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, 'apps/desktop/package.json'), 'utf8')
+  );
 
   if (typeof packageJson.version !== 'string') {
-    throw new Error('Missing package.json version');
+    throw new Error('Missing apps/desktop/package.json version');
   }
 
   return packageJson.version;

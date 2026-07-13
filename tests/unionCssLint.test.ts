@@ -144,7 +144,8 @@ function makeTempRepoFixture(): string {
   const root = makeTempRoot();
 
   fs.mkdirSync(path.join(root, 'source'), { recursive: true });
-  fs.copyFileSync('package.json', path.join(root, 'package.json'));
+  fs.mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
+  fs.copyFileSync('apps/desktop/package.json', path.join(root, 'apps/desktop/package.json'));
   fs.copyFileSync(
     'source/themeRoleContract.json',
     path.join(root, 'source/themeRoleContract.json')
