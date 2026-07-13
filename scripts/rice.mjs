@@ -6,24 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import {
-  TYRIAN_INSTALL_HOME,
-  WALLPAPER_ASSET_PATH,
-  buildTyrianBackupRoot,
-} from './portableAssets.mjs';
 import { checkRequiredCommands, hasCommand } from './commandChecks.mjs';
-import {
-  admitOwnedPaths,
-  exists,
-  installManagedPathRaw,
-  operation,
-  resolvePathIdentity,
-  syncPathsDurably,
-  withTokenFileLock,
-  writeBinaryFileRaw,
-  writeTextFileRaw,
-} from './installOps.mjs';
 import {
   buildLiveInstallPlan,
   finishCommittedHomeFilesystemTransaction,
@@ -34,6 +17,24 @@ import {
   withHomeFilesystemTransaction,
   withLiveInstallLock,
 } from './installLiveTyrian.mjs';
+import {
+  admitOwnedPaths,
+  exists,
+  installManagedPathRaw,
+  operation,
+  publishStagedOwnedPathRaw,
+  removeOwnedPathRaw,
+  resolvePathIdentity,
+  withTokenFileLock,
+  writeBinaryFileRaw,
+  writeOwnedRecoveryCandidateRaw,
+  writeTextFileRaw,
+} from './installOps.mjs';
+import {
+  buildTyrianBackupRoot,
+  TYRIAN_INSTALL_HOME,
+  WALLPAPER_ASSET_PATH,
+} from './portableAssets.mjs';
 
 const repoRoot = process.cwd();
 const home = os.homedir();
@@ -58,18 +59,34 @@ export const RICE_LAYOUT_FILES = [
 export const RICE_LAYOUT_REQUIRED_COMMANDS = ['qdbus6', 'kscreen-doctor', 'systemctl'];
 const PLASMA_PANEL_ALIGNMENTS = new Set(['left', 'center', 'right']);
 const PLASMA_PANEL_HIDING_MODES = new Set(['none', 'autohide', 'dodgewindows', 'windowsgobelow']);
+const PLASMA_KCONFIG_LOCATION_ENTRIES = /** @type {const} */ ([
+  [0, 'floating'],
+  [3, 'top'],
+  [4, 'bottom'],
+  [5, 'left'],
+  [6, 'right'],
+]);
+/** @type {ReadonlyMap<number, PanelLocation>} */
+const PLASMA_KCONFIG_LOCATION_TO_SEMANTIC = new Map(PLASMA_KCONFIG_LOCATION_ENTRIES);
+const PLASMA_SEMANTIC_LOCATION_TO_KCONFIG = new Map(
+  PLASMA_KCONFIG_LOCATION_ENTRIES.map(([numeric, semantic]) => [semantic, numeric])
+);
+const PLASMA_PANEL_LOCATIONS = new Set(PLASMA_SEMANTIC_LOCATION_TO_KCONFIG.keys());
 const CAPTURE_LOCK_PATH = '.tyrian-rice-capture.lock';
 const CAPTURE_JOURNAL_PATH = '.tyrian-rice-capture-journal.json';
+const CAPTURE_JOURNAL_CANDIDATE_PATH = `${CAPTURE_JOURNAL_PATH}.next`;
 const CAPTURE_TRANSACTION_PREFIX = '.tyrian-rice-capture-transaction-';
 const PLASMA_SHELL_SERVICE = 'plasma-plasmashell.service';
 const PLASMA_LIFECYCLE_PATH = '.local/state/tyrian-night/plasma-lifecycle.json';
+const PLASMA_LIFECYCLE_CANDIDATE_PATH = `${PLASMA_LIFECYCLE_PATH}.next`;
 // Preserve KDE's alias applet IDs: icontasks/minimizeall have X-Plasma-RootPath
 // metadata that resolves to compiled taskmanager/showdesktop roots, and replacing
 // the IDs changes the exact panel mode/look even though Plasma logs mainscript warnings.
 
 /**
  * @typedef {(command: string, args: string[], options?: import('node:child_process').ExecFileSyncOptions) => Buffer | string} CommandRunner
- * @typedef {{ hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }} PanelRuntimeState
+ * @typedef {'top' | 'bottom' | 'left' | 'right' | 'floating'} PanelLocation
+ * @typedef {{ hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: PanelLocation }} PanelRuntimeState
  * @typedef {{ activityId: string; screen: number; image: string; wallpaperPlugin: string }} WallpaperRuntimeState
  * @typedef {{
  *   apply: boolean;
@@ -180,6 +197,7 @@ export function captureRiceLayout(options = {}) {
     [
       path.join(root, CAPTURE_LOCK_PATH),
       path.join(root, CAPTURE_JOURNAL_PATH),
+      path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH),
       path.join(root, RICE_WALLPAPER_PATH),
       ...RICE_LAYOUT_FILES.map(({ snapshotPath }) => path.join(root, snapshotPath)),
       path.join(root, RICE_MANIFEST_PATH),
@@ -436,11 +454,12 @@ class SimulatedCaptureProofInterruption extends Error {
 /**
  * @param {string} userHome
  * @param {'capture' | 'layout'} owner
- * @param {{ previousPanelStateById: Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>; previousWallpaperState: WallpaperRuntimeState[]; primaryScreen: number }} previousState
+ * @param {{ previousPanelStateById: Map<string, PanelRuntimeState>; previousWallpaperState: WallpaperRuntimeState[]; primaryScreen: number }} previousState
  * @returns {void}
  */
 function beginPlasmaLifecycle(userHome, owner, previousState) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+  removePlasmaLifecycleCandidate(userHome);
 
   if (exists(journalPath)) {
     throw new Error('A Plasma lifecycle journal is already active');
@@ -468,6 +487,7 @@ function beginPlasmaLifecycle(userHome, owner, previousState) {
  */
 function recoverPlasmaLifecycle(userHome, runCommand, filesystemOutcome) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
+  removePlasmaLifecycleCandidate(userHome);
 
   if (!exists(journalPath)) {
     return;
@@ -538,7 +558,7 @@ function recoverPlasmaLifecycle(userHome, runCommand, filesystemOutcome) {
  * @param {string} userHome
  * @param {CommandRunner} runCommand
  * @param {{ testInterruptAfterFilesystem?: boolean }} [options]
- * @returns {void}
+ * @returns {'none' | 'committed' | 'rolledBack'}
  */
 function recoverRiceHomeState(userHome, runCommand, options = {}) {
   const filesystemOutcome = recoverHomeFilesystemTransaction(userHome, {
@@ -554,6 +574,8 @@ function recoverRiceHomeState(userHome, runCommand, options = {}) {
   if (filesystemOutcome === 'committed') {
     finishCommittedHomeFilesystemTransaction(userHome);
   }
+
+  return filesystemOutcome;
 }
 
 class SimulatedCommittedHandoffInterruption extends Error {
@@ -590,15 +612,17 @@ function markPlasmaLifecycleRuntimeApplied(userHome, desiredPanelState, desiredW
  */
 function writePlasmaLifecycle(userHome, journal) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
-  const temporaryPath = `${journalPath}.${randomUUID()}.tmp`;
+  const temporaryPath = path.join(userHome, PLASMA_LIFECYCLE_CANDIDATE_PATH);
 
   try {
-    writeTextFileRaw(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
-    fsyncFile(temporaryPath);
-    fs.renameSync(temporaryPath, journalPath);
-    syncPathsDurably([journalPath]);
+    writeOwnedRecoveryCandidateRaw(
+      userHome,
+      temporaryPath,
+      `${JSON.stringify(journal, null, 2)}\n`
+    );
+    publishStagedOwnedPathRaw(userHome, temporaryPath, journalPath);
   } finally {
-    fs.rmSync(temporaryPath, { force: true });
+    if (exists(temporaryPath)) removeOwnedPathRaw(userHome, temporaryPath);
   }
 }
 
@@ -688,8 +712,17 @@ function readPlasmaLifecycle(userHome) {
  */
 function finishPlasmaLifecycle(userHome) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
-  fs.rmSync(journalPath, { force: true });
-  syncPathsDurably([journalPath]);
+  if (exists(journalPath)) removeOwnedPathRaw(userHome, journalPath);
+  removePlasmaLifecycleCandidate(userHome);
+}
+
+/**
+ * @param {string} userHome
+ * @returns {void}
+ */
+function removePlasmaLifecycleCandidate(userHome) {
+  const candidatePath = path.join(userHome, PLASMA_LIFECYCLE_CANDIDATE_PATH);
+  if (exists(candidatePath)) removeOwnedPathRaw(userHome, candidatePath);
 }
 
 /**
@@ -736,12 +769,13 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
       stagedPath: path.join(transactionRoot, 'stage', String(index)),
     };
   });
-  const journal = buildCaptureJournal(root, token, 'prepared', entries);
+  const allocatingJournal = buildCaptureJournal(root, token, 'allocating', entries);
 
   admitOwnedPaths(
     root,
     [
       journalPath,
+      path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH),
       transactionRoot,
       ...entries.flatMap(({ targetPath, backupPath, stagedPath }) => [
         targetPath,
@@ -753,10 +787,11 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
   );
 
   try {
+    writeCaptureJournal(root, allocatingJournal);
+
     for (const entry of entries) {
       if (entry.existed) {
-        fs.mkdirSync(path.dirname(entry.backupPath), { recursive: true });
-        fs.copyFileSync(entry.targetPath, entry.backupPath);
+        installManagedPathRaw('copy', entry.targetPath, entry.backupPath, { ownerRoot: root });
         fsyncFile(entry.backupPath);
 
         if (readCaptureFileGeneration(entry.backupPath) !== entry.originalChecksum) {
@@ -766,7 +801,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
 
       const { content, message, stagedPath } = entry;
       console.log(message);
-      writeBinaryFileRaw(stagedPath, content);
+      writeBinaryFileRaw(stagedPath, content, { ownerRoot: root });
       fsyncFile(stagedPath);
     }
 
@@ -778,13 +813,13 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
 
     fsyncDirectory(transactionRoot);
 
+    const journal = { ...allocatingJournal, phase: /** @type {const} */ ('prepared') };
     writeCaptureJournal(root, journal);
 
     for (let index = 0; index < entries.length; index += 1) {
       const { stagedPath, targetPath, originalChecksum } = entries[index];
       assertCaptureFileGeneration(targetPath, originalChecksum, 'before publication');
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.renameSync(stagedPath, targetPath);
+      publishStagedOwnedPathRaw(root, stagedPath, targetPath);
       fsyncFile(targetPath);
       fsyncDirectory(path.dirname(targetPath));
 
@@ -810,7 +845,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
       if (exists(journalPath)) {
         recoverCapturePublication(root);
       } else {
-        fs.rmSync(transactionRoot, { force: true, recursive: true });
+        if (exists(transactionRoot)) removeOwnedPathRaw(root, transactionRoot);
       }
     } catch (rollbackError) {
       throw new AggregateError(
@@ -923,19 +958,19 @@ function assertRegularSourceFileUnder(root, sourcePath, label) {
  * @returns {void}
  */
 function withCaptureLock(root, action) {
-  return withTokenFileLock(path.join(root, CAPTURE_LOCK_PATH), action);
+  return withTokenFileLock(path.join(root, CAPTURE_LOCK_PATH), action, { ownerRoot: root });
 }
 
 /**
  * @param {string} root
  * @param {string} token
- * @param {'prepared' | 'verified' | 'rolledBack'} phase
+ * @param {'allocating' | 'prepared' | 'verified' | 'rolledBack'} phase
  * @param {Array<{ targetPath: string; stagedPath: string; backupPath: string; existed: boolean; originalChecksum: string | null; desiredChecksum: string }>} entries
- * @returns {{ version: 2; token: string; phase: 'prepared' | 'verified' | 'rolledBack'; transactionRoot: string; entries: Array<{ targetPath: string; stagedPath: string; backupPath: string; existed: boolean; originalChecksum: string | null; desiredChecksum: string }> }}
+ * @returns {{ version: 3; token: string; phase: 'allocating' | 'prepared' | 'verified' | 'rolledBack'; transactionRoot: string; entries: Array<{ targetPath: string; stagedPath: string; backupPath: string; existed: boolean; originalChecksum: string | null; desiredChecksum: string }> }}
  */
 function buildCaptureJournal(root, token, phase, entries) {
   return {
-    version: 2,
+    version: 3,
     token,
     phase,
     transactionRoot: `${CAPTURE_TRANSACTION_PREFIX}${token}`,
@@ -959,22 +994,13 @@ function buildCaptureJournal(root, token, phase, entries) {
  */
 function writeCaptureJournal(root, journal) {
   const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
-  const temporaryPath = `${journalPath}.${randomUUID()}.tmp`;
+  const temporaryPath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
 
   try {
-    writeTextFileRaw(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
-    const descriptor = fs.openSync(temporaryPath, 'r');
-
-    try {
-      fs.fsyncSync(descriptor);
-    } finally {
-      fs.closeSync(descriptor);
-    }
-
-    fs.renameSync(temporaryPath, journalPath);
-    fsyncDirectory(root);
+    writeOwnedRecoveryCandidateRaw(root, temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
+    publishStagedOwnedPathRaw(root, temporaryPath, journalPath);
   } finally {
-    fs.rmSync(temporaryPath, { force: true });
+    if (exists(temporaryPath)) removeOwnedPathRaw(root, temporaryPath);
   }
 }
 
@@ -984,6 +1010,11 @@ function writeCaptureJournal(root, journal) {
  */
 function recoverCapturePublication(root) {
   const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
+  const candidatePath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
+
+  if (exists(candidatePath)) {
+    removeOwnedPathRaw(root, candidatePath);
+  }
 
   if (!exists(journalPath)) {
     return;
@@ -1009,6 +1040,7 @@ function recoverCapturePublication(root) {
     root,
     [
       journalPath,
+      candidatePath,
       transactionRoot,
       ...journal.entries.flatMap((entry) => [
         path.join(root, entry.targetPath),
@@ -1018,6 +1050,11 @@ function recoverCapturePublication(root) {
     ],
     'Rice capture recovery'
   );
+
+  if (journal.phase === 'allocating') {
+    finalizeCapturePublication(root, journalPath, transactionRoot);
+    return;
+  }
 
   if (journal.phase === 'prepared') {
     for (const entry of journal.entries) {
@@ -1049,19 +1086,20 @@ function recoverCapturePublication(root) {
 
         if (entry.existed) {
           const restorePath = path.join(transactionRoot, 'restore', String(index));
-          fs.mkdirSync(path.dirname(restorePath), { recursive: true });
-          fs.copyFileSync(path.join(root, entry.backupPath), restorePath);
+          installManagedPathRaw('copy', path.join(root, entry.backupPath), restorePath, {
+            ownerRoot: root,
+          });
           fsyncFile(restorePath);
           if (readCaptureFileGeneration(restorePath) !== entry.originalChecksum) {
             throw new Error(`Rice capture recovery restore copy changed for ${entry.targetPath}`);
           }
 
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
-          fs.renameSync(restorePath, targetPath);
+          publishStagedOwnedPathRaw(root, restorePath, targetPath);
           fsyncFile(targetPath);
         } else {
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
-          fs.rmSync(targetPath, { force: true });
+          removeOwnedPathRaw(root, targetPath);
         }
 
         fsyncDirectory(path.dirname(targetPath));
@@ -1101,10 +1139,11 @@ function validateCaptureJournal(root, candidate) {
   ];
 
   if (
-    journal.version !== 2 ||
+    (journal.version !== 2 && journal.version !== 3) ||
     typeof journal.token !== 'string' ||
     !/^[0-9a-f-]+$/u.test(journal.token) ||
-    !['prepared', 'verified', 'rolledBack'].includes(journal.phase) ||
+    !['allocating', 'prepared', 'verified', 'rolledBack'].includes(journal.phase) ||
+    (journal.version === 2 && journal.phase === 'allocating') ||
     journal.transactionRoot !== `${CAPTURE_TRANSACTION_PREFIX}${journal.token}` ||
     !Array.isArray(journal.entries) ||
     journal.entries.length !== allowedTargets.length
@@ -1148,7 +1187,7 @@ function validateCaptureJournal(root, candidate) {
     seenTargets.add(entry.targetPath);
   }
 
-  return /** @type {ReturnType<typeof buildCaptureJournal>} */ (journal);
+  return /** @type {ReturnType<typeof buildCaptureJournal>} */ ({ ...journal, version: 3 });
 }
 
 /**
@@ -1162,9 +1201,10 @@ function finalizeCapturePublication(root, journalPath, transactionRoot) {
     throw new Error('Rice capture transaction root escapes its repository');
   }
 
-  fs.rmSync(transactionRoot, { force: true, recursive: true });
-  fs.rmSync(journalPath, { force: true });
-  fsyncDirectory(root);
+  if (exists(transactionRoot)) removeOwnedPathRaw(root, transactionRoot);
+  if (exists(journalPath)) removeOwnedPathRaw(root, journalPath);
+  const candidatePath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
+  if (exists(candidatePath)) removeOwnedPathRaw(root, candidatePath);
 }
 
 /**
@@ -1327,16 +1367,16 @@ function sameWallpaperRuntimeState(before, after) {
 }
 
 /**
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; location?: number }>} panelStateById
+ * @param {Map<string, PanelRuntimeState>} panelStateById
  * @param {number} screen
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen: number; location: number }>}
+ * @returns {Map<string, PanelRuntimeState>}
  */
 function buildDesiredPanelRuntimeState(panelStateById, screen) {
   return new Map(
     [...panelStateById].map(([panelId, state]) => {
       const location = state.location;
 
-      if (typeof location !== 'number' || !Number.isSafeInteger(location) || location < 0) {
+      if (!location || !PLASMA_PANEL_LOCATIONS.has(location)) {
         throw new Error(`Plasma panel ${panelId} has no owned placement in the layout snapshot`);
       }
 
@@ -1346,7 +1386,7 @@ function buildDesiredPanelRuntimeState(panelStateById, screen) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; withPlasmaLayout?: boolean; layoutOnly?: boolean; link?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStyle?: boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean; testInterruptRecoveryAfterFilesystem?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; withPlasmaLayout?: boolean; layoutOnly?: boolean; link?: boolean; environment?: NodeJS.ProcessEnv; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStyle?: boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean; testInterruptRecoveryAfterFilesystem?: boolean }} [options]
  * @returns {void}
  */
 export function installRice(options = {}) {
@@ -1358,6 +1398,7 @@ export function installRice(options = {}) {
   const link = options.link ?? false;
   const runCommand = options.runCommand ?? execFileSync;
   const commandExists = options.hasCommand ?? hasCommand;
+  const environment = options.environment ?? (options.home === undefined ? process.env : {});
   const runtimeRoot = resolvePathIdentity(link ? root : path.join(userHome, TYRIAN_INSTALL_HOME));
 
   if (apply && withPlasmaLayout) {
@@ -1377,7 +1418,13 @@ export function installRice(options = {}) {
       withCaptureLock(root, () => {
         recoverCapturePublication(root);
         const livePlan = !layoutOnly
-          ? buildLiveInstallPlan({ repoRoot: root, home: userHome, apply, link })
+          ? buildLiveInstallPlan({
+              repoRoot: root,
+              home: userHome,
+              apply,
+              link,
+              environment,
+            })
           : undefined;
         if (withPlasmaLayout) {
           checkRequiredCommands(RICE_LAYOUT_REQUIRED_COMMANDS, apply, commandExists, 'Tyrian rice');
@@ -1402,6 +1449,7 @@ export function installRice(options = {}) {
             withPlasmaLayout,
             layoutOnly,
             link,
+            environment,
             runtimeRoot,
             livePlan,
             preparedLayout,
@@ -1463,7 +1511,7 @@ export function installRice(options = {}) {
 }
 
 /**
- * @param {{ root: string; userHome: string; apply: boolean; withPlasmaLayout: boolean; layoutOnly: boolean; link: boolean; runtimeRoot: string; livePlan?: ReturnType<typeof buildLiveInstallPlan>; preparedLayout?: PreparedPlasmaLayoutInstall; testInterruptAfterStyle?: boolean }} options
+ * @param {{ root: string; userHome: string; apply: boolean; withPlasmaLayout: boolean; layoutOnly: boolean; link: boolean; environment?: NodeJS.ProcessEnv; runtimeRoot: string; livePlan?: ReturnType<typeof buildLiveInstallPlan>; preparedLayout?: PreparedPlasmaLayoutInstall; testInterruptAfterStyle?: boolean }} options
  * @returns {void}
  */
 function installRiceOwned(options) {
@@ -1474,6 +1522,7 @@ function installRiceOwned(options) {
     withPlasmaLayout,
     layoutOnly,
     link,
+    environment,
     runtimeRoot,
     livePlan,
     preparedLayout,
@@ -1490,10 +1539,11 @@ function installRiceOwned(options) {
         home: userHome,
         apply,
         link,
+        environment,
         stagingRoot: livePlan?.stagingRoot,
       });
     } else if (withPlasmaLayout && !link) {
-      materializeRiceLayoutAssets(root, runtimeRoot, apply);
+      materializeRiceLayoutAssets(root, userHome, runtimeRoot, apply);
     }
 
     if (testInterruptAfterStyle) {
@@ -1536,7 +1586,7 @@ class SimulatedRiceCommitInterruption extends Error {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
  * @returns {void}
  */
 export function installPlasmaLayout(options = {}) {
@@ -1547,6 +1597,7 @@ export function installPlasmaLayout(options = {}) {
   );
   const apply = options.apply ?? false;
   const runCommand = options.runCommand ?? execFileSync;
+  const commandExists = options.hasCommand ?? hasCommand;
 
   if (apply) {
     assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Plasma layout install');
@@ -1555,7 +1606,18 @@ export function installPlasmaLayout(options = {}) {
   withLiveInstallLock(
     userHome,
     () => {
-      recoverRiceHomeState(userHome, runCommand);
+      const recoveryOutcome = recoverRiceHomeState(userHome, runCommand);
+
+      if (recoveryOutcome !== 'none') {
+        console.log(`Recovered prior rice transaction: ${recoveryOutcome}`);
+      }
+
+      checkRequiredCommands(
+        RICE_LAYOUT_REQUIRED_COMMANDS,
+        apply,
+        commandExists,
+        'Plasma layout install'
+      );
       withCaptureLock(root, () => {
         recoverCapturePublication(root);
         installPreparedPlasmaLayout(
@@ -1710,7 +1772,7 @@ function applyPlasmaLayoutInstall(plan) {
 
   try {
     for (const entry of preparedEntries) {
-      stageTextFile(entry.stagedPath, entry.installedContent);
+      stageTextFile(plan.home, entry.stagedPath, entry.installedContent);
     }
 
     console.log('apply: stop Plasma shell before restoring layout');
@@ -1727,7 +1789,7 @@ function applyPlasmaLayoutInstall(plan) {
 
     for (const entry of preparedEntries) {
       console.log(`apply: restore ${entry.targetPath}`);
-      fs.renameSync(entry.stagedPath, entry.targetPath);
+      publishStagedOwnedPathRaw(plan.home, entry.stagedPath, entry.targetPath);
     }
 
     console.log('apply: start Plasma shell');
@@ -1757,7 +1819,7 @@ function applyPlasmaLayoutInstall(plan) {
     }
   } finally {
     for (const { stagedPath } of preparedEntries) {
-      fs.rmSync(stagedPath, { force: true });
+      if (exists(stagedPath)) removeOwnedPathRaw(plan.home, stagedPath);
     }
   }
 }
@@ -2113,7 +2175,7 @@ function readPlasmaScreenGeometries(runCommand) {
 
 /**
  * @param {CommandRunner} runCommand
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>}
+ * @returns {Map<string, PanelRuntimeState>}
  */
 function readLivePanelStateById(runCommand) {
   const output = String(
@@ -2142,7 +2204,7 @@ function readLivePanelStateById(runCommand) {
           '    hiding: String(panel.hiding),',
           '    alignment: String(panel.alignment),',
           '    screen: actualScreen,',
-          '    location: Number(panel.location),',
+          '    location: String(panel.location),',
           '    lengthRatio: width > 0 ? panel.length / width : null,',
           '    height: panel.height',
           '  });',
@@ -2159,7 +2221,7 @@ function readLivePanelStateById(runCommand) {
 
 /**
  * @param {string} output
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>}
+ * @returns {Map<string, PanelRuntimeState>}
  */
 function parsePanelStateJson(output) {
   const parsed = parseJsonFromQdbusOutput(output);
@@ -2178,8 +2240,7 @@ function parsePanelStateJson(output) {
       !PLASMA_PANEL_ALIGNMENTS.has(entry.alignment) ||
       !Number.isSafeInteger(entry.screen) ||
       entry.screen < 0 ||
-      !Number.isSafeInteger(entry.location) ||
-      entry.location < 0 ||
+      !PLASMA_PANEL_LOCATIONS.has(entry.location) ||
       !Number.isFinite(entry.lengthRatio) ||
       entry.lengthRatio <= 0 ||
       !Number.isFinite(entry.height) ||
@@ -2197,7 +2258,7 @@ function parsePanelStateJson(output) {
       height: Number(entry.height),
       hiding: entry.hiding,
       lengthRatio: Number(entry.lengthRatio),
-      location: Number(entry.location),
+      location: entry.location,
       screen: Number(entry.screen),
     });
   }
@@ -2207,7 +2268,7 @@ function parsePanelStateJson(output) {
 
 /**
  * @param {string} desktopLayout
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>} panelStateById
+ * @param {Map<string, PanelRuntimeState>} panelStateById
  * @returns {string}
  */
 function applyPanelStateToDesktopLayout(desktopLayout, panelStateById) {
@@ -2248,6 +2309,16 @@ function applyPanelStateToDesktopLayout(desktopLayout, panelStateById) {
       nextSection = upsertSectionKey(nextSection, 'tyrianPanelHeight', String(state.height));
     }
 
+    if (state.location !== undefined) {
+      const numericLocation = PLASMA_SEMANTIC_LOCATION_TO_KCONFIG.get(state.location);
+
+      if (numericLocation === undefined) {
+        throw new Error(`Plasma panel ${id} has unsupported runtime location ${state.location}`);
+      }
+
+      nextSection = upsertSectionKey(nextSection, 'location', String(numericLocation));
+    }
+
     return nextSection;
   });
 }
@@ -2269,7 +2340,7 @@ function readSnapshotPanelStateById(desktopLayout) {
       height: parseOptionalNumber(section.match(/^tyrianPanelHeight=(.+)$/mu)?.[1]),
       hiding: section.match(/^hiding=(.+)$/mu)?.[1],
       lengthRatio: parseOptionalNumber(section.match(/^tyrianPanelLengthRatio=(.+)$/mu)?.[1]),
-      location: parseOptionalNumber(section.match(/^location=(.+)$/mu)?.[1]),
+      location: parsePanelLocationFromKConfig(section.match(/^location=(.+)$/mu)?.[1], id),
     });
 
     return section;
@@ -2317,7 +2388,7 @@ function restorePlasmaPanelState(panelStateById, primaryScreen, runCommand) {
 }
 
 /**
- * @param {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: number }>} panelStateById
+ * @param {Map<string, PanelRuntimeState>} panelStateById
  * @param {number} primaryScreen
  * @returns {string}
  */
@@ -2347,7 +2418,7 @@ function buildPlasmaPanelStateScript(panelStateById, primaryScreen) {
     '    panel.currentConfigGroup = [];',
     '    panel.writeConfig("lastScreen", String(targetScreen));',
     '    panel.screen = targetScreen;',
-    '    if (typeof state.location === "number") panel.location = state.location;',
+    '    if (typeof state.location === "string") panel.location = state.location;',
     '    if (state.hiding) panel.hiding = state.hiding;',
     '    if (state.alignment) panel.alignment = state.alignment;',
     '    if (state.height) panel.height = state.height;',
@@ -2365,6 +2436,28 @@ function buildPlasmaPanelStateScript(panelStateById, primaryScreen) {
     '}',
     'print(JSON.stringify(mutation));',
   ].join('\n');
+}
+
+/**
+ * Convert Plasma's persisted KConfig enum at the file boundary. Runtime state
+ * remains semantic because the Plasma scripting API accepts named locations.
+ *
+ * @param {string | undefined} value
+ * @param {string} panelId
+ * @returns {PanelLocation | undefined}
+ */
+function parsePanelLocationFromKConfig(value, panelId) {
+  if (value === undefined) return undefined;
+  const numericLocation = Number(value);
+  const location = Number.isSafeInteger(numericLocation)
+    ? PLASMA_KCONFIG_LOCATION_TO_SEMANTIC.get(numericLocation)
+    : undefined;
+
+  if (!location) {
+    throw new Error(`Plasma panel ${panelId} has unsupported KConfig location ${value}`);
+  }
+
+  return /** @type {PanelLocation} */ (location);
 }
 
 /**
@@ -2450,11 +2543,12 @@ function upsertSectionKey(section, key, value) {
 
 /**
  * @param {string} root
+ * @param {string} ownerRoot
  * @param {string} runtimeRoot
  * @param {boolean} apply
  * @returns {void}
  */
-function materializeRiceLayoutAssets(root, runtimeRoot, apply) {
+function materializeRiceLayoutAssets(root, ownerRoot, runtimeRoot, apply) {
   const sourcePath = path.join(root, RICE_WALLPAPER_PATH);
   const targetPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
@@ -2464,7 +2558,7 @@ function materializeRiceLayoutAssets(root, runtimeRoot, apply) {
   }
 
   operation(true, `copy ${sourcePath} -> ${targetPath}`, () => {
-    installManagedPathRaw('copy', sourcePath, targetPath);
+    installManagedPathRaw('copy', sourcePath, targetPath, { ownerRoot });
   });
 }
 
@@ -2829,12 +2923,13 @@ function assertRiceManifest(manifest) {
 }
 
 /**
+ * @param {string} ownerRoot
  * @param {string} stagedPath
  * @param {string} content
  * @returns {void}
  */
-function stageTextFile(stagedPath, content) {
-  writeTextFileRaw(stagedPath, content, { finalNewline: true });
+function stageTextFile(ownerRoot, stagedPath, content) {
+  writeTextFileRaw(stagedPath, content, { finalNewline: true, ownerRoot });
 }
 
 /**

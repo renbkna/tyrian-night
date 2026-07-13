@@ -10,23 +10,28 @@ import { buildDesktopThemeAssets, writeDesktopThemeAssets } from './desktopTheme
 import {
   admitOwnedDirectories,
   admitOwnedPaths,
+  assertAtomicDirectoryExchangeAvailable,
   discardOwnedPathSnapshot,
   exists,
   installManagedPathRaw as installManagedPathWithMode,
   operation,
+  publishStagedOwnedPathRaw,
+  recordOwnedPathGeneration,
+  removeOwnedEmptyDirectoriesRaw,
+  removeOwnedPathRaw,
   resolvePathIdentity,
   restoreOwnedPathSnapshot,
   snapshotOwnedPaths,
   syncPathsDurably,
   withTokenFileLock,
+  writeOwnedRecoveryCandidateRaw,
   writeTextFileRaw,
 } from './installOps.mjs';
 import {
+  buildTyrianBackupRoot,
   FASTFETCH_IMAGE_ASSET_PATH,
-  FASTFETCH_IMAGE_HOME_PATH,
   TYRIAN_INSTALL_HOME,
   WALLPAPER_ASSET_PATH,
-  buildTyrianBackupRoot,
 } from './portableAssets.mjs';
 import {
   buildFishStartupConfig,
@@ -71,6 +76,9 @@ const activeHomeTransactions = new Map();
  *   stagingRoot: string;
  *   sourceRoot: string;
  *   backupRoot: string;
+ *   configRoot: string;
+ *   dataRoot: string;
+ *   stateRoot: string;
  *   materializedRoots: CopyRoot[];
  *   materializedPaths: string[];
  *   terminalThemeSlugs: string[];
@@ -81,6 +89,7 @@ const activeHomeTransactions = new Map();
  *   ownershipManifestPath: string;
  *   migrationRetirementPath: string;
  *   touchedPaths: string[];
+ *   hyprlandMode: 'lua' | 'legacy';
  * }} LiveInstallPlan
  * @typedef {{
  *   caelestiaSequences: string;
@@ -241,19 +250,24 @@ function assertGeneratedOutputAncestors(root, relativeOutput) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv }} [options]
  * @returns {LiveInstallPlan}
  */
 export function buildLiveInstallPlan(options = {}) {
   const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
   const userHome = resolvePathIdentity(options.home ?? home);
+  const xdgRoots = resolveXdgRoots(
+    userHome,
+    options.environment ?? (options.home === undefined ? process.env : {})
+  );
   const mode = options.link ? 'link' : 'copy';
   const installRoot = path.join(userHome, TYRIAN_INSTALL_HOME);
   const stagingRoot = options.stagingRoot ?? buildUnusedInstallStagingRoot(installRoot);
   const sourceRoot = mode === 'link' ? root : installRoot;
-  const livePaths = buildLivePaths(userHome);
+  const hyprlandMode = selectHyprlandMode(xdgRoots.configRoot);
+  const livePaths = buildLivePaths(xdgRoots, hyprlandMode);
   const legacyPaths = buildLegacyPaths(userHome);
-  const sourcePaths = buildSourcePaths(sourceRoot);
+  const sourcePaths = buildSourcePaths(sourceRoot, hyprlandMode);
   const terminalThemeSlugs = readThemeSources(root).map((source) => source.slug);
   const materializedPaths = buildMaterializedInstallPaths(terminalThemeSlugs);
   const materializedRoots =
@@ -265,7 +279,7 @@ export function buildLiveInstallPlan(options = {}) {
       : [
           {
             source: path.join(root, FASTFETCH_IMAGE_ASSET_PATH),
-            target: path.join(userHome, FASTFETCH_IMAGE_HOME_PATH),
+            target: path.join(xdgRoots.dataRoot, 'caelestia/fastfetch/tyrian-fetch.webp'),
           },
           {
             source: path.join(root, 'assets/wallpaper-tyrian.png'),
@@ -288,6 +302,9 @@ export function buildLiveInstallPlan(options = {}) {
     stagingRoot,
     sourceRoot,
     backupRoot: buildTyrianBackupRoot(userHome, 'live-tyrian-apply'),
+    configRoot: xdgRoots.configRoot,
+    dataRoot: xdgRoots.dataRoot,
+    stateRoot: xdgRoots.stateRoot,
     materializedPaths,
     materializedRoots,
     livePaths,
@@ -296,7 +313,7 @@ export function buildLiveInstallPlan(options = {}) {
     legacyPaths,
     ownedPaths: [
       ...new Set([
-        installRoot,
+        ...(mode === 'copy' ? [installRoot] : []),
         ...materializedRoots.map(({ target }) => target),
         ...liveOwnedPaths,
       ]),
@@ -304,6 +321,7 @@ export function buildLiveInstallPlan(options = {}) {
     ownershipManifestPath,
     migrationRetirementPath,
     touchedPaths: liveOwnedPaths,
+    hyprlandMode,
   };
 }
 
@@ -333,7 +351,6 @@ function buildMaterializedInstallPaths(themeSlugs) {
     ...themeSlugs.map((slug) => `terminal/ghostty/themes/${slug}`),
     ...themeSlugs.map((slug) => `terminal/foot/themes/${slug}.ini`),
     ...themeSlugs.map((slug) => `terminal/fish/themes/${slug}.fish`),
-    'terminal/ghostty/ghostty.css',
     'terminal/fish/functions/fish_greeting.fish',
     'terminal/fastfetch/tyrian-night.jsonc',
     'terminal/starship/tyrian-night.toml',
@@ -342,11 +359,12 @@ function buildMaterializedInstallPaths(themeSlugs) {
     'desktop/kde/plasma/look-and-feel/TyrianNight',
     'desktop/caelestia/state/tyrian-night.scheme.json',
     'desktop/caelestia/hypr/tyrian-night.conf',
+    'desktop/caelestia/hypr/tyrian-night.lua',
   ];
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} [options]
  * @returns {LiveInstallReceipt | undefined}
  */
 export function installLiveTyrian(options = {}) {
@@ -377,20 +395,26 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
     path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH),
   ]);
 
-  return withTokenFileLock(lockPath, () => {
-    if (
-      exists(path.join(userHome, PLASMA_LIFECYCLE_RELATIVE_PATH)) &&
-      !options.allowPlasmaRecovery
-    ) {
-      throw new Error('An unfinished Plasma lifecycle requires recovery through the rice command');
-    }
+  return withTokenFileLock(
+    lockPath,
+    () => {
+      if (
+        exists(path.join(userHome, PLASMA_LIFECYCLE_RELATIVE_PATH)) &&
+        !options.allowPlasmaRecovery
+      ) {
+        throw new Error(
+          'An unfinished Plasma lifecycle requires recovery through the rice command'
+        );
+      }
 
-    if (!activeHomeTransactions.has(userHome) && !options.allowPlasmaRecovery) {
-      recoverHomeFilesystemTransaction(userHome);
-    }
+      if (!activeHomeTransactions.has(userHome) && !options.allowPlasmaRecovery) {
+        recoverHomeFilesystemTransaction(userHome);
+      }
 
-    return action();
-  });
+      return action();
+    },
+    { ownerRoot: userHome }
+  );
 }
 
 /**
@@ -402,7 +426,16 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
  */
 export function withHomeFilesystemTransaction(requestedHome, transaction, action) {
   const userHome = resolvePathIdentity(requestedHome);
-  const targetPaths = [...new Set(canonicalizeOwnedHomePaths(userHome, transaction.targetPaths))];
+  const canonicalTargetPaths = [
+    ...new Set(canonicalizeOwnedHomePaths(userHome, transaction.targetPaths)),
+  ];
+  const targetPaths = canonicalTargetPaths.filter(
+    (candidate) =>
+      !canonicalTargetPaths.some(
+        (possibleAncestor) =>
+          possibleAncestor !== candidate && isSameOrDescendant(possibleAncestor, candidate)
+      )
+  );
   const [backupRoot] = canonicalizeOwnedHomePaths(userHome, [transaction.backupRoot]);
   admitOwnedDirectories(userHome, [backupRoot], `${transaction.owner} backup container`);
 
@@ -428,24 +461,33 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
       }
     }
 
-    const snapshot = snapshotOwnedPaths(targetPaths, backupRoot);
-    /** @type {{ version: 2; owner: 'live' | 'rice' | 'layout'; phase: 'prepared'; backupRoot: string; snapshotId: string; targetPaths: string[] }} */
-    const pointer = {
-      version: 2,
+    assertAtomicDirectoryExchangeAvailable();
+
+    const snapshotId = randomUUID();
+    /** @type {{ version: 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating'; backupRoot: string; snapshotId: string; targetPaths: string[] }} */
+    const allocatingPointer = {
+      version: 3,
       owner: transaction.owner,
-      phase: 'prepared',
+      phase: 'allocating',
       backupRoot: path.relative(userHome, backupRoot),
-      snapshotId: snapshot.snapshotId,
-      targetPaths: snapshot.targetPaths.map((targetPath) => path.relative(userHome, targetPath)),
+      snapshotId,
+      targetPaths: targetPaths.map((targetPath) => path.relative(userHome, targetPath)),
     };
+    writeLiveInstallTransaction(userHome, allocatingPointer);
+    /** @type {ReturnType<typeof snapshotOwnedPaths> | undefined} */
+    let snapshot;
 
     try {
+      snapshot = snapshotOwnedPaths(targetPaths, backupRoot, { ownerRoot: userHome, snapshotId });
       syncPathsDurably([backupRoot, path.dirname(backupRoot)]);
-      writeLiveInstallTransaction(userHome, pointer);
+      writeLiveInstallTransaction(userHome, { ...allocatingPointer, phase: 'prepared' });
     } catch (error) {
-      snapshot.discard();
+      snapshot?.discard();
+      removeLiveInstallTransaction(userHome);
       throw error;
     }
+
+    const pointer = { ...allocatingPointer, phase: /** @type {const} */ ('prepared') };
 
     activeHomeTransactions.set(userHome, { depth: 1, owner: transaction.owner, targetPaths });
     /** @type {T | undefined} */
@@ -455,6 +497,7 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
       result = action();
     } catch (error) {
       activeHomeTransactions.delete(userHome);
+      snapshot.seal();
 
       if (transaction.shouldLeavePrepared?.(error)) {
         throw error;
@@ -488,6 +531,7 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
     }
 
     activeHomeTransactions.delete(userHome);
+    snapshot.seal();
 
     try {
       syncPathsDurably(targetPaths);
@@ -649,12 +693,16 @@ function resolveLiveInstallTransactionScope(plan) {
   const desiredOwnedPaths = [...new Set(plan.ownedPaths)];
   const desiredOwnedPathSet = new Set(desiredOwnedPaths);
   const staleOwnedPaths = previousOwnedPaths.filter(
-    (ownedPath) => !desiredOwnedPathSet.has(ownedPath)
+    (ownedPath) =>
+      !desiredOwnedPathSet.has(ownedPath) &&
+      !desiredOwnedPaths.some((desiredPath) => isSameOrDescendant(ownedPath, desiredPath))
   );
 
   const targetPaths = [
-    plan.installRoot,
-    plan.stagingRoot,
+    ...(plan.mode === 'copy' ? [plan.installRoot, plan.stagingRoot] : []),
+    ...plan.materializedRoots
+      .map(({ target }) => target)
+      .filter((target) => plan.mode !== 'copy' || !isSameOrDescendant(plan.installRoot, target)),
     plan.ownershipManifestPath,
     plan.migrationRetirementPath,
     ...plan.touchedPaths,
@@ -686,6 +734,7 @@ function readLiveOwnedPaths(plan) {
     return [
       ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.ghosttyThemes, slug)),
       ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.footThemes, `${slug}.ini`)),
+      path.join(plan.configRoot, 'ghostty/ghostty.css'),
       ...plan.legacyPaths,
     ];
   }
@@ -778,7 +827,7 @@ function isAllowedLiveOwnedPath(plan, ownedPath) {
 function cleanupStaleOwnedPaths(plan, staleOwnedPaths) {
   for (const stalePath of staleOwnedPaths) {
     operation(plan.apply, `remove stale owned path ${stalePath}`, () => {
-      fs.rmSync(stalePath, { recursive: true, force: true });
+      removeOwnedPathRaw(plan.home, stalePath);
     });
   }
 }
@@ -803,7 +852,7 @@ function publishLiveOwnedPaths(plan, ownedPaths) {
   )}\n`;
 
   operation(plan.apply, `write ${plan.ownershipManifestPath}`, () => {
-    writeFileRaw(plan.ownershipManifestPath, content);
+    writeFileRaw(plan.home, plan.ownershipManifestPath, content);
   });
 }
 
@@ -823,7 +872,7 @@ function publishLiveMigrationRetirement(plan) {
   )}\n`;
 
   operation(plan.apply, `write ${plan.migrationRetirementPath}`, () => {
-    writeFileRaw(plan.migrationRetirementPath, content);
+    writeFileRaw(plan.home, plan.migrationRetirementPath, content);
   });
 }
 
@@ -840,6 +889,11 @@ class SimulatedLiveInstallInterruption extends Error {
  */
 export function recoverHomeFilesystemTransaction(userHome, options = {}) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
+  const transactionCandidatePath = `${transactionPath}.next`;
+
+  if (exists(transactionCandidatePath)) {
+    removeOwnedPathRaw(userHome, transactionCandidatePath);
+  }
 
   if (!exists(transactionPath)) {
     return 'none';
@@ -847,6 +901,29 @@ export function recoverHomeFilesystemTransaction(userHome, options = {}) {
 
   const transaction = readLiveInstallTransaction(userHome);
   const backupRoot = path.resolve(userHome, transaction.backupRoot);
+
+  if (transaction.version === 2) {
+    if (transaction.phase === 'committed') {
+      if (!options.deferCommittedCleanup) {
+        removeLiveInstallTransaction(userHome);
+      }
+
+      return 'committed';
+    }
+
+    throw new Error(
+      `Legacy live transaction ${transaction.phase} cannot be recovered safely because it has no generation evidence; preserve ${backupRoot}`
+    );
+  }
+
+  if (transaction.phase === 'allocating') {
+    if (exists(backupRoot)) {
+      removeOwnedPathRaw(userHome, backupRoot);
+    }
+
+    removeLiveInstallTransaction(userHome);
+    return 'rolledBack';
+  }
 
   if (transaction.phase === 'committed') {
     if (!options.deferCommittedCleanup) {
@@ -864,7 +941,11 @@ export function recoverHomeFilesystemTransaction(userHome, options = {}) {
       ),
       snapshotId: transaction.snapshotId,
     });
-    writeLiveInstallTransaction(userHome, { ...transaction, phase: 'rolledBack' });
+    writeLiveInstallTransaction(userHome, {
+      ...transaction,
+      version: 3,
+      phase: 'rolledBack',
+    });
   }
 
   if (exists(backupRoot)) {
@@ -904,26 +985,32 @@ export function finishCommittedHomeFilesystemTransaction(userHome) {
 
 /**
  * @param {string} userHome
- * @param {{ version: 2; owner: 'live' | 'rice' | 'layout'; phase: 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }} transaction
+ * @param {{ version: 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }} transaction
  * @returns {void}
  */
 function writeLiveInstallTransaction(userHome, transaction) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
-  const temporaryPath = `${transactionPath}.${randomUUID()}.tmp`;
+  // The fixed candidate is an explicit recovery artifact. A crash before
+  // publication leaves one bounded path for the next lock owner to remove.
+  const temporaryPath = `${transactionPath}.next`;
 
   try {
-    writeTextFileRaw(temporaryPath, `${JSON.stringify(transaction, null, 2)}\n`);
-    fsyncFile(temporaryPath);
-    fs.renameSync(temporaryPath, transactionPath);
-    fsyncDirectory(path.dirname(transactionPath));
+    writeOwnedRecoveryCandidateRaw(
+      userHome,
+      temporaryPath,
+      `${JSON.stringify(transaction, null, 2)}\n`
+    );
+    publishStagedOwnedPathRaw(userHome, temporaryPath, transactionPath);
   } finally {
-    fs.rmSync(temporaryPath, { force: true });
+    if (exists(temporaryPath)) {
+      removeOwnedPathRaw(userHome, temporaryPath);
+    }
   }
 }
 
 /**
  * @param {string} userHome
- * @returns {{ version: 2; owner: 'live' | 'rice' | 'layout'; phase: 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }}
+ * @returns {{ version: 2 | 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }}
  */
 function readLiveInstallTransaction(userHome) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
@@ -967,9 +1054,10 @@ function readLiveInstallTransaction(userHome) {
     : undefined;
 
   if (
-    candidate?.version !== 2 ||
+    ![2, 3].includes(candidate?.version) ||
     !['live', 'rice', 'layout'].includes(candidate.owner) ||
-    !['prepared', 'committed', 'rolledBack'].includes(candidate.phase) ||
+    !['allocating', 'prepared', 'committed', 'rolledBack'].includes(candidate.phase) ||
+    (candidate.version === 2 && candidate.phase === 'allocating') ||
     !backupRoot ||
     typeof candidate.snapshotId !== 'string' ||
     !/^[0-9a-f-]{36}$/iu.test(candidate.snapshotId) ||
@@ -984,7 +1072,7 @@ function readLiveInstallTransaction(userHome) {
   }
 
   return {
-    version: 2,
+    version: candidate.version,
     owner: candidate.owner,
     phase: candidate.phase,
     backupRoot: path.relative(userHome, backupRoot),
@@ -1001,90 +1089,93 @@ function readLiveInstallTransaction(userHome) {
  */
 function removeLiveInstallTransaction(userHome) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
-  fs.rmSync(transactionPath, { force: true });
-  fsyncDirectory(path.dirname(transactionPath));
-  removeEmptyParentsWithin(path.dirname(transactionPath), userHome);
-}
+  removeOwnedPathRaw(userHome, transactionPath);
+  removeOwnedPathRaw(userHome, `${transactionPath}.next`);
+  const absentParents = [];
+  let parent = path.dirname(transactionPath);
 
-/**
- * @param {string} startDirectory
- * @param {string} boundary
- * @returns {void}
- */
-function removeEmptyParentsWithin(startDirectory, boundary) {
-  let current = startDirectory;
-
-  while (current !== boundary && isSameOrDescendant(boundary, current)) {
-    try {
-      fs.rmdirSync(current);
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        (error.code === 'ENOENT' || error.code === 'ENOTEMPTY' || error.code === 'EEXIST')
-      ) {
-        return;
-      }
-
-      throw error;
-    }
-
-    current = path.dirname(current);
+  while (parent !== userHome && isSameOrDescendant(userHome, parent)) {
+    absentParents.push(parent);
+    parent = path.dirname(parent);
   }
-}
 
-/**
- * @param {string} filePath
- * @returns {void}
- */
-function fsyncFile(filePath) {
-  const descriptor = fs.openSync(filePath, 'r');
-
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-}
-
-/**
- * @param {string} directory
- * @returns {void}
- */
-function fsyncDirectory(directory) {
-  const descriptor = fs.openSync(directory, 'r');
-
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
+  removeOwnedEmptyDirectoriesRaw(userHome, absentParents);
 }
 
 /**
  * @param {string} userHome
+ * @param {NodeJS.ProcessEnv} environment
+ * @returns {{ configRoot: string; dataRoot: string; stateRoot: string }}
+ */
+function resolveXdgRoots(userHome, environment) {
+  /**
+   * @param {'XDG_CONFIG_HOME' | 'XDG_DATA_HOME' | 'XDG_STATE_HOME'} variable
+   * @param {string} fallback
+   * @returns {string}
+   */
+  const resolveRoot = (variable, fallback) => {
+    const configured = environment[variable];
+
+    if (configured !== undefined && !path.isAbsolute(configured)) {
+      throw new Error(`${variable} must be an absolute path`);
+    }
+
+    const root = resolvePathIdentity(configured ?? path.join(userHome, fallback));
+
+    if (!isSameOrDescendant(userHome, root)) {
+      throw new Error(`${variable} outside the destination home is unsupported for recovery`);
+    }
+
+    return root;
+  };
+
+  return {
+    configRoot: resolveRoot('XDG_CONFIG_HOME', '.config'),
+    dataRoot: resolveRoot('XDG_DATA_HOME', '.local/share'),
+    stateRoot: resolveRoot('XDG_STATE_HOME', '.local/state'),
+  };
+}
+
+/**
+ * Caelestia follows the active Hyprland configuration syntax. Lua wins when
+ * both files exist because current Hyprland/Caelestia loads hyprland.lua.
+ *
+ * @param {string} configRoot
+ * @returns {'lua' | 'legacy'}
+ */
+function selectHyprlandMode(configRoot) {
+  return exists(path.join(configRoot, 'hypr/hyprland.lua')) ? 'lua' : 'legacy';
+}
+
+/**
+ * @param {{ configRoot: string; dataRoot: string; stateRoot: string }} xdgRoots
+ * @param {'lua' | 'legacy'} hyprlandMode
  * @returns {Record<string, string>}
  */
-function buildLivePaths(userHome) {
+function buildLivePaths(xdgRoots, hyprlandMode) {
+  const { configRoot, dataRoot, stateRoot } = xdgRoots;
+
   return {
-    ghosttyConfig: path.join(userHome, '.config/ghostty/config'),
-    ghosttyCss: path.join(userHome, '.config/ghostty/ghostty.css'),
-    ghosttyThemes: path.join(userHome, '.config/ghostty/themes'),
-    footConfig: path.join(userHome, '.config/foot/foot.ini'),
-    footThemes: path.join(userHome, '.config/foot/themes'),
-    fishStartupConfig: path.join(userHome, '.config/fish/conf.d/tyrian-night.fish'),
-    fishGreeting: path.join(userHome, '.config/fish/functions/fish_greeting.fish'),
-    fastfetchConfig: path.join(userHome, '.local/share/caelestia/fastfetch/config.jsonc'),
-    starshipConfig: path.join(userHome, '.local/share/caelestia/starship.toml'),
-    kdeglobals: path.join(userHome, '.config/kdeglobals'),
-    plasmarc: path.join(userHome, '.config/plasmarc'),
-    screenLockerConfig: path.join(userHome, '.config/kscreenlockerrc'),
-    kdeTyrianScheme: path.join(userHome, '.local/share/color-schemes/TyrianNight.colors'),
-    plasmaTyrianTheme: path.join(userHome, '.local/share/plasma/desktoptheme/TyrianNight'),
-    lookAndFeelTyrian: path.join(userHome, '.local/share/plasma/look-and-feel/TyrianNight'),
-    caelestiaSchemeState: path.join(userHome, '.local/state/caelestia/scheme.json'),
-    caelestiaSequences: path.join(userHome, '.local/state/caelestia/sequences.txt'),
-    hyprCurrentScheme: path.join(userHome, '.config/hypr/scheme/current.conf'),
+    ghosttyConfig: path.join(configRoot, 'ghostty/config'),
+    ghosttyThemes: path.join(configRoot, 'ghostty/themes'),
+    footConfig: path.join(configRoot, 'foot/foot.ini'),
+    footThemes: path.join(configRoot, 'foot/themes'),
+    fishStartupConfig: path.join(configRoot, 'fish/conf.d/tyrian-night.fish'),
+    fishGreeting: path.join(configRoot, 'fish/functions/fish_greeting.fish'),
+    fastfetchConfig: path.join(dataRoot, 'caelestia/fastfetch/config.jsonc'),
+    starshipConfig: path.join(dataRoot, 'caelestia/starship.toml'),
+    kdeglobals: path.join(configRoot, 'kdeglobals'),
+    plasmarc: path.join(configRoot, 'plasmarc'),
+    screenLockerConfig: path.join(configRoot, 'kscreenlockerrc'),
+    kdeTyrianScheme: path.join(dataRoot, 'color-schemes/TyrianNight.colors'),
+    plasmaTyrianTheme: path.join(dataRoot, 'plasma/desktoptheme/TyrianNight'),
+    lookAndFeelTyrian: path.join(dataRoot, 'plasma/look-and-feel/TyrianNight'),
+    caelestiaSchemeState: path.join(stateRoot, 'caelestia/scheme.json'),
+    caelestiaSequences: path.join(stateRoot, 'caelestia/sequences.txt'),
+    hyprCurrentScheme: path.join(
+      configRoot,
+      `hypr/scheme/current.${hyprlandMode === 'lua' ? 'lua' : 'conf'}`
+    ),
   };
 }
 
@@ -1109,11 +1200,11 @@ function buildLegacyPaths(userHome) {
 
 /**
  * @param {string} sourceRoot
+ * @param {'lua' | 'legacy'} hyprlandMode
  * @returns {Record<string, string>}
  */
-function buildSourcePaths(sourceRoot) {
+function buildSourcePaths(sourceRoot, hyprlandMode) {
   return {
-    ghosttyCss: path.join(sourceRoot, 'terminal/ghostty/ghostty.css'),
     fishGreeting: path.join(sourceRoot, 'terminal/fish/functions/fish_greeting.fish'),
     fastfetchConfig: path.join(sourceRoot, 'terminal/fastfetch/tyrian-night.jsonc'),
     fastfetchImage: path.join(sourceRoot, FASTFETCH_IMAGE_ASSET_PATH),
@@ -1123,7 +1214,10 @@ function buildSourcePaths(sourceRoot) {
     plasmaTyrianThemeRoot: path.join(sourceRoot, 'desktop/kde/plasma/desktoptheme/TyrianNight'),
     lookAndFeelTyrianRoot: path.join(sourceRoot, 'desktop/kde/plasma/look-and-feel/TyrianNight'),
     caelestiaSchemeState: path.join(sourceRoot, 'desktop/caelestia/state/tyrian-night.scheme.json'),
-    hyprCurrentScheme: path.join(sourceRoot, 'desktop/caelestia/hypr/tyrian-night.conf'),
+    hyprCurrentScheme: path.join(
+      sourceRoot,
+      `desktop/caelestia/hypr/tyrian-night.${hyprlandMode === 'lua' ? 'lua' : 'conf'}`
+    ),
   };
 }
 
@@ -1135,7 +1229,6 @@ function buildSourcePaths(sourceRoot) {
 function buildLiveOwnedPaths(livePaths, themeSlugs) {
   return [
     livePaths.ghosttyConfig,
-    livePaths.ghosttyCss,
     ...themeSlugs.map((slug) => path.join(livePaths.ghosttyThemes, slug)),
     livePaths.footConfig,
     ...themeSlugs.map((slug) => path.join(livePaths.footThemes, `${slug}.ini`)),
@@ -1166,6 +1259,7 @@ function buildPlanMutationTargets(plan) {
     plan.backupRoot,
     plan.ownershipManifestPath,
     plan.migrationRetirementPath,
+    ...plan.materializedRoots.map(({ target }) => target),
     ...plan.touchedPaths,
   ];
 }
@@ -1331,10 +1425,7 @@ function prepareLiveInstall(plan) {
       repoRoot: plan.repoRoot,
       themeDirectory: plan.livePaths.footThemes,
     }),
-    ghosttyConfig: buildGhosttyConfig({
-      gtkCustomCss: plan.livePaths.ghosttyCss,
-      repoRoot: plan.repoRoot,
-    }),
+    ghosttyConfig: buildGhosttyConfig({ repoRoot: plan.repoRoot }),
     kdeglobals: patchIniSection(
       patchIniSection(kdeglobalsContent, 'KDE', {
         LookAndFeelPackage: 'TyrianNight',
@@ -1365,18 +1456,19 @@ function materializeSourceRoot(plan) {
       const stagingRoot = plan.stagingRoot;
 
       try {
-        fs.mkdirSync(path.dirname(stagingRoot), { recursive: true });
-        fs.mkdirSync(stagingRoot);
-
         for (const root of plan.materializedRoots) {
           const relativeTarget = path.relative(plan.installRoot, root.target);
-          installManagedPathWithMode('copy', root.source, path.join(stagingRoot, relativeTarget));
+          installManagedPathWithMode('copy', root.source, path.join(stagingRoot, relativeTarget), {
+            ownerRoot: plan.home,
+          });
         }
 
-        fs.rmSync(plan.installRoot, { recursive: true, force: true });
-        fs.renameSync(stagingRoot, plan.installRoot);
+        recordOwnedPathGeneration(plan.home, stagingRoot);
+        publishStagedOwnedPathRaw(plan.home, stagingRoot, plan.installRoot);
       } catch (error) {
-        fs.rmSync(stagingRoot, { recursive: true, force: true });
+        if (exists(stagingRoot)) {
+          removeOwnedPathRaw(plan.home, stagingRoot);
+        }
         throw error;
       }
     });
@@ -1407,7 +1499,6 @@ function installTerminalLayer(plan, prepared) {
     );
   }
 
-  installManagedPath(plan, plan.sourcePaths.ghosttyCss, plan.livePaths.ghosttyCss);
   writeFile(plan, plan.livePaths.ghosttyConfig, prepared.ghosttyConfig);
   writeFile(plan, plan.livePaths.footConfig, prepared.footConfig);
 
@@ -1429,12 +1520,12 @@ function installDesktopLayer(plan, prepared) {
   writeFile(plan, plan.livePaths.kdeglobals, prepared.kdeglobals);
   writeFile(plan, plan.livePaths.plasmarc, prepared.plasmarc);
   writeFile(plan, plan.livePaths.screenLockerConfig, prepared.screenLockerConfig);
-  installManagedPath(
+  publishRuntimeFile(
     plan,
     plan.sourcePaths.caelestiaSchemeState,
     plan.livePaths.caelestiaSchemeState
   );
-  installManagedPath(plan, plan.sourcePaths.hyprCurrentScheme, plan.livePaths.hyprCurrentScheme);
+  publishRuntimeFile(plan, plan.sourcePaths.hyprCurrentScheme, plan.livePaths.hyprCurrentScheme);
   writeFile(plan, plan.livePaths.caelestiaSequences, prepared.caelestiaSequences);
 }
 
@@ -1453,13 +1544,26 @@ function installManagedPath(plan, sourcePath, targetPath) {
 }
 
 /**
+ * Runtime readers must observe one complete generation. These files therefore
+ * remain atomically replaced regular files even when stable assets use --link.
+ * @param {LiveInstallPlan} plan
+ * @param {string} sourcePath
+ * @param {string} targetPath
+ */
+function publishRuntimeFile(plan, sourcePath, targetPath) {
+  operation(plan.apply, `publish ${sourcePath} -> ${targetPath}`, () => {
+    installManagedPathWithMode('copy', sourcePath, targetPath, { ownerRoot: plan.home });
+  });
+}
+
+/**
  * @param {LiveInstallPlan} plan
  * @param {string} sourcePath
  * @param {string} targetPath
  * @returns {void}
  */
 function installManagedPathRaw(plan, sourcePath, targetPath) {
-  installManagedPathWithMode(plan.mode, sourcePath, targetPath);
+  installManagedPathWithMode(plan.mode, sourcePath, targetPath, { ownerRoot: plan.home });
 }
 
 /**
@@ -1479,10 +1583,17 @@ function installPlasmaDesktopTheme(plan) {
  * @returns {void}
  */
 function installLookAndFeelPackage(plan) {
-  installManagedPath(
-    plan,
-    plan.sourcePaths.lookAndFeelTyrianRoot,
-    plan.livePaths.lookAndFeelTyrian
+  operation(
+    plan.apply,
+    `materialize ${plan.sourcePaths.lookAndFeelTyrianRoot} -> ${plan.livePaths.lookAndFeelTyrian}`,
+    () => {
+      installManagedPathWithMode(
+        'copy',
+        plan.sourcePaths.lookAndFeelTyrianRoot,
+        plan.livePaths.lookAndFeelTyrian,
+        { ownerRoot: plan.home }
+      );
+    }
   );
 }
 
@@ -1535,18 +1646,18 @@ function patchIniSectionContent(sectionContent, values) {
  */
 function writeFile(plan, filePath, content) {
   operation(plan.apply, `write ${filePath}`, () => {
-    writeFileRaw(filePath, content);
+    writeFileRaw(plan.home, filePath, content);
   });
 }
 
 /**
+ * @param {string} ownerRoot
  * @param {string} filePath
  * @param {string} content
  * @returns {void}
  */
-function writeFileRaw(filePath, content) {
-  fs.rmSync(filePath, { force: true, recursive: true });
-  writeTextFileRaw(filePath, content);
+function writeFileRaw(ownerRoot, filePath, content) {
+  writeTextFileRaw(filePath, content, { followFinalSymlink: false, ownerRoot });
 }
 
 /**
