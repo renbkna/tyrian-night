@@ -145,6 +145,10 @@ function makeTempRepoFixture(): string {
 
   fs.mkdirSync(path.join(root, 'source'), { recursive: true });
   fs.copyFileSync('package.json', path.join(root, 'package.json'));
+  fs.copyFileSync(
+    'source/themeRoleContract.json',
+    path.join(root, 'source/themeRoleContract.json')
+  );
   fs.copyFileSync('source/themeCatalog.json', path.join(root, 'source/themeCatalog.json'));
   fs.cpSync('source/themes', path.join(root, 'source/themes'), { recursive: true });
   fs.cpSync('source/union-css', path.join(root, 'source/union-css'), { recursive: true });

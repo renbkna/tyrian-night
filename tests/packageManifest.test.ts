@@ -5,6 +5,7 @@ import path from 'node:path';
 import { expect, test } from 'bun:test';
 
 import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog';
+import { ThemePreviewController } from '../assets/preview';
 import {
   buildVscodeThemeContributions,
   syncGeneratedContracts,
@@ -86,11 +87,12 @@ test('VS Code package includes only VS Code runtime and marketplace assets', () 
     'README.md',
     ...SOURCE_THEMES.map(({ islandCssPath }) => islandCssPath),
     'assets/icon.png',
-    'assets/preview.png',
     'out/extension.js',
     'out/islandCli.js',
-    ...SOURCE_THEMES.map(({ sourcePath }) => sourcePath),
+    ...SOURCE_THEMES.map(({ vscodeThemePath }) => vscodeThemePath),
   ]);
+  expect(fs.existsSync('assets/preview.png')).toBe(false);
+  expect(fs.readFileSync('README.md', 'utf8')).not.toContain('assets/preview.png');
   expect(fs.existsSync('.vscodeignore')).toBe(false);
 });
 
@@ -161,7 +163,7 @@ test('VS Code contribution generation resolves the injected catalog root', () =>
       ).contributes.themes[0]?.label
     ).toBe('Injected Tyrian Night');
     expect(readJson<{ files: string[] }>(path.join(root, 'package.json')).files).toContain(
-      'source/themes/tyrian-night.json'
+      'apps/vscode/themes/tyrian-night.json'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -196,15 +198,28 @@ test('VS Code companion settings example is parseable and aligned with Tyrian de
   expect(settings).not.toHaveProperty('vscord.status.details.text.viewing');
 });
 
-test('preview source advertises the default Night preset', () => {
+test('preview output derives palette and identity entirely from the selected mode', async () => {
   const previewSource = fs.readFileSync('assets/preview.ts', 'utf8');
+  const controller = new ThemePreviewController(process.cwd());
 
-  expect(previewSource).toContain("dark: 'Tyrian Night'");
-  expect(previewSource).toContain('# Tyrian Night');
   expect(previewSource).toContain("defaultMode: ThemeMode = 'night'");
-  expect(previewSource).toContain("renderPreview('night')");
   expect(previewSource).not.toContain("defaultMode: ThemeMode = 'nocturne'");
-  expect(previewSource).not.toContain("renderPreview('nocturne')");
+
+  await controller.readThemeManifest('night');
+  const nightSummary = controller.summarize('night');
+  expect(nightSummary).toContain('mode=night');
+  expect(nightSummary).toContain('#252530 #C06868 #489060 #C09040');
+  expect(nightSummary).toContain('"dark": "Tyrian Night"');
+  expect(nightSummary).toContain('# Tyrian Night');
+  expect(nightSummary).not.toContain('Tyrian Dawn');
+
+  await controller.readThemeManifest('dawn');
+  const dawnSummary = controller.summarize('dawn');
+  expect(dawnSummary).toContain('mode=dawn');
+  expect(dawnSummary).toContain('#2A2433 #B63A3A #2B7A4F #8A5D00');
+  expect(dawnSummary).toContain('"light": "Tyrian Dawn"');
+  expect(dawnSummary).toContain('# Tyrian Dawn');
+  expect(dawnSummary).not.toContain('Tyrian Night');
 });
 
 test('repo does not keep stale packaged VSIX artifacts as proof surfaces', () => {
@@ -238,13 +253,13 @@ test('package scripts own the full verification path without npm shims', () => {
     'bun run check:tracked-generated && bun run build:generated'
   );
   expect(manifest.scripts['check:tracked-generated']).toBe(
-    'bun run check:contracts && bun run check:zed-theme'
+    'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme'
   );
   expect(manifest.scripts['precommit:tracked-generated']).toContain(
-    'git diff --quiet -- source/themeCatalog.json source/themes package.json'
+    'git ls-files --error-unmatch source/themeRoleContract.json scripts/themeDefinition.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs'
   );
   expect(manifest.scripts['precommit:tracked-generated']).toContain(
-    'git ls-files --error-unmatch apps/vscode/src/generated/themeCatalog.ts apps/zed/themes/tyrian-night.json'
+    'git diff --quiet -- source/themeCatalog.json source/themeRoleContract.json source/themes scripts/themeDefinition.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs package.json'
   );
   expect(manifest['simple-git-hooks']['pre-commit']).toBe(
     'bun run precommit:tracked-generated && bun run verify'
@@ -252,6 +267,7 @@ test('package scripts own the full verification path without npm shims', () => {
   expect(manifest.scripts.verify).toContain('bun run check:generated');
   expect(manifest.scripts.verify).toContain('bun run check:rice');
   expect(manifest.scripts['build:generated']).toContain('bun run build:contracts');
+  expect(manifest.scripts['build:generated']).toContain('bun run build:vscode-themes');
   expect(manifest.scripts['build:generated']).toContain('bun run build:island-css');
   expect(manifest.scripts['build:generated']).toContain('bun run build:zed-theme');
   expect(manifest.scripts['build:generated']).toContain('bun run build:terminal-themes');
@@ -261,6 +277,7 @@ test('package scripts own the full verification path without npm shims', () => {
   );
   expect(manifest.scripts.test).toBe('bun run build:runtime-generated && bun test ./tests');
   expect(manifest.scripts['check:generated']).toContain('bun run check:contracts');
+  expect(manifest.scripts['check:generated']).toContain('bun run check:vscode-themes');
   expect(manifest.scripts['check:generated']).toContain('bun run check:island-css');
   expect(manifest.scripts['check:generated']).toContain('bun run check:zed-theme');
   expect(manifest.scripts['check:generated']).toContain('bun run check:terminal-themes');
@@ -289,12 +306,14 @@ test('package scripts own the full verification path without npm shims', () => {
   expect(ciWorkflow).toContain('run: bun run package');
 });
 
-test('clean clones retain generated projections required by typecheck and Zed development', () => {
+test('clean clones retain generated projections required by VS Code and Zed development', () => {
   const gitignore = fs.readFileSync('.gitignore', 'utf8');
 
   expect(gitignore).not.toContain('apps/vscode/src/generated/');
+  expect(gitignore).not.toContain('apps/vscode/themes/');
   expect(gitignore).not.toContain('apps/zed/themes/tyrian-night.json');
   expect(fs.existsSync('apps/vscode/src/generated/themeCatalog.ts')).toBe(true);
+  expect(fs.existsSync('apps/vscode/themes/tyrian-night.json')).toBe(true);
   expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
 });
 

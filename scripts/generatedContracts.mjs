@@ -11,12 +11,7 @@ const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const themeCatalogOutputPath = 'apps/vscode/src/generated/themeCatalog.ts';
 const GENERATED_CONTRACT_OWNERSHIP = [{ directory: 'apps/vscode/src/generated' }];
 const PACKAGE_RUNTIME_PREFIX_FILES = ['LICENSE', 'README.md'];
-const PACKAGE_RUNTIME_SUFFIX_FILES = [
-  'assets/icon.png',
-  'assets/preview.png',
-  'out/extension.js',
-  'out/islandCli.js',
-];
+const PACKAGE_RUNTIME_SUFFIX_FILES = ['assets/icon.png', 'out/extension.js', 'out/islandCli.js'];
 
 /**
  * @typedef {{ label: string; path: string; uiTheme: string }} VscodeThemeContribution
@@ -90,8 +85,6 @@ function formatThemeEntry(theme) {
     label: ${formatTsString(theme.label)},
     slug: ${formatTsString(theme.slug)},
     isDefault: ${theme.isDefault},
-    sourcePath: ${formatTsString(theme.sourcePath)},
-    vscodeContributionPath: ${formatTsString(theme.vscodeContributionPath)},
     vscodeUiTheme: ${formatTsString(theme.vscodeUiTheme)},
     islandCssFile: ${formatTsString(theme.islandCssFile)},
     islandCssPath: ${formatTsString(theme.islandCssPath)},
@@ -125,7 +118,7 @@ function syncPackageThemeContracts(root, check, sourceThemes) {
     ...PACKAGE_RUNTIME_PREFIX_FILES,
     ...sourceThemes.map(({ islandCssPath }) => islandCssPath),
     ...PACKAGE_RUNTIME_SUFFIX_FILES,
-    ...sourceThemes.map(({ sourcePath }) => sourcePath),
+    ...sourceThemes.map(({ vscodeThemePath }) => vscodeThemePath),
   ];
 
   if (check) {

@@ -3,45 +3,40 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { FASTFETCH_IMAGE_CONFIG_PATH } from './portableAssets.mjs';
+import { themeColor as requireThemeColor } from './themeDefinition.mjs';
 import {
   getTerminalDefaultThemeSource,
+  loadThemeRepository,
   readSourceTheme,
-  readThemeSources,
 } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
- * @typedef {{
- *   name: string;
- *   colors: Record<string, string>;
- *   semanticTokenColors: Record<string, HighlightSettings>;
- *   tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
- * }} VscodeTheme
+ * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
 
-const TERMINAL_ANSI_KEYS = [
-  'terminal.ansiBlack',
-  'terminal.ansiRed',
-  'terminal.ansiGreen',
-  'terminal.ansiYellow',
-  'terminal.ansiBlue',
-  'terminal.ansiMagenta',
-  'terminal.ansiCyan',
-  'terminal.ansiWhite',
-  'terminal.ansiBrightBlack',
-  'terminal.ansiBrightRed',
-  'terminal.ansiBrightGreen',
-  'terminal.ansiBrightYellow',
-  'terminal.ansiBrightBlue',
-  'terminal.ansiBrightMagenta',
-  'terminal.ansiBrightCyan',
-  'terminal.ansiBrightWhite',
+const TERMINAL_ANSI_ROLES = [
+  'terminal:ansi.black',
+  'terminal:ansi.red',
+  'terminal:ansi.green',
+  'terminal:ansi.yellow',
+  'terminal:ansi.blue',
+  'terminal:ansi.magenta',
+  'terminal:ansi.cyan',
+  'terminal:ansi.white',
+  'terminal:ansi.brightBlack',
+  'terminal:ansi.brightRed',
+  'terminal:ansi.brightGreen',
+  'terminal:ansi.brightYellow',
+  'terminal:ansi.brightBlue',
+  'terminal:ansi.brightMagenta',
+  'terminal:ansi.brightCyan',
+  'terminal:ansi.brightWhite',
 ];
 
 const TERMINAL_GENERATED_OWNERSHIP = [
@@ -62,9 +57,12 @@ const TERMINAL_GENERATED_OWNERSHIP = [
  * @returns {GeneratedAsset[]}
  */
 export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
-  const sourceThemes = readThemeSources(repoRoot).map((source) => ({
+  const repository = loadThemeRepository(repoRoot);
+  const sourceThemes = repository.sources.map((source) => ({
     source,
-    theme: /** @type {VscodeTheme} */ (readSourceTheme(source, repoRoot)),
+    theme: /** @type {ThemeDefinition} */ (
+      readSourceTheme(source, repoRoot, repository.definition)
+    ),
   }));
   const defaultDarkTheme = terminalSourceTheme(sourceThemes, 'dark').theme;
 
@@ -85,23 +83,19 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
     ]),
     {
       path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig({ repoRoot }),
-    },
-    {
-      path: 'terminal/ghostty/ghostty.css',
-      content: buildGhosttyGtkCss(defaultDarkTheme),
+      content: buildGhosttyConfig({ repoRoot, repository }),
     },
     {
       path: 'terminal/foot/foot.ini',
-      content: buildFootConfig({ repoRoot }),
+      content: buildFootConfig({ repoRoot, repository }),
     },
     {
       path: 'terminal/fish/config.example.fish',
-      content: buildFishConfig({ repoRoot }),
+      content: buildFishConfig({ repoRoot, repository }),
     },
     {
       path: 'terminal/fish/conf.d/tyrian-night.fish',
-      content: buildFishStartupConfig({ repoRoot }),
+      content: buildFishStartupConfig({ repoRoot, repository }),
     },
     {
       path: 'terminal/fish/functions/fish_greeting.fish',
@@ -139,48 +133,42 @@ export function writeTerminalThemeAssets(repoRoot = defaultRepoRoot, options = {
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {string}
  */
 function buildGhosttyTheme(theme) {
-  const colors = theme.colors;
-  const background = themeColor(theme, 'terminal.background', 'editor.background');
-  const foreground = themeColor(theme, 'terminal.foreground', 'editor.foreground');
-  const selectionBackground = themeColor(
-    theme,
-    'terminal.selectionBackground',
-    'editor.selectionBackground'
-  );
+  const background = opaqueRoleColor(theme, 'terminal:background');
+  const foreground = opaqueRoleColor(theme, 'terminal:foreground');
+  const selectionBackground = opaqueRoleColor(theme, 'terminal:selection');
 
   return [
-    ...TERMINAL_ANSI_KEYS.map(
-      (colorKey, index) => `palette = ${index}=${opaqueThemeColor(colors[colorKey], background)}`
+    ...TERMINAL_ANSI_ROLES.map(
+      (role, index) => `palette = ${index}=${opaqueRoleColor(theme, role)}`
     ),
     `background = ${background}`,
     `foreground = ${foreground}`,
-    `cursor-color = ${themeColor(theme, 'editorCursor.foreground', 'terminal.foreground')}`,
-    `cursor-text = ${themeColor(theme, 'editorCursor.background', 'terminal.background')}`,
+    `cursor-color = ${opaqueRoleColor(theme, 'terminal:cursor')}`,
+    `cursor-text = ${background}`,
     `selection-background = ${selectionBackground}`,
     `selection-foreground = ${foreground}`,
+    `window-titlebar-background = ${background}`,
+    `window-titlebar-foreground = ${foreground}`,
     '',
   ].join('\n');
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {string}
  */
 function buildFootTheme(theme) {
-  const colors = theme.colors;
-  const background = themeColor(theme, 'terminal.background', 'editor.background');
-  const foreground = themeColor(theme, 'terminal.foreground', 'editor.foreground');
+  const background = opaqueRoleColor(theme, 'terminal:background');
+  const foreground = opaqueRoleColor(theme, 'terminal:foreground');
 
-  const ansiColors = TERMINAL_ANSI_KEYS.map((colorKey) =>
-    footColor(opaqueThemeColor(colors[colorKey], background))
-  );
+  const ansiColors = TERMINAL_ANSI_ROLES.map((role) => footColor(opaqueRoleColor(theme, role)));
 
   return [
-    '[colors-dark]',
+    theme.appearance === 'light' ? '[colors-light]' : '[colors-dark]',
     `foreground=${footColor(foreground)}`,
     `background=${footColor(background)}`,
     'alpha=0.82',
@@ -201,13 +189,9 @@ function buildFootTheme(theme) {
     `bright5=${ansiColors[13]}`,
     `bright6=${ansiColors[14]}`,
     `bright7=${ansiColors[15]}`,
-    `cursor=${footColor(themeColor(theme, 'editorCursor.foreground', 'terminal.foreground'))} ${footColor(
-      themeColor(theme, 'editorCursor.background', 'terminal.background')
-    )}`,
+    `cursor=${footColor(background)} ${footColor(opaqueRoleColor(theme, 'terminal:cursor'))}`,
     `selection-foreground=${footColor(foreground)}`,
-    `selection-background=${footColor(
-      themeColor(theme, 'terminal.selectionBackground', 'editor.selectionBackground')
-    )}`,
+    `selection-background=${footColor(opaqueRoleColor(theme, 'terminal:selection'))}`,
     '',
     '[csd]',
     `color=ff${footColor(background)}`,
@@ -217,57 +201,51 @@ function buildFootTheme(theme) {
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {string}
  */
 function buildFishTheme(theme) {
-  const semantic = theme.semanticTokenColors;
-  const background = themeColor(theme, 'terminal.background', 'editor.background');
-  const foreground = fishThemeColor(theme, 'terminal.foreground', 'editor.foreground');
-  const selectionBackground = fishThemeColor(
-    theme,
-    'list.activeSelectionBackground',
-    'terminal.selectionBackground'
-  );
+  const foreground = fishRoleColor(theme, 'terminal:foreground');
+  const selectionBackground = fishRoleColor(theme, 'ui:selection.active');
 
   const fishColors = [
     ['fish_color_normal', foreground],
-    ['fish_color_command', fishColor(semantic.function.foreground, background)],
-    ['fish_color_keyword', fishColor(tokenColor(theme, 'keyword'), background)],
-    ['fish_color_quote', fishColor(tokenColor(theme, 'string'), background)],
-    ['fish_color_redirection', fishThemeColor(theme, 'terminal.ansiBlue')],
-    ['fish_color_end', fishThemeColor(theme, 'terminal.ansiMagenta')],
-    ['fish_color_error', `${fishThemeColor(theme, 'editorError.foreground')} --bold`],
-    ['fish_color_param', fishColor(semantic.parameter.foreground, background)],
-    ['fish_color_valid_path', `${fishThemeColor(theme, 'terminal.ansiGreen')} --underline`],
-    ['fish_color_option', fishThemeColor(theme, 'terminal.ansiYellow')],
-    ['fish_color_comment', fishColor(tokenColor(theme, 'comment'), background)],
+    ['fish_color_command', fishRoleColor(theme, 'syntax:function')],
+    ['fish_color_keyword', fishRoleColor(theme, 'syntax:keyword')],
+    ['fish_color_quote', fishRoleColor(theme, 'syntax:string')],
+    ['fish_color_redirection', fishRoleColor(theme, 'terminal:ansi.blue')],
+    ['fish_color_end', fishRoleColor(theme, 'terminal:ansi.magenta')],
+    ['fish_color_error', `${fishRoleColor(theme, 'ui:status.error')} --bold`],
+    ['fish_color_param', fishRoleColor(theme, 'syntax:data')],
+    ['fish_color_valid_path', `${fishRoleColor(theme, 'terminal:ansi.green')} --underline`],
+    ['fish_color_option', fishRoleColor(theme, 'terminal:ansi.yellow')],
+    ['fish_color_comment', fishRoleColor(theme, 'syntax:comment')],
     ['fish_color_selection', `${foreground} --background=${selectionBackground}`],
-    ['fish_color_operator', fishThemeColor(theme, 'terminal.ansiMagenta')],
-    ['fish_color_escape', fishThemeColor(theme, 'terminal.ansiYellow')],
-    ['fish_color_autosuggestion', fishThemeColor(theme, 'breadcrumb.foreground')],
-    ['fish_color_cwd', fishThemeColor(theme, 'terminal.ansiCyan')],
-    ['fish_color_cwd_root', fishThemeColor(theme, 'editorError.foreground')],
-    ['fish_color_user', fishThemeColor(theme, 'terminal.ansiMagenta')],
-    ['fish_color_host', fishThemeColor(theme, 'terminal.ansiBlue')],
-    ['fish_color_host_remote', fishThemeColor(theme, 'terminal.ansiYellow')],
-    ['fish_color_status', fishThemeColor(theme, 'editorError.foreground')],
-    ['fish_color_cancel', `${fishThemeColor(theme, 'editorError.foreground')} --reverse`],
+    ['fish_color_operator', fishRoleColor(theme, 'terminal:ansi.magenta')],
+    ['fish_color_escape', fishRoleColor(theme, 'terminal:ansi.yellow')],
+    ['fish_color_autosuggestion', fishRoleColor(theme, 'ui:text.muted')],
+    ['fish_color_cwd', fishRoleColor(theme, 'terminal:ansi.cyan')],
+    ['fish_color_cwd_root', fishRoleColor(theme, 'ui:status.error')],
+    ['fish_color_user', fishRoleColor(theme, 'terminal:ansi.magenta')],
+    ['fish_color_host', fishRoleColor(theme, 'terminal:ansi.blue')],
+    ['fish_color_host_remote', fishRoleColor(theme, 'terminal:ansi.yellow')],
+    ['fish_color_status', fishRoleColor(theme, 'ui:status.error')],
+    ['fish_color_cancel', `${fishRoleColor(theme, 'ui:status.error')} --reverse`],
     ['fish_color_search_match', `${foreground} --background=${selectionBackground}`],
-    ['fish_color_history_current', `${fishThemeColor(theme, 'terminal.ansiCyan')} --bold`],
-    ['fish_pager_color_progress', fishThemeColor(theme, 'breadcrumb.foreground')],
-    ['fish_pager_color_prefix', `${fishThemeColor(theme, 'terminal.ansiCyan')} --bold`],
+    ['fish_color_history_current', `${fishRoleColor(theme, 'terminal:ansi.cyan')} --bold`],
+    ['fish_pager_color_progress', fishRoleColor(theme, 'ui:text.muted')],
+    ['fish_pager_color_prefix', `${fishRoleColor(theme, 'terminal:ansi.cyan')} --bold`],
     ['fish_pager_color_completion', foreground],
-    ['fish_pager_color_description', fishThemeColor(theme, 'breadcrumb.foreground')],
+    ['fish_pager_color_description', fishRoleColor(theme, 'ui:text.muted')],
     ['fish_pager_color_selected_background', `--background=${selectionBackground}`],
     [
       'fish_pager_color_selected_prefix',
-      `${fishThemeColor(theme, 'terminal.ansiCyan')} --bold --background=${selectionBackground}`,
+      `${fishRoleColor(theme, 'terminal:ansi.cyan')} --bold --background=${selectionBackground}`,
     ],
     ['fish_pager_color_selected_completion', `${foreground} --background=${selectionBackground}`],
     [
       'fish_pager_color_selected_description',
-      `${fishThemeColor(theme, 'breadcrumb.foreground')} --background=${selectionBackground}`,
+      `${fishRoleColor(theme, 'ui:text.muted')} --background=${selectionBackground}`,
     ],
   ];
 
@@ -275,15 +253,14 @@ function buildFishTheme(theme) {
 }
 
 /**
- * @param {{ gtkCustomCss?: string; repoRoot?: string }} [options]
+ * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository }} [options]
  * @returns {string}
  */
 export function buildGhosttyConfig(options = {}) {
   const root = options.repoRoot ?? defaultRepoRoot;
-  const sourceThemes = readThemeSources(root);
-  const darkSource = getTerminalDefaultThemeSource('dark', sourceThemes);
-  const lightSource = getTerminalDefaultThemeSource('light', sourceThemes);
-  const theme = /** @type {VscodeTheme} */ (readSourceTheme(darkSource, root));
+  const repository = resolveThemeRepository(root, options.repository);
+  const darkSource = getTerminalDefaultThemeSource('dark', repository.sources);
+  const lightSource = getTerminalDefaultThemeSource('light', repository.sources);
   const lines = [
     `theme = dark:${darkSource.slug},light:${lightSource.slug}`,
     'background-opacity = 0.82',
@@ -299,8 +276,6 @@ export function buildGhosttyConfig(options = {}) {
     'window-decoration = client',
     'window-theme = ghostty',
     'window-vsync = true',
-    `window-titlebar-background = ${themeColor(theme, 'terminal.background', 'editor.background')}`,
-    `window-titlebar-foreground = ${themeColor(theme, 'terminal.foreground', 'editor.foreground')}`,
     'gtk-titlebar = true',
     'gtk-titlebar-style = tabs',
     'window-show-tab-bar = auto',
@@ -314,26 +289,26 @@ export function buildGhosttyConfig(options = {}) {
     'copy-on-select = clipboard',
   ];
 
-  if (options.gtkCustomCss) {
-    lines.push(`gtk-custom-css = ${options.gtkCustomCss}`);
-  }
-
   return `${lines.join('\n')}\n`;
 }
 
 /**
- * @param {{ repoRoot?: string; themeDirectory?: string }} [options]
+ * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; themeDirectory?: string }} [options]
  * @returns {string}
  */
 export function buildFootConfig(options = {}) {
   const root = options.repoRoot ?? defaultRepoRoot;
-  const defaultDarkSource = getTerminalDefaultThemeSource('dark', readThemeSources(root));
+  const repository = resolveThemeRepository(root, options.repository);
+  const defaultDarkSource = getTerminalDefaultThemeSource('dark', repository.sources);
+  const defaultLightSource = getTerminalDefaultThemeSource('light', repository.sources);
   const themeDirectory = options.themeDirectory ?? '/path/to/tyrian-night/terminal/foot/themes';
 
   return [
     `include=${themeDirectory}/${defaultDarkSource.slug}.ini`,
+    `include=${themeDirectory}/${defaultLightSource.slug}.ini`,
     '',
     '[main]',
+    'initial-color-theme=dark',
     'font=Monaspace Neon:size=13',
     'font-bold=Monaspace Neon:size=13',
     'font-italic=Monaspace Radon:size=13',
@@ -354,7 +329,7 @@ export function buildFootConfig(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; tyrianRoot?: string }} [options]
+ * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} [options]
  * @returns {string}
  */
 export function buildFishConfig(options = {}) {
@@ -362,7 +337,11 @@ export function buildFishConfig(options = {}) {
 
   return [
     'if status is-interactive',
-    ...buildFishStartupConfig({ repoRoot: options.repoRoot, tyrianRoot })
+    ...buildFishStartupConfig({
+      repoRoot: options.repoRoot,
+      repository: options.repository,
+      tyrianRoot,
+    })
       .trimEnd()
       .split('\n')
       .map((line) => `    ${line}`),
@@ -374,12 +353,15 @@ export function buildFishConfig(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; tyrianRoot?: string }} [options]
+ * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} [options]
  * @returns {string}
  */
 export function buildFishStartupConfig(options = {}) {
   const root = options.repoRoot ?? defaultRepoRoot;
-  const defaultDarkSource = getTerminalDefaultThemeSource('dark', readThemeSources(root));
+  const defaultDarkSource = getTerminalDefaultThemeSource(
+    'dark',
+    resolveThemeRepository(root, options.repository).sources
+  );
   const tyrianRoot = options.tyrianRoot ?? '/path/to/tyrian-night';
 
   return [
@@ -414,7 +396,7 @@ function buildFishGreetingFunction() {
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {string}
  */
 function buildFastfetchConfig(theme) {
@@ -443,10 +425,10 @@ function buildFastfetchConfig(theme) {
     display: {
       separator: '  ',
       color: {
-        keys: themeColor(theme, 'terminal.ansiMagenta'),
-        title: themeColor(theme, 'terminal.foreground'),
-        output: themeColor(theme, 'terminal.foreground'),
-        separator: themeColor(theme, 'breadcrumb.foreground'),
+        keys: opaqueRoleColor(theme, 'terminal:ansi.magenta'),
+        title: opaqueRoleColor(theme, 'terminal:foreground'),
+        output: opaqueRoleColor(theme, 'terminal:foreground'),
+        separator: opaqueRoleColor(theme, 'ui:text.muted'),
       },
       brightColor: true,
       key: {
@@ -463,17 +445,17 @@ function buildFastfetchConfig(theme) {
           right: '',
         },
         color: {
-          elapsed: themeColor(theme, 'terminal.ansiMagenta'),
-          total: themeColor(theme, 'tab.border'),
+          elapsed: opaqueRoleColor(theme, 'terminal:ansi.magenta'),
+          total: opaqueRoleColor(theme, 'ui:border.tab'),
         },
         width: 12,
       },
       percent: {
         type: ['bar', 'num'],
         color: {
-          green: themeColor(theme, 'terminal.ansiGreen'),
-          yellow: themeColor(theme, 'terminal.ansiYellow'),
-          red: themeColor(theme, 'terminal.ansiRed'),
+          green: opaqueRoleColor(theme, 'terminal:ansi.green'),
+          yellow: opaqueRoleColor(theme, 'terminal:ansi.yellow'),
+          red: opaqueRoleColor(theme, 'terminal:ansi.red'),
         },
       },
     },
@@ -485,7 +467,7 @@ function buildFastfetchConfig(theme) {
       {
         type: 'separator',
         string: '─',
-        outputColor: themeColor(theme, 'terminal.ansiMagenta'),
+        outputColor: opaqueRoleColor(theme, 'terminal:ansi.magenta'),
       },
       {
         type: 'os',
@@ -563,7 +545,7 @@ function formatJson(value) {
 }
 
 /**
- * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }>} sourceThemes
+ * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }>} sourceThemes
  * @returns {string}
  */
 function buildStarshipConfig(sourceThemes) {
@@ -660,9 +642,9 @@ function buildStarshipConfig(sourceThemes) {
 }
 
 /**
- * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }>} sourceThemes
+ * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }>} sourceThemes
  * @param {'dark' | 'light'} appearance
- * @returns {{ source: import('./themeSources.mjs').ThemeSource; theme: VscodeTheme }}
+ * @returns {{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }}
  */
 function terminalSourceTheme(sourceThemes, appearance) {
   const defaultSource = getTerminalDefaultThemeSource(
@@ -679,69 +661,15 @@ function terminalSourceTheme(sourceThemes, appearance) {
 }
 
 /**
- * @param {VscodeTheme} theme
- * @returns {string}
+ * @param {string} root
+ * @param {import('./themeSources.mjs').ThemeRepository | undefined} repository
  */
-function buildGhosttyGtkCss(theme) {
-  const background = themeColor(theme, 'terminal.background', 'editor.background').toLowerCase();
-  const foreground = themeColor(theme, 'terminal.foreground', 'editor.foreground').toLowerCase();
-  const accent = themeColor(theme, 'terminal.ansiMagenta', 'activityBar.activeBorder');
-
-  return [
-    'headerbar {',
-    '  min-height: 30px;',
-    '  padding: 2px 6px;',
-    `  background: ${background};`,
-    '  border: none;',
-    '  box-shadow: none;',
-    '}',
-    '',
-    'tabbar {',
-    '  padding: 0;',
-    '  background: transparent;',
-    '  border: none;',
-    '  box-shadow: none;',
-    '}',
-    '',
-    'tabbar tabbox tab {',
-    '  min-height: 20px;',
-    '  padding: 0 8px;',
-    '  margin: 2px 1px;',
-    '  border-radius: 6px;',
-    '  background: transparent;',
-    '  border: none;',
-    '}',
-    '',
-    'tabbar tabbox tab:hover {',
-    `  background: ${rgba(accent, 0.18)};`,
-    '}',
-    '',
-    'tabbar tabbox tab:selected {',
-    `  background: ${rgba(accent, 0.32)};`,
-    '}',
-    '',
-    'tabbar tabbox tab label {',
-    `  color: ${foreground};`,
-    '  font-size: 10pt;',
-    '  font-weight: 500;',
-    '}',
-    '',
-    'windowcontrols > button {',
-    '  min-width: 22px;',
-    '  min-height: 22px;',
-    '  margin: 0 1px;',
-    '  padding: 0;',
-    '  border-radius: 999px;',
-    '  background: transparent;',
-    '  border: none;',
-    '  box-shadow: none;',
-    '}',
-    '',
-    'windowcontrols > button:hover {',
-    `  background: ${rgba(accent, 0.22)};`,
-    '}',
-    '',
-  ].join('\n');
+function resolveThemeRepository(root, repository) {
+  const resolvedRepository = repository ?? loadThemeRepository(root);
+  if (resolvedRepository.root !== path.resolve(root)) {
+    throw new Error('Terminal generator theme context does not belong to the requested root.');
+  }
+  return resolvedRepository;
 }
 
 /**
@@ -771,24 +699,21 @@ function buildLanguageModule(module) {
 
 /**
  * @param {string} paletteName
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {string[]}
  */
 function buildStarshipPalette(paletteName, theme) {
   const palette = {
-    surface: themeColor(theme, 'list.hoverBackground', 'sideBar.background'),
-    text: themeColor(theme, 'terminal.foreground', 'editor.foreground'),
-    muted: themeColor(theme, 'breadcrumb.foreground', 'editorLineNumber.foreground'),
-    accent: themeColor(theme, 'terminal.ansiMagenta', 'activityBar.activeBorder'),
-    command: themeColor(theme, 'terminal.ansiCyan', 'editorHint.foreground'),
-    language: themeColor(theme, 'terminal.ansiBlue', 'editorInfo.foreground'),
-    container: opaqueThemeColor(
-      theme.semanticTokenColors.parameter.foreground,
-      theme.colors['editor.background']
-    ),
-    success: themeColor(theme, 'terminal.ansiGreen', 'editorHint.foreground'),
-    danger: themeColor(theme, 'terminal.ansiRed', 'editorError.foreground'),
-    warning: themeColor(theme, 'terminal.ansiYellow', 'editorWarning.foreground'),
+    surface: opaqueRoleColor(theme, 'ui:surface.hover'),
+    text: opaqueRoleColor(theme, 'terminal:foreground'),
+    muted: opaqueRoleColor(theme, 'ui:text.muted'),
+    accent: opaqueRoleColor(theme, 'terminal:ansi.magenta'),
+    command: opaqueRoleColor(theme, 'terminal:ansi.cyan'),
+    language: opaqueRoleColor(theme, 'terminal:ansi.blue'),
+    container: opaqueRoleColor(theme, 'syntax:data'),
+    success: opaqueRoleColor(theme, 'terminal:ansi.green'),
+    danger: opaqueRoleColor(theme, 'terminal:ansi.red'),
+    warning: opaqueRoleColor(theme, 'terminal:ansi.yellow'),
   };
 
   return [
@@ -799,67 +724,24 @@ function buildStarshipPalette(paletteName, theme) {
 }
 
 /**
- * @param {VscodeTheme} theme
- * @param {string} key
- * @param {string} [fallbackKey]
+ * @param {ThemeDefinition} theme
+ * @param {string} qualifiedRole
  * @returns {string}
  */
-function themeColor(theme, key, fallbackKey) {
-  const background = theme.colors['terminal.background'] ?? theme.colors['editor.background'];
-  const color = theme.colors[key] ?? (fallbackKey ? theme.colors[fallbackKey] : undefined);
-
-  if (!color) {
-    throw new Error(`Missing color '${key}' in ${theme.name}`);
-  }
-
-  return opaqueThemeColor(color, background);
+function opaqueRoleColor(theme, qualifiedRole) {
+  return opaqueHex(
+    requireThemeColor(theme, qualifiedRole),
+    requireThemeColor(theme, 'terminal:background')
+  );
 }
 
 /**
- * @param {VscodeTheme} theme
- * @param {string} key
- * @param {string} [fallbackKey]
+ * @param {ThemeDefinition} theme
+ * @param {string} qualifiedRole
  * @returns {string}
  */
-function fishThemeColor(theme, key, fallbackKey) {
-  return themeColor(theme, key, fallbackKey).slice(1);
-}
-
-/**
- * @param {string | undefined} color
- * @param {string} background
- * @returns {string}
- */
-function fishColor(color, background) {
-  if (!color) {
-    throw new Error('Missing fish theme color');
-  }
-
-  return opaqueThemeColor(color, background).slice(1);
-}
-
-/**
- * @param {string | undefined} color
- * @param {string} background
- * @returns {string}
- */
-function opaqueThemeColor(color, background) {
-  if (!color) {
-    throw new Error('Missing theme color');
-  }
-
-  return opaqueHex(color, background);
-}
-
-/**
- * @param {string} color
- * @param {number} alpha
- * @returns {string}
- */
-function rgba(color, alpha) {
-  const { red, green, blue } = parseHexColor(color);
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+function fishRoleColor(theme, qualifiedRole) {
+  return opaqueRoleColor(theme, qualifiedRole).slice(1);
 }
 
 /**
@@ -876,32 +758,6 @@ function footColor(color) {
  */
 function fishEscape(value) {
   return value.replace(/(["\\])/gu, '\\$1');
-}
-
-/**
- * @param {VscodeTheme} theme
- * @param {string} scope
- * @returns {string}
- */
-function tokenColor(theme, scope) {
-  return tokenSettings(theme, scope).foreground ?? '';
-}
-
-/**
- * @param {VscodeTheme} theme
- * @param {string} scope
- * @returns {HighlightSettings}
- */
-function tokenSettings(theme, scope) {
-  for (const token of theme.tokenColors) {
-    const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
-
-    if (scopes.includes(scope)) {
-      return token.settings;
-    }
-  }
-
-  throw new Error(`Missing token scope '${scope}' in ${theme.name}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

@@ -1,23 +1,22 @@
+import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { expect, test } from 'bun:test';
-
 import { contrastRatio } from '../scripts/colorScience.mjs';
 import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildDesktopThemeAssets } from '../scripts/desktopThemes.mjs';
-import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import { themeColor } from '../scripts/themeDefinition.mjs';
+import { readSourceTheme, SOURCE_THEMES } from '../scripts/themeSources.mjs';
 import { flattenCssFile } from '../scripts/union/flattenCss.mjs';
 
-type HighlightSettings = {
-  foreground?: string;
-};
-
-type VscodeTheme = {
+type ThemeDefinition = {
+  appearance: 'dark' | 'light';
   name: string;
-  colors: Record<string, string>;
-  semanticTokenColors: Record<string, HighlightSettings>;
+  schemaVersion: 1;
+  syntax: Record<string, string>;
+  terminal: Record<string, string>;
+  ui: Record<string, string>;
 };
 
 const assets = new Map(buildDesktopThemeAssets().map((asset) => [asset.path, asset.content]));
@@ -44,7 +43,7 @@ const UNION_FORBIDDEN_CONTRACT = [
   'Breeze',
 ];
 
-test('desktop theme assets match the generated VS Code-derived outputs', () => {
+test('desktop theme assets match the neutral theme definitions', () => {
   for (const [assetPath, content] of assets) {
     expect(fs.readFileSync(assetPath, 'utf8')).toBe(content);
   }
@@ -83,35 +82,45 @@ test('KDE manual Union setup includes packaged base styles', () => {
   ]) {
     expect(kdeReadme).toContain(path);
   }
+
+  expect(kdeReadme).toContain('bun run build:desktop-themes');
+  expect(kdeReadme).toContain('does not mutate the live');
+  expect(kdeReadme).not.toContain('clears already-imported');
 });
 
-test('KDE color schemes derive backgrounds and accents from Tyrian sources', () => {
+test('KDE color schemes consume neutral surface, accent, and text roles', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const schemeId = pascalSlug(source.slug);
     const colorScheme = requiredAsset(`desktop/kde/color-schemes/${schemeId}.colors`);
 
     expect(colorScheme).toContain(`ColorScheme=${schemeId}`);
     expect(colorScheme).toContain(`Name=${theme.name}`);
-    expect(colorScheme).toContain(`BackgroundNormal=${kdeRgb(theme.colors['editor.background'])}`);
     expect(colorScheme).toContain(
-      `DecorationFocus=${kdeRgb(theme.colors['activityBar.activeBorder'])}`
+      `BackgroundNormal=${kdeRgb(sourceColor(theme, 'ui:surface.canvas'))}`
     );
-    expect(colorScheme).toContain(`ForegroundNormal=${kdeRgb(theme.colors['editor.foreground'])}`);
+    expect(colorScheme).toContain(
+      `DecorationFocus=${kdeRgb(sourceColor(theme, 'ui:accent.primary'))}`
+    );
+    expect(colorScheme).toContain(
+      `ForegroundNormal=${kdeRgb(sourceColor(theme, 'ui:text.primary'))}`
+    );
     expect(colorScheme).not.toContain('Monochrome');
   }
 });
 
 test('Plasma desktop-theme colors consume the KDE palette without owning ColorEffects', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const schemeId = pascalSlug(source.slug);
     const plasmaColors = requiredAsset(`desktop/kde/plasma/desktoptheme/${schemeId}/colors`);
 
     expect(plasmaColors).toContain(`ColorScheme=${schemeId}`);
-    expect(plasmaColors).toContain(`BackgroundNormal=${kdeRgb(theme.colors['editor.background'])}`);
     expect(plasmaColors).toContain(
-      `DecorationFocus=${kdeRgb(theme.colors['activityBar.activeBorder'])}`
+      `BackgroundNormal=${kdeRgb(sourceColor(theme, 'ui:surface.canvas'))}`
+    );
+    expect(plasmaColors).toContain(
+      `DecorationFocus=${kdeRgb(sourceColor(theme, 'ui:accent.primary'))}`
     );
     expect(plasmaColors).not.toContain('[ColorEffects:');
   }
@@ -122,7 +131,7 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
 
   for (const source of SOURCE_THEMES) {
     const schemeId = pascalSlug(source.slug);
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const desktopMetadata = JSON.parse(
       requiredAsset(`desktop/kde/plasma/desktoptheme/${schemeId}/metadata.json`)
     );
@@ -146,6 +155,9 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
     expect(lookAndFeelDefaults).toContain(`ColorScheme=${schemeId}`);
     expect(lookAndFeelDefaults).toContain('widgetStyle=Breeze');
     expect(lookAndFeelDefaults).toContain(`name=${schemeId}`);
+    expect(lookAndFeelDefaults).toContain(
+      `Theme=${source.appearance === 'light' ? 'Papirus' : 'Papirus-Dark'}`
+    );
     expect(
       `${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}\n${JSON.stringify(
         lookAndFeelMetadata
@@ -156,7 +168,7 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
 
 test('Union CSS styles combine generated Tyrian tokens with the editable rice template', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const schemeId = pascalSlug(source.slug);
     const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
 
@@ -164,17 +176,17 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
       `/*
  * ${theme.name} Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * Palette and shape tokens are generated from source/themes by scripts/desktopThemes.mjs.
+ * Palette and shape tokens are generated from neutral source/themes roles by scripts/desktopThemes.mjs.
  */
 
 :root {
 `
     );
     expect(unionStyle).toContain(
-      `--tyrian-background: ${opaqueHex(theme.colors['editor.background']).toLowerCase()}`
+      `--tyrian-background: ${sourceColor(theme, 'ui:surface.canvas').toLowerCase()}`
     );
     expect(unionStyle).toContain(
-      `--tyrian-accent: ${opaqueHex(theme.colors['activityBar.activeBorder']).toLowerCase()}`
+      `--tyrian-accent: ${sourceColor(theme, 'ui:accent.primary').toLowerCase()}`
     );
 
     for (const token of UNION_TOKEN_CONTRACT) {
@@ -191,13 +203,13 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
 
 test('Plasma widget skin derives popup, search, task, and row surfaces from Tyrian colors', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const schemeId = pascalSlug(source.slug);
-    const background = opaqueHex(theme.colors['editor.background']);
-    const surface = opaqueHex(theme.colors['list.hoverBackground']);
-    const surfaceLow = opaqueHex(theme.colors['sideBar.background']);
-    const selection = opaqueHex(theme.colors['list.activeSelectionBackground']);
-    const accent = opaqueHex(theme.colors['activityBar.activeBorder']);
+    const background = sourceColor(theme, 'ui:surface.canvas');
+    const surface = sourceColor(theme, 'ui:surface.hover');
+    const surfaceLow = sourceColor(theme, 'ui:surface.sidebar');
+    const selection = sourceColor(theme, 'ui:selection.active');
+    const accent = sourceColor(theme, 'ui:accent.primary');
     const launcherBackground = requiredAsset(
       `desktop/kde/plasma/desktoptheme/${schemeId}/dialogs/background.svg`
     );
@@ -264,25 +276,29 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
   }
 });
 
-test('Caelestia schemes derive Material and terminal tokens from Tyrian sources', () => {
+test('Caelestia schemes consume neutral Material and terminal roles', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const flavour = source.slug.replace(/^tyrian-/, '');
     const mode = source.appearance === 'light' ? 'light' : 'dark';
     const scheme = requiredAsset(`desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`);
     const hypr = requiredAsset(`desktop/caelestia/hypr/${source.slug}.conf`);
+    const hyprLua = requiredAsset(`desktop/caelestia/hypr/${source.slug}.lua`);
     const state = JSON.parse(requiredAsset(`desktop/caelestia/state/${source.slug}.scheme.json`));
-    const background = hexNoHash(theme.colors['editor.background']);
-    const primary = hexNoHash(theme.colors['activityBar.activeBorder']);
-    const foreground = hexNoHash(theme.colors['editor.foreground']);
+    const background = hexNoHash(sourceColor(theme, 'ui:surface.canvas'));
+    const primary = hexNoHash(sourceColor(theme, 'ui:accent.primary'));
+    const foreground = hexNoHash(sourceColor(theme, 'ui:text.primary'));
 
     expect(scheme).toContain(`background ${background}`);
     expect(scheme).toContain(`onBackground ${foreground}`);
     expect(scheme).toContain(`primary ${primary}`);
-    expect(scheme).toContain(`term5 ${hexNoHash(theme.colors['terminal.ansiMagenta'])}`);
+    expect(scheme).toContain(`term5 ${hexNoHash(sourceColor(theme, 'terminal:ansi.magenta'))}`);
     expect(scheme).not.toContain('#');
     expect(hypr).toContain(`$background = ${background}`);
     expect(hypr).toContain(`$primary = ${primary}`);
+    expect(hyprLua).toContain(`background = "${background}"`);
+    expect(hyprLua).toContain(`primary = "${primary}"`);
+    expect(hyprLua).toStartWith('return {\n');
     expect(state.name).toBe('tyrian');
     expect(state.flavour).toBe(flavour);
     expect(state.mode).toBe(mode);
@@ -314,6 +330,17 @@ test('Caelestia schemes derive Material and terminal tokens from Tyrian sources'
   }
 });
 
+test('Caelestia manual setup names generation, XDG, and both Hyprland projections', () => {
+  const readme = fs.readFileSync('desktop/caelestia/README.md', 'utf8');
+
+  expect(readme).toContain('bun run build:desktop-themes');
+  expect(readme).toContain('current.lua');
+  expect(readme).toContain('current.conf');
+  expect(readme).toContain('XDG_CONFIG_HOME');
+  expect(readme).toContain('XDG_DATA_HOME');
+  expect(readme).toContain('XDG_STATE_HOME');
+});
+
 function requiredAsset(assetPath: string): string {
   const content = assets.get(assetPath);
 
@@ -332,6 +359,10 @@ function kdeRgb(color: string): string {
 
 function hexNoHash(color: string): string {
   return opaqueHex(color).slice(1).toLowerCase();
+}
+
+function sourceColor(theme: ThemeDefinition, qualifiedRole: string): string {
+  return opaqueHex(themeColor(theme, qualifiedRole), themeColor(theme, 'ui:surface.canvas'));
 }
 
 function readJson<T>(filePath: string): T {

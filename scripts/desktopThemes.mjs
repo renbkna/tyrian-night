@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex, parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { themeColor as readThemeColor } from './themeDefinition.mjs';
 import { readSourceTheme, readThemeSources } from './themeSources.mjs';
 import { flattenCssFile } from './union/flattenCss.mjs';
 import { lintUnionCss } from './union/lintUnionCss.mjs';
@@ -14,13 +15,7 @@ import { lintUnionCss } from './union/lintUnionCss.mjs';
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * @typedef {{ foreground?: string; fontStyle?: string; italic?: boolean; bold?: boolean }} HighlightSettings
- * @typedef {{
- *   name: string;
- *   colors: Record<string, string>;
- *   semanticTokenColors: Record<string, HighlightSettings>;
- *   tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
- * }} VscodeTheme
+ * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ path: string; content: string }} GeneratedAsset
  * @typedef {{
  *   background: string;
@@ -176,23 +171,23 @@ const CAELESTIA_COLOUR_ORDER = [
   'onSuccessContainer',
 ];
 
-const ANSI_KEYS = [
-  'terminal.ansiBlack',
-  'terminal.ansiRed',
-  'terminal.ansiGreen',
-  'terminal.ansiYellow',
-  'terminal.ansiBlue',
-  'terminal.ansiMagenta',
-  'terminal.ansiCyan',
-  'terminal.ansiWhite',
-  'terminal.ansiBrightBlack',
-  'terminal.ansiBrightRed',
-  'terminal.ansiBrightGreen',
-  'terminal.ansiBrightYellow',
-  'terminal.ansiBrightBlue',
-  'terminal.ansiBrightMagenta',
-  'terminal.ansiBrightCyan',
-  'terminal.ansiBrightWhite',
+const ANSI_ROLES = [
+  'terminal:ansi.black',
+  'terminal:ansi.red',
+  'terminal:ansi.green',
+  'terminal:ansi.yellow',
+  'terminal:ansi.blue',
+  'terminal:ansi.magenta',
+  'terminal:ansi.cyan',
+  'terminal:ansi.white',
+  'terminal:ansi.brightBlack',
+  'terminal:ansi.brightRed',
+  'terminal:ansi.brightGreen',
+  'terminal:ansi.brightYellow',
+  'terminal:ansi.brightBlue',
+  'terminal:ansi.brightMagenta',
+  'terminal:ansi.brightCyan',
+  'terminal:ansi.brightWhite',
 ];
 
 const DESKTOP_GENERATED_OWNERSHIP = [
@@ -213,7 +208,7 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const packageVersion = readPackageVersion(repoRoot);
 
   return readThemeSources(repoRoot).flatMap((source) => {
-    const theme = /** @type {VscodeTheme} */ (readSourceTheme(source, repoRoot));
+    const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot));
     const palette = buildDesktopPalette(theme);
     const kdeFileName = pascalSlug(source.slug);
     const flavour = source.slug.replace(/^tyrian-/, '');
@@ -231,7 +226,12 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
       },
       ...buildPlasmaDesktopThemePackageAssets(kdeFileName, theme.name, packageVersion),
       ...buildPlasmaWidgetSkinAssets(kdeFileName, palette),
-      ...buildPlasmaLookAndFeelPackageAssets(kdeFileName, theme.name, packageVersion),
+      ...buildPlasmaLookAndFeelPackageAssets(
+        kdeFileName,
+        theme.name,
+        packageVersion,
+        theme.appearance
+      ),
       ...buildUnionCssStylePackageAssets(repoRoot, kdeFileName, theme.name, palette),
       {
         path: `desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`,
@@ -240,6 +240,10 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
       {
         path: `desktop/caelestia/hypr/${source.slug}.conf`,
         content: buildCaelestiaHyprScheme(caelestiaColours),
+      },
+      {
+        path: `desktop/caelestia/hypr/${source.slug}.lua`,
+        content: buildCaelestiaHyprLuaScheme(caelestiaColours),
       },
       {
         path: `desktop/caelestia/state/${source.slug}.scheme.json`,
@@ -294,40 +298,40 @@ export function writeDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {}
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @returns {DesktopPalette}
  */
 function buildDesktopPalette(theme) {
-  const background = themeColor(theme, 'editor.background', 'terminal.background');
+  const background = desktopColor(theme, 'ui:surface.canvas');
 
   return {
     background,
-    foreground: themeColor(theme, 'editor.foreground', 'terminal.foreground'),
-    surfaceLow: themeColor(theme, 'sideBar.background', 'editor.background'),
-    surface: themeColor(theme, 'list.hoverBackground', 'sideBar.background'),
-    surfaceHigh: themeColor(theme, 'list.inactiveSelectionBackground', 'list.hoverBackground'),
-    surfaceHighest: themeColor(theme, 'list.activeSelectionBackground', 'list.hoverBackground'),
-    border: themeColor(theme, 'sideBar.border', 'tab.border'),
-    muted: themeColor(theme, 'editorLineNumber.foreground', 'breadcrumb.foreground'),
-    accent: themeColor(theme, 'activityBar.activeBorder', 'terminal.ansiMagenta'),
-    accentHover: themeColor(theme, 'button.hoverBackground', 'terminal.ansiBrightMagenta'),
-    selection: themeColor(theme, 'list.activeSelectionBackground', 'editor.selectionBackground'),
-    selectionAlt: themeColor(theme, 'editor.selectionBackground', 'list.activeSelectionBackground'),
-    link: themeColor(theme, 'notificationLink.foreground', 'terminal.ansiBlue'),
-    visited: themeColor(theme, 'terminal.ansiMagenta', 'activityBar.activeBorder'),
-    negative: themeColor(theme, 'editorError.foreground', 'terminal.ansiRed'),
-    neutral: themeColor(theme, 'editorWarning.foreground', 'terminal.ansiYellow'),
-    positive: themeColor(theme, 'editorGutter.addedBackground', 'terminal.ansiGreen'),
-    info: themeColor(theme, 'editorInfo.foreground', 'terminal.ansiBlue'),
-    parameter: semanticColor(theme, 'parameter', 'terminal.ansiMagenta'),
-    brightAccent: themeColor(theme, 'terminal.ansiBrightMagenta', 'activityBar.activeBorder'),
-    brightBlue: themeColor(theme, 'terminal.ansiBrightBlue', 'terminal.ansiBlue'),
-    brightCyan: themeColor(theme, 'terminal.ansiBrightCyan', 'terminal.ansiCyan'),
-    brightGreen: themeColor(theme, 'terminal.ansiBrightGreen', 'terminal.ansiGreen'),
-    brightYellow: themeColor(theme, 'terminal.ansiBrightYellow', 'terminal.ansiYellow'),
-    brightRed: themeColor(theme, 'terminal.ansiBrightRed', 'terminal.ansiRed'),
-    brightWhite: themeColor(theme, 'terminal.ansiBrightWhite', 'terminal.foreground'),
-    ansi: ANSI_KEYS.map((key) => themeColor(theme, key, undefined, background)),
+    foreground: desktopColor(theme, 'ui:text.primary'),
+    surfaceLow: desktopColor(theme, 'ui:surface.sidebar'),
+    surface: desktopColor(theme, 'ui:surface.hover'),
+    surfaceHigh: desktopColor(theme, 'ui:selection.inactive'),
+    surfaceHighest: desktopColor(theme, 'ui:selection.active'),
+    border: desktopColor(theme, 'ui:border.default'),
+    muted: desktopColor(theme, 'ui:editor.lineNumber.normal'),
+    accent: desktopColor(theme, 'ui:accent.primary'),
+    accentHover: desktopColor(theme, 'ui:buttons.hover.background'),
+    selection: desktopColor(theme, 'ui:selection.active'),
+    selectionAlt: desktopColor(theme, 'ui:selection.primary'),
+    link: desktopColor(theme, 'ui:link.primary'),
+    visited: desktopColor(theme, 'terminal:ansi.magenta'),
+    negative: desktopColor(theme, 'ui:status.error'),
+    neutral: desktopColor(theme, 'ui:status.warning'),
+    positive: desktopColor(theme, 'ui:status.success'),
+    info: desktopColor(theme, 'ui:status.info'),
+    parameter: desktopColor(theme, 'syntax:data'),
+    brightAccent: desktopColor(theme, 'terminal:ansi.brightMagenta'),
+    brightBlue: desktopColor(theme, 'terminal:ansi.brightBlue'),
+    brightCyan: desktopColor(theme, 'terminal:ansi.brightCyan'),
+    brightGreen: desktopColor(theme, 'terminal:ansi.brightGreen'),
+    brightYellow: desktopColor(theme, 'terminal:ansi.brightYellow'),
+    brightRed: desktopColor(theme, 'terminal:ansi.brightRed'),
+    brightWhite: desktopColor(theme, 'terminal:ansi.brightWhite'),
+    ansi: ANSI_ROLES.map((role) => desktopColor(theme, role, background)),
   };
 }
 
@@ -522,9 +526,10 @@ function buildPlasmaDesktopThemePackageAssets(schemeId, schemeName, packageVersi
  * @param {string} schemeId
  * @param {string} schemeName
  * @param {string} packageVersion
+ * @param {'dark' | 'light'} appearance
  * @returns {GeneratedAsset[]}
  */
-function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersion) {
+function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersion, appearance) {
   const packageRoot = `desktop/kde/plasma/look-and-feel/${schemeId}`;
 
   return [
@@ -547,16 +552,17 @@ function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersio
     },
     {
       path: `${packageRoot}/contents/defaults`,
-      content: buildLookAndFeelDefaults(schemeId),
+      content: buildLookAndFeelDefaults(schemeId, appearance),
     },
   ];
 }
 
 /**
  * @param {string} schemeId
+ * @param {'dark' | 'light'} appearance
  * @returns {string}
  */
-function buildLookAndFeelDefaults(schemeId) {
+function buildLookAndFeelDefaults(schemeId, appearance) {
   return [
     '[kdeglobals][KDE]',
     'widgetStyle=Breeze',
@@ -575,7 +581,7 @@ function buildLookAndFeelDefaults(schemeId) {
     'ToolButtonStyleOtherToolbars=NoText',
     '',
     '[kdeglobals][Icons]',
-    'Theme=Papirus-Dark',
+    `Theme=${appearance === 'light' ? 'Papirus' : 'Papirus-Dark'}`,
     '',
     '[plasmarc][Theme]',
     `name=${schemeId}`,
@@ -1127,7 +1133,7 @@ function svgHeader(width, height) {
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @param {DesktopPalette} palette
  * @returns {Record<string, string>}
  */
@@ -1137,7 +1143,7 @@ function buildCaelestiaColours(theme, palette) {
   const onTertiary = contrastText(palette.parameter);
   const onError = contrastText(palette.negative);
   const onSuccess = contrastText(palette.positive);
-  const crust = themeColor(theme, 'editorGutter.background', 'editor.background');
+  const crust = desktopColor(theme, 'ui:editor.gutter.background');
   /** @type {Record<string, string>} */
   const colours = {
     background: palette.background,
@@ -1152,7 +1158,7 @@ function buildCaelestiaColours(theme, palette) {
     surfaceContainerHighest: palette.surfaceHighest,
     onSurface: palette.foreground,
     surfaceVariant: palette.border,
-    onSurfaceVariant: themeColor(theme, 'sideBar.foreground', 'editor.foreground'),
+    onSurfaceVariant: desktopColor(theme, 'ui:text.sidebar'),
     inverseSurface: palette.foreground,
     inverseOnSurface: palette.background,
     outline: palette.muted,
@@ -1161,7 +1167,7 @@ function buildCaelestiaColours(theme, palette) {
     scrim: '#000000',
     surfaceTint: palette.accent,
     primary: palette.accent,
-    primaryDim: themeColor(theme, 'editorCursor.foreground', 'activityBar.activeBorder'),
+    primaryDim: desktopColor(theme, 'ui:accent.cursor'),
     onPrimary: onAccent,
     primaryContainer: palette.selection,
     onPrimaryContainer: palette.foreground,
@@ -1171,35 +1177,27 @@ function buildCaelestiaColours(theme, palette) {
     onPrimaryFixed: contrastText(palette.brightAccent),
     onPrimaryFixedVariant: palette.background,
     secondary: palette.info,
-    secondaryDim: themeColor(theme, 'terminal.ansiBlue', 'editorInfo.foreground'),
+    secondaryDim: desktopColor(theme, 'terminal:ansi.blue'),
     onSecondary,
-    secondaryContainer: themeColor(
-      theme,
-      'merge.currentContentBackground',
-      'list.inactiveSelectionBackground'
-    ),
+    secondaryContainer: desktopColor(theme, 'ui:status.modifiedBackground'),
     onSecondaryContainer: palette.foreground,
     secondaryFixed: palette.brightBlue,
     secondaryFixedDim: palette.info,
     onSecondaryFixed: contrastText(palette.brightBlue),
     onSecondaryFixedVariant: palette.background,
     tertiary: palette.parameter,
-    tertiaryDim: themeColor(theme, 'terminal.ansiMagenta', 'activityBar.activeBorder'),
+    tertiaryDim: desktopColor(theme, 'terminal:ansi.magenta'),
     onTertiary,
-    tertiaryContainer: themeColor(
-      theme,
-      'editor.wordHighlightBackground',
-      'list.inactiveSelectionBackground'
-    ),
+    tertiaryContainer: desktopColor(theme, 'ui:editor.reference.read'),
     onTertiaryContainer: palette.foreground,
     tertiaryFixed: palette.brightAccent,
     tertiaryFixedDim: palette.parameter,
     onTertiaryFixed: contrastText(palette.brightAccent),
     onTertiaryFixedVariant: palette.background,
     error: palette.negative,
-    errorDim: themeColor(theme, 'terminal.ansiRed', 'editorError.foreground'),
+    errorDim: desktopColor(theme, 'terminal:ansi.red'),
     onError,
-    errorContainer: themeColor(theme, 'inputValidation.errorBackground', 'editorError.foreground'),
+    errorContainer: desktopColor(theme, 'ui:status.errorBackground'),
     onErrorContainer: palette.foreground,
     primaryPaletteKeyColor: palette.accent,
     secondaryPaletteKeyColor: palette.info,
@@ -1253,10 +1251,10 @@ function buildCaelestiaColours(theme, palette) {
     kpositive: palette.positive,
     kpositiveSelection: palette.brightGreen,
     text: palette.foreground,
-    subtext1: themeColor(theme, 'sideBar.foreground', 'editor.foreground'),
+    subtext1: desktopColor(theme, 'ui:text.sidebar'),
     subtext0: palette.muted,
     overlay2: palette.muted,
-    overlay1: themeColor(theme, 'breadcrumb.foreground', 'editorLineNumber.foreground'),
+    overlay1: desktopColor(theme, 'ui:text.muted'),
     overlay0: palette.border,
     surface2: palette.surfaceHighest,
     surface1: palette.surfaceHigh,
@@ -1266,11 +1264,7 @@ function buildCaelestiaColours(theme, palette) {
     crust,
     success: palette.positive,
     onSuccess,
-    successContainer: themeColor(
-      theme,
-      'merge.incomingContentBackground',
-      'editorGutter.addedBackground'
-    ),
+    successContainer: desktopColor(theme, 'ui:status.successBackground'),
     onSuccessContainer: palette.foreground,
   };
 
@@ -1293,6 +1287,19 @@ function buildCaelestiaSchemeText(colours) {
  */
 function buildCaelestiaHyprScheme(colours) {
   return `${CAELESTIA_COLOUR_ORDER.map((name) => `$${name} = ${colours[name]}`).join('\n')}\n`;
+}
+
+/**
+ * Current Caelestia/Hyprland loads the active scheme as a Lua module whose
+ * fields carry the same no-hash hexadecimal strings as the legacy projection.
+ *
+ * @param {Record<string, string>} colours
+ * @returns {string}
+ */
+function buildCaelestiaHyprLuaScheme(colours) {
+  return `return {\n${CAELESTIA_COLOUR_ORDER.map(
+    (name) => `    ${name} = ${JSON.stringify(colours[name])},`
+  ).join('\n')}\n}\n`;
 }
 
 /**
@@ -1361,36 +1368,16 @@ function pascalSlug(slug) {
 }
 
 /**
- * @param {VscodeTheme} theme
- * @param {string} key
- * @param {string | undefined} fallbackKey
+ * @param {ThemeDefinition} theme
+ * @param {string} qualifiedRole
  * @param {string} [background]
  * @returns {string}
  */
-function themeColor(theme, key, fallbackKey, background) {
-  const backdrop =
-    background ?? theme.colors['terminal.background'] ?? theme.colors['editor.background'];
-  const color = theme.colors[key] ?? (fallbackKey ? theme.colors[fallbackKey] : undefined);
-
-  if (!color) {
-    throw new Error(`Missing color '${key}' in ${theme.name}`);
-  }
-
-  return opaqueHex(color, backdrop);
-}
-
-/**
- * @param {VscodeTheme} theme
- * @param {string} key
- * @param {string} fallbackKey
- * @returns {string}
- */
-function semanticColor(theme, key, fallbackKey) {
-  const color = theme.semanticTokenColors[key]?.foreground;
-
-  return color
-    ? opaqueHex(color, theme.colors['editor.background'])
-    : themeColor(theme, fallbackKey, undefined);
+function desktopColor(theme, qualifiedRole, background) {
+  return opaqueHex(
+    readThemeColor(theme, qualifiedRole),
+    background ?? readThemeColor(theme, 'ui:surface.canvas')
+  );
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

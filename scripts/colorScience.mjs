@@ -3,6 +3,7 @@
 import { Cam16 } from '../node_modules/@material/material-color-utilities/hct/cam16.js';
 import { Hct } from '../node_modules/@material/material-color-utilities/hct/hct.js';
 import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { themeColor } from './themeDefinition.mjs';
 
 /**
  * @typedef {{ chroma: number; hue: number; tone: number }} HctColor
@@ -28,13 +29,7 @@ import { opaqueHex, parseHexColor } from './colorUtils.mjs';
  *   oklab: Oklab;
  *   oklch: Oklch;
  * }} ColorMetrics
- * @typedef {{
- *   background: string;
- *   colors: Record<string, string>;
- *   name: string;
- *   semanticTokenColors: Record<string, { foreground?: string }>;
- *   tokenColors: Array<{ scope: string | string[]; settings: { foreground?: string } }>;
- * }} VscodeTheme
+ * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ hex: string; role: string }} ThemeRoleColor
  * @typedef {{
  *   leftRole: string;
@@ -62,14 +57,14 @@ import { opaqueHex, parseHexColor } from './colorUtils.mjs';
  */
 
 export const DEFAULT_SYNTAX_ROLES = {
-  add: { kind: 'semantic', selector: 'function' },
-  comment: { kind: 'token', selector: 'comment' },
-  def: { kind: 'semantic', selector: 'keyword' },
-  self: { kind: 'token', selector: 'variable.language' },
-  sentinel: { kind: 'token', selector: 'constant.language' },
-  string: { kind: 'semantic', selector: 'string' },
-  type: { kind: 'semantic', selector: 'type' },
-  value: { kind: 'semantic', selector: 'parameter' },
+  add: 'syntax:function',
+  comment: 'syntax:comment',
+  def: 'syntax:keyword',
+  self: 'syntax:data',
+  sentinel: 'syntax:constantLanguage',
+  string: 'syntax:string',
+  type: 'syntax:type',
+  value: 'syntax:data',
 };
 
 export const DEFAULT_ROLE_PAIR_RULES = [
@@ -162,27 +157,24 @@ export function compareColors(input) {
 }
 
 /**
- * @param {VscodeTheme} theme
- * @param {Record<string, { kind: string; selector: string }>} [roleMap]
+ * @param {ThemeDefinition} theme
+ * @param {Record<string, string>} [roleMap]
  * @returns {ThemeRoleColor[]}
  */
 export function themeRoleColors(theme, roleMap = DEFAULT_SYNTAX_ROLES) {
   return Object.entries(roleMap).map(([role, source]) => ({
-    hex:
-      source.kind === 'token'
-        ? tokenColor(theme, source.selector)
-        : semanticColor(theme, source.selector),
+    hex: themeColor(theme, source),
     role,
   }));
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @param {ThemeRoleColor[]} [roleColors]
  * @returns {RoleAudit[]}
  */
 export function auditThemeRoles(theme, roleColors = themeRoleColors(theme)) {
-  const background = theme.colors['editor.background'];
+  const background = themeColor(theme, 'ui:surface.canvas');
 
   return roleColors.map((color) => {
     const neighbors = roleColors.filter((neighbor) => neighbor.role !== color.role);
@@ -200,13 +192,13 @@ export function auditThemeRoles(theme, roleColors = themeRoleColors(theme)) {
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @param {string[]} candidates
  * @param {{ minContrast?: number; neighbors?: ThemeRoleColor[]; pairRules?: RolePairRule[]; role?: string; targetContrast?: number }} [options]
  * @returns {Array<{ contrast: number; hex: string; metrics: ColorMetrics; nearest: { delta: number; hex: string; role: string }; oklch: Oklch; pairRisk?: RolePairRisk; score: number }>}
  */
 export function rankCandidates(theme, candidates, options = {}) {
-  const background = theme.colors['editor.background'];
+  const background = themeColor(theme, 'ui:surface.canvas');
   const minContrast = options.minContrast ?? 4.5;
   const neighbors = options.neighbors ?? themeRoleColors(theme);
   const pairRules = options.pairRules ?? DEFAULT_ROLE_PAIR_RULES;
@@ -276,9 +268,9 @@ export function auditSampleSequence(roleColors, sampleRoles = DEFAULT_SAMPLE_ROL
 }
 
 /**
- * @param {VscodeTheme} theme
+ * @param {ThemeDefinition} theme
  * @param {string} role
- * @param {Record<string, { kind: string; selector: string }>} [roleMap]
+ * @param {Record<string, string>} [roleMap]
  * @returns {string}
  */
 export function themeRoleColor(theme, role, roleMap = DEFAULT_SYNTAX_ROLES) {
@@ -288,9 +280,7 @@ export function themeRoleColor(theme, role, roleMap = DEFAULT_SYNTAX_ROLES) {
     throw new Error(`Unknown role '${role}'`);
   }
 
-  return source.kind === 'token'
-    ? tokenColor(theme, source.selector)
-    : semanticColor(theme, source.selector);
+  return themeColor(theme, source);
 }
 
 /**
@@ -509,38 +499,6 @@ function requiredRoleColor(roleColors, role) {
  */
 function formatRuleNumber(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-
-/**
- * @param {VscodeTheme} theme
- * @param {string} selector
- * @returns {string}
- */
-function semanticColor(theme, selector) {
-  const color = theme.semanticTokenColors[selector]?.foreground;
-
-  if (!color) {
-    throw new Error(`Missing semantic color '${selector}' in ${theme.name}`);
-  }
-
-  return color;
-}
-
-/**
- * @param {VscodeTheme} theme
- * @param {string} scope
- * @returns {string}
- */
-function tokenColor(theme, scope) {
-  for (const token of theme.tokenColors) {
-    const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
-
-    if (scopes.includes(scope) && token.settings.foreground) {
-      return token.settings.foreground;
-    }
-  }
-
-  throw new Error(`Missing token scope '${scope}' in ${theme.name}`);
 }
 
 /**

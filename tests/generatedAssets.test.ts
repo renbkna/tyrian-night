@@ -76,10 +76,17 @@ test('generator entrypoints resolve the repository independently of cwd', () => 
       'scripts/terminalThemes.mjs',
       'scripts/desktopThemes.mjs',
       'scripts/zedTheme.mjs',
+      'scripts/vscodeThemes.mjs',
     ]) {
       execFileSync('node', [path.resolve(script), '--check'], { cwd, stdio: 'pipe' });
     }
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
+
+  const vscodeGenerator = fs.readFileSync('scripts/vscodeThemes.mjs', 'utf8');
+  expect(vscodeGenerator).toContain(
+    'fileURLToPath(import.meta.url) === path.resolve(process.argv[1])'
+  );
+  expect(vscodeGenerator).not.toContain('if (import.meta.main)');
 });

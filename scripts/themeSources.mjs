@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadThemeDefinitionContext, validateThemeDefinition } from './themeDefinition.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -13,7 +14,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  *   slug: string;
  *   terminalDefault?: boolean;
  * }} ThemeCatalogEntry
- * @typedef {{ name: string; type: ThemeAppearance }} ThemeIdentity
+ * @typedef {{ appearance: ThemeAppearance; name: string }} ThemeIdentity
  * @typedef {{
  *   appearance: ThemeAppearance;
  *   isDefault: boolean;
@@ -25,23 +26,48 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  *   slug: string;
  *   sourcePath: string;
  *   vscodeContributionPath: string;
+ *   vscodeThemePath: string;
  *   vscodeUiTheme: 'vs' | 'vs-dark';
  * }} ThemeSource
+ * @typedef {{
+ *   definition: import('./themeDefinition.mjs').ThemeDefinitionContext;
+ *   root: string;
+ *   sources: ReadonlyArray<ThemeSource>;
+ * }} ThemeRepository
  */
+
+const defaultThemeRepository = loadThemeRepository(repoRoot);
 
 /** @type {ReadonlyArray<ThemeSource>} */
 export const SOURCE_THEMES = Object.freeze(
-  readThemeSources(repoRoot).map((theme) => Object.freeze(theme))
+  defaultThemeRepository.sources.map((theme) => Object.freeze(theme))
 );
 
 /**
+ * Loads one role-membership context and every catalog member for a repository root.
  * @param {string} [root]
+ * @returns {ThemeRepository}
+ */
+export function loadThemeRepository(root = repoRoot) {
+  const resolvedRoot = path.resolve(root);
+  const definition = loadThemeDefinitionContext(resolvedRoot);
+  const sources = Object.freeze(
+    readThemeSources(resolvedRoot, definition).map((source) => Object.freeze(source))
+  );
+
+  return Object.freeze({ definition, root: resolvedRoot, sources });
+}
+
+/**
+ * @param {string} [root]
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
  * @returns {ThemeSource[]}
  */
-export function readThemeSources(root = repoRoot) {
-  const themesDirectory = path.join(root, 'source/themes');
+export function readThemeSources(root = repoRoot, definition = loadThemeDefinitionContext(root)) {
+  const resolvedRoot = requireContextRoot(root, definition);
+  const themesDirectory = path.join(resolvedRoot, 'source/themes');
   const themes = normalizeThemeCatalog(
-    readJson(path.join(root, 'source/themeCatalog.json')),
+    readJson(path.join(resolvedRoot, 'source/themeCatalog.json')),
     (slug) => {
       const sourcePath = path.join(themesDirectory, `${slug}.json`);
       const stats = fs.lstatSync(sourcePath);
@@ -50,7 +76,7 @@ export function readThemeSources(root = repoRoot) {
         throw new Error(`Theme source '${slug}' must be a regular file.`);
       }
 
-      return readJson(sourcePath);
+      return validateThemeDefinition(readJson(sourcePath), slug, definition);
     }
   );
   const expectedFiles = new Set(themes.map(({ slug }) => `${slug}.json`));
@@ -77,13 +103,22 @@ export function readJson(filePath) {
 }
 
 /**
- * @template T
  * @param {ThemeSource} source
  * @param {string} [root]
- * @returns {T}
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @returns {import('./themeDefinition.mjs').ThemeDefinition}
  */
-export function readSourceTheme(source, root = repoRoot) {
-  return readJson(path.join(root, source.sourcePath));
+export function readSourceTheme(
+  source,
+  root = repoRoot,
+  definition = loadThemeDefinitionContext(root)
+) {
+  const resolvedRoot = requireContextRoot(root, definition);
+  return validateThemeDefinition(
+    readJson(path.join(resolvedRoot, source.sourcePath)),
+    source.slug,
+    definition
+  );
 }
 
 /**
@@ -142,11 +177,11 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
 
     const identity = /** @type {Partial<ThemeIdentity>} */ (identityValue);
     const label = requireThemeName(identity.name, slug);
-    if (identity.type !== 'dark' && identity.type !== 'light') {
-      throw new Error(`Theme source '${slug}' has an invalid type.`);
+    if (identity.appearance !== 'dark' && identity.appearance !== 'light') {
+      throw new Error(`Theme source '${slug}' has an invalid appearance.`);
     }
 
-    const appearance = identity.type;
+    const appearance = identity.appearance;
     const vscodeUiTheme = /** @type {'vs' | 'vs-dark'} */ (
       appearance === 'light' ? 'vs' : 'vs-dark'
     );
@@ -168,7 +203,8 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
       paletteName: slug.replaceAll('-', '_'),
       slug,
       sourcePath: `source/themes/${slug}.json`,
-      vscodeContributionPath: `./source/themes/${slug}.json`,
+      vscodeContributionPath: `./apps/vscode/themes/${slug}.json`,
+      vscodeThemePath: `apps/vscode/themes/${slug}.json`,
       vscodeUiTheme,
     };
   });
@@ -254,4 +290,16 @@ function requireSingleThemeRole(themes, role) {
   }
 
   return /** @type {ThemeSource} */ (themes[0]);
+}
+
+/**
+ * @param {string} root
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
+ */
+function requireContextRoot(root, definition) {
+  const resolvedRoot = path.resolve(root);
+  if (definition.root !== resolvedRoot) {
+    throw new Error('Theme definition context does not belong to the requested repository root.');
+  }
+  return resolvedRoot;
 }

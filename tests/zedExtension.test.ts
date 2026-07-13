@@ -4,8 +4,17 @@ import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
+import { parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+
+type ThemeDefinition = {
+  appearance: 'dark' | 'light';
+  name: string;
+  syntax: Record<string, string>;
+  terminal: Record<string, string>;
+  ui: Record<string, string>;
+};
 
 type ZedThemeFamily = {
   $schema: string;
@@ -29,11 +38,6 @@ type ZedThemeFamily = {
       syntax: Record<string, { color?: string; font_style?: string; font_weight?: number }>;
     };
   }>;
-};
-
-type HighlightSettings = {
-  foreground?: string;
-  fontStyle?: string;
 };
 
 const EXPECTED_ZED_THEME_STYLE_KEYS = [
@@ -280,7 +284,7 @@ test('Zed extension manifest is theme-only and installable from the apps/zed dir
   expect(fs.existsSync('apps/zed/Cargo.toml')).toBe(false);
 });
 
-test('Zed theme asset matches the generated Zed schema port of the VS Code themes', () => {
+test('Zed theme asset matches the generated projection of the neutral themes', () => {
   const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
   const generated = buildZedThemeFamily() as ZedThemeFamily;
 
@@ -297,18 +301,37 @@ test('Zed theme asset matches the generated Zed schema port of the VS Code theme
   ]);
 });
 
+test('every generated Zed color uses a supported hex representation', () => {
+  const generated = buildZedThemeFamily() as ZedThemeFamily;
+
+  for (const theme of generated.themes) {
+    const colors = collectHexStrings(theme.style);
+    expect(colors.length).toBeGreaterThan(0);
+    for (const color of colors) expect(() => parseHexColor(color)).not.toThrow();
+  }
+
+  const dawn = generated.themes.find((theme) => theme.name === 'Tyrian Dawn');
+  expect(dawn?.style['border.transparent']).toBe('#00000000');
+});
+
 test('Zed generation resolves theme membership and identity from the injected root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-zed-root-'));
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
-    const theme = readJson<Record<string, unknown>>(themePath);
+    const theme = readJson<ThemeDefinition>(themePath);
     theme.name = 'Injected Zed Night';
+    theme.ui['surface.canvas'] = '#112233';
+    theme.syntax.function = '#445566';
+    theme.terminal['ansi.red'] = '#778899';
     fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
 
     const generated = buildZedThemeFamily(root) as ZedThemeFamily;
     expect(generated.themes[0]?.name).toBe('Injected Zed Night');
+    expect(generated.themes[0]?.style['editor.background']).toBe('#112233');
+    expect(generated.themes[0]?.style.syntax.function?.color).toBe('#445566');
+    expect(generated.themes[0]?.style['terminal.ansi.red']).toBe('#778899');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -342,101 +365,51 @@ test('Zed theme covers the current schema and built-in style and syntax surfaces
   }
 });
 
-test('Zed theme keeps the core palette and syntax colors tied to the VS Code sources', () => {
+test('Zed theme maps UI, syntax, and terminal colors from their neutral owners', () => {
   const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
 
   for (const theme of zedTheme.themes) {
-    const vscodeTheme = readJson<{
-      colors: Record<string, string>;
-      semanticTokenColors: Record<string, { foreground?: string }>;
-      tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
-    }>(sourceThemePath(theme.name));
+    const source = sourceTheme(theme.name);
 
-    expect(theme.style['editor.background']).toBe(vscodeTheme.colors['editor.background']);
-    expect(theme.style['editor.foreground']).toBe(vscodeTheme.colors['editor.foreground']);
-    expect(theme.style['editor.active_line.background']).toBe(
-      vscodeTheme.colors['editor.lineHighlightBackground']
-    );
-    expect(theme.style['editor.highlighted_line.background']).toBe(
-      vscodeTheme.colors['editor.rangeHighlightBackground'] ??
-        vscodeTheme.colors['editor.lineHighlightBackground']
-    );
-    expect(theme.style['search.active_match_background']).toBe(
-      vscodeTheme.colors['editor.findMatchBackground']
-    );
-    expect(theme.style['search.match_background']).toBe(
-      vscodeTheme.colors['editor.findMatchHighlightBackground'] ??
-        vscodeTheme.colors['editor.findMatchBackground']
-    );
-    expect(theme.style.players[0]?.cursor).toBe(vscodeTheme.colors['editorCursor.foreground']);
-    expect(theme.style.accents[0]).toBe(vscodeTheme.colors.focusBorder);
-    expect(theme.style['pane.focused_border']).toBe(vscodeTheme.colors.focusBorder);
-    expect(theme.style['panel.focused_border']).toBe(vscodeTheme.colors.focusBorder);
-    expect(theme.style.predictive).toBe(vscodeTheme.colors['editorGhostText.foreground']);
-    expect(theme.style['predictive.background']).toBe(
-      vscodeTheme.colors['editorGhostText.background']
-    );
-    expect(theme.style['predictive.border']).toBe(vscodeTheme.colors['editorGhostText.border']);
-    expect(theme.style['editor.document_highlight.bracket_background']).not.toBe(
-      vscodeTheme.colors['editorBracketHighlight.foreground1']
-    );
-    expect(theme.style['terminal.ansi.red']).toBe(vscodeTheme.colors['terminal.ansiRed']);
-    expect(theme.style['version_control.deleted']).toBe(
-      vscodeTheme.colors['editorGutter.deletedBackground']
-    );
+    expect(theme.style['editor.background']).toBe(source.ui['surface.canvas']);
+    expect(theme.style['editor.foreground']).toBe(source.ui['text.primary']);
+    expect(theme.style['editor.active_line.background']).toBe(source.ui['surface.hover']);
+    expect(theme.style['editor.highlighted_line.background']).toBe(source.ui['editor.highlight']);
+    expect(theme.style['search.active_match_background']).toBe(source.ui['search.match.active']);
+    expect(theme.style['search.match_background']).toBe(source.ui['search.match.passive']);
+    expect(theme.style.players[0]?.cursor).toBe(source.ui['accent.cursor']);
+    expect(theme.style.accents[0]).toBe(source.ui['accent.primary']);
+    expect(theme.style['pane.focused_border']).toBe(source.ui['accent.primary']);
+    expect(theme.style['panel.focused_border']).toBe(source.ui['accent.primary']);
+    expect(theme.style.predictive).toBe(source.ui['text.hint']);
+    expect(theme.style['predictive.background']).toBe(source.ui['editor.predictive.background']);
+    expect(theme.style['predictive.border']).toBe(source.ui['editor.predictive.border']);
+    expect(theme.style['terminal.ansi.red']).toBe(source.terminal['ansi.red']);
+    expect(theme.style['version_control.deleted']).toBe(source.ui['status.removed']);
     expect(theme.style['version_control.word_deleted']).toMatch(
-      new RegExp(`^${vscodeTheme.colors['editorGutter.deletedBackground'].slice(0, 7)}`, 'u')
+      new RegExp(`^${source.ui['status.removed'].slice(0, 7)}`, 'u')
     );
-    expect(theme.style.syntax.function.color).toBe(
-      vscodeTheme.semanticTokenColors.function.foreground
-    );
-    expect(theme.style.syntax.constructor.color).toBe(
-      vscodeTheme.semanticTokenColors.constructor.foreground
-    );
-    expect(theme.style.syntax['function.builtin']?.color).toBe(
-      vscodeTheme.semanticTokenColors['function.defaultLibrary'].foreground
-    );
-    expect(theme.style.syntax.hint?.color).toBe(vscodeTheme.colors['editorInlayHint.foreground']);
+    expect(theme.style.syntax.function.color).toBe(source.syntax.function);
+    expect(theme.style.syntax.constructor.color).toBe(source.syntax.type);
+    expect(theme.style.syntax['function.builtin']?.color).toBe(source.syntax.function);
+    expect(theme.style.syntax.hint?.color).toBe(source.ui['text.hint']);
     expect(theme.style.syntax.hint?.font_style).toBe('italic');
-    expect(theme.style.syntax['markup.quote']?.color).toBe(
-      tokenSettings(vscodeTheme, 'markup.quote').foreground
-    );
+    expect(theme.style.syntax['markup.quote']?.color).toBe(source.syntax.string);
     expect(theme.style.syntax['markup.quote']?.font_style).toBe('italic');
-    expect(theme.style.syntax.predictive?.color).toBe(
-      vscodeTheme.colors['editorGhostText.foreground']
-    );
+    expect(theme.style.syntax.predictive?.color).toBe(source.ui['text.hint']);
     expect(theme.style.syntax.predictive?.font_style).toBeUndefined();
-    expect(theme.style.syntax['invalid.deprecated']?.color).toBe(
-      tokenSettings(vscodeTheme, 'invalid.deprecated').foreground
-    );
-    expect(theme.style.syntax.parameter.color).toBe(
-      vscodeTheme.semanticTokenColors.parameter.foreground
-    );
-    expect(theme.style.syntax.boolean.color).toBe(
-      tokenSettings(vscodeTheme, 'constant.language').foreground
-    );
-    expect(theme.style.syntax['constant.builtin']?.color).toBe(
-      tokenSettings(vscodeTheme, 'constant.language').foreground
-    );
-    expect(theme.style.syntax.constant.color).toBe(
-      vscodeTheme.semanticTokenColors['variable.readonly'].foreground
-    );
-    expect(theme.style.syntax.number.color).toBe(
-      tokenSettings(vscodeTheme, 'constant.numeric').foreground
-    );
-    expect(theme.style.syntax['variable.special']?.color).toBe(
-      tokenSettings(vscodeTheme, 'variable.language').foreground
-    );
-    expect(theme.style.syntax.operator.color).toBe(
-      vscodeTheme.semanticTokenColors.operator.foreground
-    );
-    expect(theme.style.syntax['selector.pseudo']?.color).toBe(
-      tokenSettings(vscodeTheme, 'keyword').foreground
-    );
-    expect(theme.style.syntax['property.readonly']?.color).toBe(
-      vscodeTheme.semanticTokenColors['property.readonly'].foreground
-    );
-    expect(theme.style.syntax.type.color).toBe(vscodeTheme.semanticTokenColors.type.foreground);
+    expect(theme.style.syntax['invalid.deprecated']?.color).toBe(source.syntax.data);
+    expect(theme.style.syntax.parameter.color).toBe(source.syntax.data);
+    expect(theme.style.syntax.boolean.color).toBe(source.syntax.constantLanguage);
+    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.constantLanguage);
+    expect(theme.style.syntax.constant.color).toBe(source.syntax.data);
+    expect(theme.style.syntax.number.color).toBe(source.syntax.data);
+    expect(theme.style.syntax['variable.special']?.color).toBe(source.syntax.data);
+    expect(theme.style.syntax['variable.special']?.font_style).toBe('italic');
+    expect(theme.style.syntax.operator.color).toBe(source.syntax.keyword);
+    expect(theme.style.syntax['selector.pseudo']?.color).toBe(source.syntax.keyword);
+    expect(theme.style.syntax['property.readonly']?.color).toBe(source.syntax.data);
+    expect(theme.style.syntax.type.color).toBe(source.syntax.type);
   }
 });
 
@@ -551,27 +524,12 @@ test('Zed example settings match the repo companion settings contract', () => {
   }
 });
 
-test('Zed theme files do not expose VS Code-only theme fields', () => {
-  const zedTheme = readJson<Record<string, unknown>>('apps/zed/themes/tyrian-night.json');
-
-  for (const forbiddenField of ['type', 'colors', 'semanticHighlighting', 'semanticTokenColors']) {
-    expect(zedTheme).not.toHaveProperty(forbiddenField);
-  }
-
-  for (const theme of (zedTheme as ZedThemeFamily).themes) {
-    expect(theme).not.toHaveProperty('type');
-    expect(theme).not.toHaveProperty('colors');
-    expect(theme).not.toHaveProperty('tokenColors');
-    expect(theme).not.toHaveProperty('semanticTokenColors');
-  }
-});
-
-function sourceThemePath(themeName: string): string {
+function sourceTheme(themeName: string): ThemeDefinition {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<{ name: string }>(source);
+    const theme = readSourceTheme(source);
 
     if (theme.name === themeName) {
-      return source.sourcePath;
+      return theme;
     }
   }
 
@@ -582,20 +540,11 @@ function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
 }
 
-function tokenSettings(
-  vscodeTheme: {
-    name?: string;
-    tokenColors: Array<{ scope: string | string[]; settings: HighlightSettings }>;
-  },
-  scope: string
-): HighlightSettings {
-  for (const token of vscodeTheme.tokenColors) {
-    const scopes = Array.isArray(token.scope) ? token.scope : [token.scope];
-
-    if (scopes.includes(scope)) {
-      return token.settings;
-    }
+function collectHexStrings(value: unknown): string[] {
+  if (typeof value === 'string') return value.startsWith('#') ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(collectHexStrings);
+  if (value && typeof value === 'object') {
+    return Object.values(value).flatMap(collectHexStrings);
   }
-
-  throw new Error(`Missing token scope '${scope}' in ${vscodeTheme.name ?? 'theme'}`);
+  return [];
 }

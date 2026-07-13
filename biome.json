@@ -21,9 +21,8 @@
       "!out/**",
       "!node_modules/**",
       "!*.vsix",
-      "!apps/vscode/island/tyrian-dawn.css",
-      "!apps/vscode/island/tyrian-night.css",
-      "!apps/vscode/island/tyrian-night-old.css",
+      "!apps/vscode/island/tyrian-*.css",
+      "!apps/vscode/themes/**",
       "!apps/zed/themes/tyrian-night.json"
     ]
   }

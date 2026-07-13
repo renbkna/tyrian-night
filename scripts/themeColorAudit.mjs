@@ -13,10 +13,14 @@ import {
   themeRoleColor,
   themeRoleColors,
 } from './colorScience.mjs';
-import { SOURCE_THEMES, readSourceTheme } from './themeSources.mjs';
+import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
+import { themeColor } from './themeDefinition.mjs';
 
 const args = parseAuditArgs(process.argv.slice(2));
-const themes = SOURCE_THEMES.map((source) => readSourceTheme(source));
+const repository = loadThemeRepository();
+const themes = repository.sources.map((source) =>
+  readSourceTheme(source, repository.root, repository.definition)
+);
 
 if (args.help) {
   printHelp();
@@ -61,7 +65,7 @@ function printThemeAudit() {
 function printRoleAudit(role) {
   const rows = themes.map((theme) => {
     const hex = themeRoleColor(theme, role);
-    const metrics = colorMetrics(hex, theme.colors['editor.background']);
+    const metrics = colorMetrics(hex, themeColor(theme, 'ui:surface.canvas'));
     const roleNeighbors = themeRoleColors(theme).filter((neighbor) => neighbor.role !== role);
     const nearest = rankCandidates(theme, [hex], { neighbors: roleNeighbors })[0].nearest;
 
@@ -142,7 +146,7 @@ function printCandidateRanking() {
 }
 
 /**
- * @param {import('./colorScience.mjs').VscodeTheme} theme
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  */
 function printPairRisks(theme) {
   const risks = auditRolePairs(themeRoleColors(theme));
@@ -155,7 +159,7 @@ function printPairRisks(theme) {
 }
 
 /**
- * @param {import('./colorScience.mjs').VscodeTheme} theme
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  */
 function printSampleSequence(theme) {
   const samples = auditSampleSequence(themeRoleColors(theme));

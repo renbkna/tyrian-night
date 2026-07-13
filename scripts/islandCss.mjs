@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { themeColor } from './themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme, readThemeSources } from './themeSources.mjs';
 
 const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
@@ -22,107 +24,127 @@ const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 /** @type {Record<string, Record<string, string>>} */
 const ISLAND_CSS_THEME_TOKENS = {
   'tyrian-abyss': {
-    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(134, 82, 255, 0))',
-    '--islands-breathe-peak': 'drop-shadow(0 0 10px rgba(134, 82, 255, 0.42))',
-    '--islands-aurora-primary': 'rgba(134, 82, 255, 0.42)',
-    '--islands-aurora-secondary': 'rgba(180, 140, 255, 0.22)',
-    '--islands-aurora-tail': 'rgba(134, 82, 255, 0.14)',
-    '--islands-surface-border-top': '1px solid rgba(180, 140, 255, 0.12)',
-    '--islands-surface-border-left': '1px solid rgba(180, 140, 255, 0.08)',
-    '--islands-surface-border-bottom': '1px solid rgba(134, 82, 255, 0.03)',
-    '--islands-surface-border-right': '1px solid rgba(134, 82, 255, 0.03)',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(var(--islands-accent-glow-rgb), 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 10px rgba(var(--islands-accent-glow-rgb), 0.42))',
+    '--islands-aurora-primary': 'rgba(var(--islands-accent-glow-rgb), 0.42)',
+    '--islands-aurora-secondary': 'rgba(var(--islands-accent-effect-rgb), 0.22)',
+    '--islands-aurora-tail': 'rgba(var(--islands-accent-glow-rgb), 0.14)',
+    '--islands-surface-border-top': '1px solid rgba(var(--islands-accent-effect-rgb), 0.12)',
+    '--islands-surface-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.08)',
+    '--islands-surface-border-bottom': '1px solid rgba(var(--islands-accent-glow-rgb), 0.03)',
+    '--islands-surface-border-right': '1px solid rgba(var(--islands-accent-glow-rgb), 0.03)',
     '--islands-surface-shadow': '0 2px 10px 0 rgba(0, 0, 0, 0.48)',
-    '--islands-elevated-border-top': '1px solid rgba(180, 140, 255, 0.16)',
-    '--islands-elevated-border-left': '1px solid rgba(180, 140, 255, 0.1)',
-    '--islands-elevated-border-bottom': '1px solid rgba(134, 82, 255, 0.04)',
-    '--islands-elevated-border-right': '1px solid rgba(134, 82, 255, 0.04)',
-    '--islands-list-focus-bg': 'linear-gradient(135deg, #24134ab8, #150d2980)',
-    '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #24134ad1, #150d2994)',
-    '--islands-list-focus-active-bg': 'linear-gradient(135deg, #351779db, #24134a9e)',
-    '--islands-list-hover-bg': 'linear-gradient(135deg, #24134a61, #150d2942)',
-    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.06)',
-    '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
-    '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.1)',
-    '--islands-tab-divider': '#24134a',
-    '--islands-tab-hover-text-shadow': '0 0 6px rgba(180, 140, 255, 0.22)',
-    '--islands-hover-border': '1px solid rgba(180, 140, 255, 0.1)',
+    '--islands-elevated-border-top': '1px solid rgba(var(--islands-accent-effect-rgb), 0.16)',
+    '--islands-elevated-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.1)',
+    '--islands-elevated-border-bottom': '1px solid rgba(var(--islands-accent-glow-rgb), 0.04)',
+    '--islands-elevated-border-right': '1px solid rgba(var(--islands-accent-glow-rgb), 0.04)',
+    '--islands-list-focus-bg':
+      'linear-gradient(135deg, rgba(var(--islands-border-rgb), 0.72), rgba(var(--islands-selection-inactive-rgb), 0.5))',
+    '--islands-list-focus-selected-bg':
+      'linear-gradient(135deg, rgba(var(--islands-border-rgb), 0.82), rgba(var(--islands-selection-inactive-rgb), 0.58))',
+    '--islands-list-focus-active-bg':
+      'linear-gradient(135deg, rgba(var(--islands-effect-strong-accent-rgb), 0.86), rgba(var(--islands-border-rgb), 0.62))',
+    '--islands-list-hover-bg':
+      'linear-gradient(135deg, rgba(var(--islands-border-rgb), 0.38), rgba(var(--islands-selection-inactive-rgb), 0.26))',
+    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.06)',
+    '--islands-list-focus-selected-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.08)',
+    '--islands-list-focus-active-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.1)',
+    '--islands-tab-divider': 'var(--islands-border)',
+    '--islands-tab-hover-text-shadow': '0 0 6px rgba(var(--islands-accent-effect-rgb), 0.22)',
+    '--islands-hover-border': '1px solid rgba(var(--islands-accent-effect-rgb), 0.1)',
     '--islands-hover-shadow': '0 4px 18px 0 rgba(0, 0, 0, 0.52)',
-    '--islands-activity-border-right': '1px solid rgba(180, 140, 255, 0.06)',
-    '--islands-activity-shadow': 'inset 0 1px 3px #b48cff14, 0 1px 5px #0000006b',
-    '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(134, 82, 255, 0.36))',
-    '--islands-activity-checked-bg': 'linear-gradient(180deg, #24134af5, #120a1fc7)',
-    '--islands-activity-checked-shadow': 'inset 0 1px 0 #b48cff24, 0 1px 4px #0000006b',
-    '--islands-statusbar-hover': '#b2a8c8',
+    '--islands-activity-border-right': '1px solid rgba(var(--islands-accent-effect-rgb), 0.06)',
+    '--islands-activity-shadow':
+      'inset 0 1px 3px rgba(var(--islands-accent-effect-rgb), 0.08), 0 1px 5px #0000006b',
+    '--islands-activity-hover-filter':
+      'drop-shadow(0 0 6px rgba(var(--islands-accent-glow-rgb), 0.36))',
+    '--islands-activity-checked-bg':
+      'linear-gradient(180deg, rgba(var(--islands-border-rgb), 0.96), rgba(var(--islands-terminal-black-rgb), 0.78))',
+    '--islands-activity-checked-shadow':
+      'inset 0 1px 0 rgba(var(--islands-accent-effect-rgb), 0.14), 0 1px 4px #0000006b',
+    '--islands-statusbar-hover': 'var(--islands-effect-status-hover)',
     '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
     '--islands-letterpress-opacity': '0.45',
-    '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b48cff29)',
+    '--islands-letterpress-filter':
+      'brightness(0) drop-shadow(2px 2px 1px rgba(var(--islands-accent-effect-rgb), 0.16))',
     '--islands-command-shadow':
-      'inset 0 1px 0 #b48cff1f, inset 1px 0 0 #b48cff0f, 0 1px 4px #00000057',
+      'inset 0 1px 0 rgba(var(--islands-accent-effect-rgb), 0.12), inset 1px 0 0 rgba(var(--islands-accent-effect-rgb), 0.06), 0 1px 4px #00000057',
     '--islands-notification-shadow': '0 4px 14px 0 rgba(0, 0, 0, 0.48)',
     '--islands-widget-large-shadow': '0 8px 28px 0 rgba(0, 0, 0, 0.58)',
-    '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #24134ac7, #150d298f)',
-    '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(180, 140, 255, 0.08)',
+    '--islands-quick-row-focus-bg':
+      'linear-gradient(135deg, rgba(var(--islands-border-rgb), 0.78), rgba(var(--islands-selection-inactive-rgb), 0.56))',
+    '--islands-quick-row-focus-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.08)',
     '--islands-sticky-shadow': '0 4px 9px -2px rgba(0, 0, 0, 0.48)',
-    '--islands-terminal-border-left': '1px solid rgba(180, 140, 255, 0.08)',
+    '--islands-terminal-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.08)',
   },
-  'tyrian-night': neutralDarkIslandTokens({
-    primaryRgb: '141, 105, 193',
-    secondaryRgb: '168, 136, 200',
-  }),
-  'tyrian-night-old': neutralDarkIslandTokens({
-    primaryRgb: '139, 106, 189',
-    secondaryRgb: '160, 136, 192',
-  }),
+  'tyrian-night': neutralDarkIslandTokens(),
+  'tyrian-night-old': neutralDarkIslandTokens(),
   'tyrian-nocturne': {
-    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(166, 108, 255, 0))',
-    '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(166, 108, 255, 0.36))',
-    '--islands-aurora-primary': 'rgba(166, 108, 255, 0.38)',
-    '--islands-aurora-secondary': 'rgba(185, 138, 255, 0.22)',
-    '--islands-aurora-tail': 'rgba(166, 108, 255, 0.13)',
-    '--islands-surface-border-top': '1px solid rgba(185, 138, 255, 0.12)',
-    '--islands-surface-border-left': '1px solid rgba(185, 138, 255, 0.08)',
-    '--islands-surface-border-bottom': '1px solid rgba(166, 108, 255, 0.03)',
-    '--islands-surface-border-right': '1px solid rgba(166, 108, 255, 0.03)',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(var(--islands-accent-glow-rgb), 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(var(--islands-accent-glow-rgb), 0.36))',
+    '--islands-aurora-primary': 'rgba(var(--islands-accent-glow-rgb), 0.38)',
+    '--islands-aurora-secondary': 'rgba(var(--islands-accent-effect-rgb), 0.22)',
+    '--islands-aurora-tail': 'rgba(var(--islands-accent-glow-rgb), 0.13)',
+    '--islands-surface-border-top': '1px solid rgba(var(--islands-accent-effect-rgb), 0.12)',
+    '--islands-surface-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.08)',
+    '--islands-surface-border-bottom': '1px solid rgba(var(--islands-accent-glow-rgb), 0.03)',
+    '--islands-surface-border-right': '1px solid rgba(var(--islands-accent-glow-rgb), 0.03)',
     '--islands-surface-shadow': '0 2px 9px 0 rgba(0, 0, 0, 0.42)',
-    '--islands-elevated-border-top': '1px solid rgba(185, 138, 255, 0.14)',
-    '--islands-elevated-border-left': '1px solid rgba(185, 138, 255, 0.09)',
-    '--islands-elevated-border-bottom': '1px solid rgba(166, 108, 255, 0.04)',
-    '--islands-elevated-border-right': '1px solid rgba(166, 108, 255, 0.04)',
-    '--islands-list-focus-bg': 'linear-gradient(135deg, #2a203bcf, #15132091)',
-    '--islands-list-focus-selected-bg': 'linear-gradient(135deg, #2a203be0, #151320a8)',
-    '--islands-list-focus-active-bg': 'linear-gradient(135deg, #382a52e6, #2a203bb8)',
-    '--islands-list-hover-bg': 'linear-gradient(135deg, #2a203b73, #15132055)',
-    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.06)',
-    '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
-    '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.1)',
-    '--islands-tab-divider': '#29233a',
-    '--islands-tab-hover-text-shadow': '0 0 6px rgba(185, 138, 255, 0.2)',
-    '--islands-hover-border': '1px solid rgba(185, 138, 255, 0.09)',
+    '--islands-elevated-border-top': '1px solid rgba(var(--islands-accent-effect-rgb), 0.14)',
+    '--islands-elevated-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.09)',
+    '--islands-elevated-border-bottom': '1px solid rgba(var(--islands-accent-glow-rgb), 0.04)',
+    '--islands-elevated-border-right': '1px solid rgba(var(--islands-accent-glow-rgb), 0.04)',
+    '--islands-list-focus-bg':
+      'linear-gradient(135deg, rgba(var(--islands-selection-rgb), 0.81), rgba(var(--islands-hover-rgb), 0.57))',
+    '--islands-list-focus-selected-bg':
+      'linear-gradient(135deg, rgba(var(--islands-selection-rgb), 0.88), rgba(var(--islands-hover-rgb), 0.66))',
+    '--islands-list-focus-active-bg':
+      'linear-gradient(135deg, rgba(var(--islands-button-hover-rgb), 0.9), rgba(var(--islands-selection-rgb), 0.72))',
+    '--islands-list-hover-bg':
+      'linear-gradient(135deg, rgba(var(--islands-selection-rgb), 0.45), rgba(var(--islands-hover-rgb), 0.33))',
+    '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.06)',
+    '--islands-list-focus-selected-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.08)',
+    '--islands-list-focus-active-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.1)',
+    '--islands-tab-divider': 'var(--islands-border)',
+    '--islands-tab-hover-text-shadow': '0 0 6px rgba(var(--islands-accent-effect-rgb), 0.2)',
+    '--islands-hover-border': '1px solid rgba(var(--islands-accent-effect-rgb), 0.09)',
     '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.46)',
-    '--islands-activity-border-right': '1px solid rgba(185, 138, 255, 0.06)',
-    '--islands-activity-shadow': 'inset 0 1px 3px #b98aff14, 0 1px 4px #00000059',
-    '--islands-activity-hover-filter': 'drop-shadow(0 0 6px rgba(166, 108, 255, 0.32))',
-    '--islands-activity-checked-bg': 'linear-gradient(180deg, #2a203bf2, #151320c4)',
-    '--islands-activity-checked-shadow': 'inset 0 1px 0 #b98aff24, 0 1px 4px #00000059',
-    '--islands-statusbar-hover': '#d8d2e8',
+    '--islands-activity-border-right': '1px solid rgba(var(--islands-accent-effect-rgb), 0.06)',
+    '--islands-activity-shadow':
+      'inset 0 1px 3px rgba(var(--islands-accent-effect-rgb), 0.08), 0 1px 4px #00000059',
+    '--islands-activity-hover-filter':
+      'drop-shadow(0 0 6px rgba(var(--islands-accent-glow-rgb), 0.32))',
+    '--islands-activity-checked-bg':
+      'linear-gradient(180deg, rgba(var(--islands-selection-rgb), 0.95), rgba(var(--islands-hover-rgb), 0.77))',
+    '--islands-activity-checked-shadow':
+      'inset 0 1px 0 rgba(var(--islands-accent-effect-rgb), 0.14), 0 1px 4px #00000059',
+    '--islands-statusbar-hover': 'var(--islands-effect-status-hover)',
     '--islands-file-icon-filter': 'drop-shadow(0 0 3px currentColor)',
     '--islands-letterpress-opacity': '0.42',
-    '--islands-letterpress-filter': 'brightness(0) drop-shadow(2px 2px 1px #b98aff24)',
+    '--islands-letterpress-filter':
+      'brightness(0) drop-shadow(2px 2px 1px rgba(var(--islands-accent-effect-rgb), 0.14))',
     '--islands-command-shadow':
-      'inset 0 1px 0 #b98aff1f, inset 1px 0 0 #b98aff0f, 0 1px 4px #00000052',
+      'inset 0 1px 0 rgba(var(--islands-accent-effect-rgb), 0.12), inset 1px 0 0 rgba(var(--islands-accent-effect-rgb), 0.06), 0 1px 4px #00000052',
     '--islands-notification-shadow': '0 4px 13px 0 rgba(0, 0, 0, 0.46)',
     '--islands-widget-large-shadow': '0 8px 26px 0 rgba(0, 0, 0, 0.54)',
-    '--islands-quick-row-focus-bg': 'linear-gradient(135deg, #2a203bd6, #15132099)',
-    '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(185, 138, 255, 0.08)',
+    '--islands-quick-row-focus-bg':
+      'linear-gradient(135deg, rgba(var(--islands-selection-rgb), 0.84), rgba(var(--islands-hover-rgb), 0.6))',
+    '--islands-quick-row-focus-ring':
+      'inset 0 0 0 1px rgba(var(--islands-accent-effect-rgb), 0.08)',
     '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.44)',
-    '--islands-terminal-border-left': '1px solid rgba(185, 138, 255, 0.08)',
+    '--islands-terminal-border-left': '1px solid rgba(var(--islands-accent-effect-rgb), 0.08)',
   },
   'tyrian-dawn': {
-    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(111, 53, 184, 0))',
-    '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(111, 53, 184, 0.26))',
-    '--islands-aurora-primary': 'rgba(111, 53, 184, 0.26)',
-    '--islands-aurora-secondary': 'rgba(134, 81, 157, 0.15)',
-    '--islands-aurora-tail': 'rgba(111, 53, 184, 0.08)',
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(var(--islands-accent-glow-rgb), 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(var(--islands-accent-glow-rgb), 0.26))',
+    '--islands-aurora-primary': 'rgba(var(--islands-accent-glow-rgb), 0.26)',
+    '--islands-aurora-secondary': 'rgba(var(--islands-accent-effect-rgb), 0.15)',
+    '--islands-aurora-tail': 'rgba(var(--islands-accent-glow-rgb), 0.08)',
     '--islands-surface-border-top': '1px solid rgba(255, 255, 255, 0.5)',
     '--islands-surface-border-left': '1px solid rgba(255, 255, 255, 0.3)',
     '--islands-surface-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
@@ -133,29 +155,30 @@ const ISLAND_CSS_THEME_TOKENS = {
     '--islands-elevated-border-bottom': '1px solid rgba(0, 0, 0, 0.06)',
     '--islands-elevated-border-right': '1px solid rgba(0, 0, 0, 0.04)',
     '--islands-list-focus-bg':
-      'linear-gradient(135deg, rgba(236, 227, 248, 0.58), rgba(243, 238, 252, 0.45))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.58), rgba(var(--islands-effect-hover-surface-rgb), 0.45))',
     '--islands-list-focus-selected-bg':
-      'linear-gradient(135deg, rgba(236, 227, 248, 0.7), rgba(243, 238, 252, 0.56))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.7), rgba(var(--islands-effect-hover-surface-rgb), 0.56))',
     '--islands-list-focus-active-bg':
-      'linear-gradient(135deg, rgba(227, 214, 242, 0.68), rgba(236, 227, 248, 0.56))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-active-surface-rgb), 0.68), rgba(var(--islands-effect-focus-surface-rgb), 0.56))',
     '--islands-list-hover-bg':
-      'linear-gradient(135deg, rgba(236, 227, 248, 0.34), rgba(243, 238, 252, 0.24))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.34), rgba(var(--islands-effect-hover-surface-rgb), 0.24))',
     '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.05)',
     '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.07)',
     '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.08)',
-    '--islands-tab-divider': '#d9d0e8',
-    '--islands-tab-hover-text-shadow': '0 0 5px rgba(111, 53, 184, 0.14)',
+    '--islands-tab-divider': 'var(--islands-border)',
+    '--islands-tab-hover-text-shadow': '0 0 5px rgba(var(--islands-accent-glow-rgb), 0.14)',
     '--islands-hover-border': '1px solid rgba(0, 0, 0, 0.08)',
     '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.1)',
     '--islands-activity-border-right': '1px solid rgba(0, 0, 0, 0.04)',
     '--islands-activity-shadow':
       'inset 0 1px 3px 0 rgba(255, 255, 255, 0.4), 0 1px 4px 0 rgba(0, 0, 0, 0.08)',
-    '--islands-activity-hover-filter': 'drop-shadow(0 0 5px rgba(111, 53, 184, 0.22))',
+    '--islands-activity-hover-filter':
+      'drop-shadow(0 0 5px rgba(var(--islands-accent-glow-rgb), 0.22))',
     '--islands-activity-checked-bg':
-      'linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 238, 252, 0.74))',
+      'linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(var(--islands-effect-hover-surface-rgb), 0.74))',
     '--islands-activity-checked-shadow':
       'inset 0 1px 0 0 rgba(255, 255, 255, 0.6), inset 1px 0 0 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 0 rgba(0, 0, 0, 0.04), inset -1px 0 0 0 rgba(0, 0, 0, 0.03), inset 0 1px 2px 0 rgba(255, 255, 255, 0.3), 0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-    '--islands-statusbar-hover': '#5a5368',
+    '--islands-statusbar-hover': 'var(--islands-effect-status-hover)',
     '--islands-file-icon-filter': 'drop-shadow(0 0 2px currentColor)',
     '--islands-letterpress-opacity': '0.3',
     '--islands-letterpress-filter':
@@ -165,7 +188,7 @@ const ISLAND_CSS_THEME_TOKENS = {
     '--islands-notification-shadow': '0 4px 12px 0 rgba(0, 0, 0, 0.1)',
     '--islands-widget-large-shadow': '0 8px 24px 0 rgba(0, 0, 0, 0.12)',
     '--islands-quick-row-focus-bg':
-      'linear-gradient(135deg, rgba(236, 227, 248, 0.68), rgba(243, 238, 252, 0.54))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.68), rgba(var(--islands-effect-hover-surface-rgb), 0.54))',
     '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(0, 0, 0, 0.06)',
     '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.08)',
     '--islands-terminal-border-left': '1px solid rgba(0, 0, 0, 0.06)',
@@ -192,16 +215,15 @@ const ROOT_LAYOUT_TOKENS = {
 };
 
 /**
- * @param {{ primaryRgb: string; secondaryRgb: string }} colors
  * @returns {Record<string, string>}
  */
-function neutralDarkIslandTokens(colors) {
+function neutralDarkIslandTokens() {
   return {
-    '--islands-breathe-rest': `drop-shadow(0 0 2px rgba(${colors.primaryRgb}, 0))`,
-    '--islands-breathe-peak': `drop-shadow(0 0 8px rgba(${colors.primaryRgb}, 0.3))`,
-    '--islands-aurora-primary': `rgba(${colors.primaryRgb}, 0.35)`,
-    '--islands-aurora-secondary': `rgba(${colors.secondaryRgb}, 0.2)`,
-    '--islands-aurora-tail': `rgba(${colors.primaryRgb}, 0.12)`,
+    '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(var(--islands-accent-glow-rgb), 0))',
+    '--islands-breathe-peak': 'drop-shadow(0 0 8px rgba(var(--islands-accent-glow-rgb), 0.3))',
+    '--islands-aurora-primary': 'rgba(var(--islands-accent-glow-rgb), 0.35)',
+    '--islands-aurora-secondary': 'rgba(var(--islands-accent-effect-rgb), 0.2)',
+    '--islands-aurora-tail': 'rgba(var(--islands-accent-glow-rgb), 0.12)',
     '--islands-surface-border-top': '1px solid rgba(255, 255, 255, 0.1)',
     '--islands-surface-border-left': '1px solid rgba(255, 255, 255, 0.06)',
     '--islands-surface-border-bottom': '1px solid rgba(255, 255, 255, 0.02)',
@@ -212,29 +234,30 @@ function neutralDarkIslandTokens(colors) {
     '--islands-elevated-border-bottom': '1px solid rgba(255, 255, 255, 0.03)',
     '--islands-elevated-border-right': '1px solid rgba(255, 255, 255, 0.03)',
     '--islands-list-focus-bg':
-      'linear-gradient(135deg, rgba(49, 50, 56, 0.6), rgba(37, 38, 44, 0.4))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.6), rgba(var(--islands-effect-hover-surface-rgb), 0.4))',
     '--islands-list-focus-selected-bg':
-      'linear-gradient(135deg, rgba(49, 50, 56, 0.7), rgba(37, 38, 44, 0.5))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.7), rgba(var(--islands-effect-hover-surface-rgb), 0.5))',
     '--islands-list-focus-active-bg':
-      'linear-gradient(135deg, rgba(49, 50, 56, 0.8), rgba(37, 38, 44, 0.6))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-active-surface-rgb), 0.8), rgba(var(--islands-effect-hover-surface-rgb), 0.6))',
     '--islands-list-hover-bg':
-      'linear-gradient(135deg, rgba(49, 50, 56, 0.3), rgba(37, 38, 44, 0.2))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.3), rgba(var(--islands-effect-hover-surface-rgb), 0.2))',
     '--islands-list-focus-ring': 'inset 0 0 0 1px rgba(255, 255, 255, 0.05)',
     '--islands-list-focus-selected-ring': 'inset 0 0 0 1px rgba(255, 255, 255, 0.07)',
     '--islands-list-focus-active-ring': 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
-    '--islands-tab-divider': '#252530',
+    '--islands-tab-divider': 'var(--islands-border)',
     '--islands-tab-hover-text-shadow': '0 0 5px rgba(255, 255, 255, 0.15)',
     '--islands-hover-border': '1px solid rgba(255, 255, 255, 0.08)',
     '--islands-hover-shadow': '0 4px 16px 0 rgba(0, 0, 0, 0.4)',
     '--islands-activity-border-right': '1px solid rgba(255, 255, 255, 0.05)',
     '--islands-activity-shadow':
       'inset 0 1px 3px 0 rgba(255, 255, 255, 0.06), 0 1px 4px 0 rgba(0, 0, 0, 0.3)',
-    '--islands-activity-hover-filter': `drop-shadow(0 0 5px rgba(${colors.primaryRgb}, 0.25))`,
+    '--islands-activity-hover-filter':
+      'drop-shadow(0 0 5px rgba(var(--islands-accent-glow-rgb), 0.25))',
     '--islands-activity-checked-bg':
-      'linear-gradient(180deg, rgba(55, 56, 62, 0.9), rgba(40, 41, 46, 0.7))',
+      'linear-gradient(180deg, rgba(var(--islands-effect-active-surface-rgb), 0.9), rgba(var(--islands-effect-checked-surface-rgb), 0.7))',
     '--islands-activity-checked-shadow':
       'inset 0 1px 0 0 rgba(255, 255, 255, 0.12), inset 1px 0 0 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 0 rgba(255, 255, 255, 0.02), inset -1px 0 0 0 rgba(255, 255, 255, 0.02), inset 0 1px 2px 0 rgba(255, 255, 255, 0.05), 0 1px 3px 0 rgba(0, 0, 0, 0.3)',
-    '--islands-statusbar-hover': '#9a9ea5',
+    '--islands-statusbar-hover': 'var(--islands-effect-status-hover)',
     '--islands-file-icon-filter': 'drop-shadow(0 0 2.5px currentColor)',
     '--islands-letterpress-opacity': '0.4',
     '--islands-letterpress-filter':
@@ -244,7 +267,7 @@ function neutralDarkIslandTokens(colors) {
     '--islands-notification-shadow': '0 4px 12px 0 rgba(0, 0, 0, 0.4)',
     '--islands-widget-large-shadow': '0 8px 24px 0 rgba(0, 0, 0, 0.5)',
     '--islands-quick-row-focus-bg':
-      'linear-gradient(135deg, rgba(49, 50, 56, 0.7), rgba(37, 38, 44, 0.5))',
+      'linear-gradient(135deg, rgba(var(--islands-effect-focus-surface-rgb), 0.7), rgba(var(--islands-effect-hover-surface-rgb), 0.5))',
     '--islands-quick-row-focus-ring': 'inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
     '--islands-sticky-shadow': '0 4px 8px -2px rgba(0, 0, 0, 0.4)',
     '--islands-terminal-border-left': '1px solid rgba(255, 255, 255, 0.06)',
@@ -356,14 +379,42 @@ function formatCssVariables(tokens) {
 }
 
 /**
- * @param {{ colors: Record<string, string> }} theme
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  * @returns {Readonly<Record<string, string>>}
  */
 function sourcePaletteTokens(theme) {
   return {
-    '--islands-bg-canvas': lowerHex(theme.colors['editor.background']),
-    '--islands-bg-surface': lowerHex(theme.colors['sideBar.background']),
+    '--islands-accent-glow-rgb': rgbChannels(themeColor(theme, 'ui:accent.glow')),
+    '--islands-accent-effect-rgb': rgbChannels(themeColor(theme, 'ui:accent.effect')),
+    '--islands-border': lowerHex(themeColor(theme, 'ui:border.default')),
+    '--islands-border-rgb': rgbChannels(themeColor(theme, 'ui:border.default')),
+    '--islands-button-hover-rgb': rgbChannels(themeColor(theme, 'ui:buttons.hover.background')),
+    '--islands-bg-canvas': lowerHex(themeColor(theme, 'ui:surface.canvas')),
+    '--islands-bg-surface': lowerHex(themeColor(theme, 'ui:surface.sidebar')),
+    '--islands-effect-active-surface-rgb': rgbChannels(
+      themeColor(theme, 'ui:effect.activeSurface')
+    ),
+    '--islands-effect-checked-surface-rgb': rgbChannels(
+      themeColor(theme, 'ui:effect.checkedSurface')
+    ),
+    '--islands-effect-focus-surface-rgb': rgbChannels(themeColor(theme, 'ui:effect.focusSurface')),
+    '--islands-effect-hover-surface-rgb': rgbChannels(themeColor(theme, 'ui:effect.hoverSurface')),
+    '--islands-effect-status-hover': lowerHex(themeColor(theme, 'ui:effect.statusHover')),
+    '--islands-effect-strong-accent-rgb': rgbChannels(themeColor(theme, 'ui:effect.strongAccent')),
+    '--islands-hover-rgb': rgbChannels(themeColor(theme, 'ui:surface.hover')),
+    '--islands-selection-rgb': rgbChannels(themeColor(theme, 'ui:selection.active')),
+    '--islands-selection-inactive-rgb': rgbChannels(themeColor(theme, 'ui:selection.inactive')),
+    '--islands-status-text': lowerHex(themeColor(theme, 'ui:text.status')),
+    '--islands-terminal-black-rgb': rgbChannels(themeColor(theme, 'terminal:ansi.black')),
+    '--islands-text-primary': lowerHex(themeColor(theme, 'ui:text.primary')),
+    '--islands-text-secondary': lowerHex(themeColor(theme, 'ui:text.secondary')),
   };
+}
+
+/** @param {string} color */
+function rgbChannels(color) {
+  const { red, green, blue } = parseHexColor(color);
+  return `${red}, ${green}, ${blue}`;
 }
 
 /**

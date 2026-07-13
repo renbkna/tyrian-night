@@ -1653,7 +1653,7 @@
         "border.disabled": "#00000000",
         "border.focused": "#6F35B8",
         "border.selected": "#6F35B8",
-        "border.transparent": "#0000000000",
+        "border.transparent": "#00000000",
         "border.variant": "#D9D0E8",
         "conflict": "#8A5D00",
         "conflict.background": "#8A5D0018",

@@ -10,21 +10,12 @@ import {
   FASTFETCH_IMAGE_CONFIG_PATH,
 } from '../scripts/portableAssets.mjs';
 import { buildTerminalThemeAssets, writeTerminalThemeAssets } from '../scripts/terminalThemes.mjs';
+import { themeColor } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
-
-type HighlightSettings = {
-  foreground?: string;
-};
-
-type VscodeTheme = {
-  name: string;
-  colors: Record<string, string>;
-  semanticTokenColors: Record<string, HighlightSettings>;
-};
 
 const assets = new Map(buildTerminalThemeAssets().map((asset) => [asset.path, asset.content]));
 
-test('terminal theme assets match the generated VS Code-derived outputs', () => {
+test('terminal theme assets match the generated neutral-role projections', () => {
   for (const [assetPath, content] of assets) {
     expect(fs.readFileSync(assetPath, 'utf8')).toBe(content);
   }
@@ -92,72 +83,93 @@ test('terminal generation preserves unrelated files in mixed output directories'
   }
 });
 
-test('Ghostty themes derive terminal colors from the VS Code theme sources', () => {
+test('Ghostty themes derive their palette from neutral terminal roles', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const ghosttyTheme = requiredAsset(`terminal/ghostty/themes/${source.slug}`);
-    const background = theme.colors['terminal.background'];
+    const background = themeColor(theme, 'terminal:background');
 
-    expect(ghosttyTheme).toContain(`background = ${theme.colors['terminal.background']}`);
-    expect(ghosttyTheme).toContain(`foreground = ${theme.colors['terminal.foreground']}`);
-    expect(ghosttyTheme).toContain(`palette = 0=${theme.colors['terminal.ansiBlack']}`);
-    expect(ghosttyTheme).toContain(`palette = 5=${theme.colors['terminal.ansiMagenta']}`);
-    expect(ghosttyTheme).toContain(`palette = 15=${theme.colors['terminal.ansiBrightWhite']}`);
+    expect(ghosttyTheme).toContain(`background = ${themeColor(theme, 'terminal:background')}`);
+    expect(ghosttyTheme).toContain(`foreground = ${themeColor(theme, 'terminal:foreground')}`);
+    expect(ghosttyTheme).toContain(`palette = 0=${themeColor(theme, 'terminal:ansi.black')}`);
+    expect(ghosttyTheme).toContain(`palette = 5=${themeColor(theme, 'terminal:ansi.magenta')}`);
     expect(ghosttyTheme).toContain(
-      `selection-background = ${opaqueHex(theme.colors['terminal.selectionBackground'], background)}`
+      `palette = 15=${themeColor(theme, 'terminal:ansi.brightWhite')}`
+    );
+    expect(ghosttyTheme).toContain(
+      `selection-background = ${opaqueHex(themeColor(theme, 'terminal:selection'), background)}`
+    );
+    expect(ghosttyTheme).toContain(
+      `window-titlebar-background = ${themeColor(theme, 'terminal:background')}`
+    );
+    expect(ghosttyTheme).toContain(
+      `window-titlebar-foreground = ${themeColor(theme, 'terminal:foreground')}`
     );
   }
 });
 
-test('Foot themes derive terminal colors from the VS Code theme sources', () => {
+test('Foot themes derive their palette from neutral terminal roles', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const footTheme = requiredAsset(`terminal/foot/themes/${source.slug}.ini`);
 
-    expect(footTheme).toContain(`[colors-dark]`);
+    expect(footTheme).toContain(theme.appearance === 'light' ? '[colors-light]' : '[colors-dark]');
+    expect(footTheme).not.toContain(
+      theme.appearance === 'light' ? '[colors-dark]' : '[colors-light]'
+    );
     expect(footTheme).not.toContain(`[colors]`);
-    expect(footTheme).toContain(`background=${footHex(theme.colors['terminal.background'])}`);
-    expect(footTheme).toContain(`foreground=${footHex(theme.colors['terminal.foreground'])}`);
+    expect(footTheme).toContain(`background=${footHex(themeColor(theme, 'terminal:background'))}`);
+    expect(footTheme).toContain(`foreground=${footHex(themeColor(theme, 'terminal:foreground'))}`);
     expect(footTheme).toContain('alpha=0.82');
     expect(footTheme).toContain('blur=yes');
-    expect(footTheme).toContain(`regular0=${footHex(theme.colors['terminal.ansiBlack'])}`);
-    expect(footTheme).toContain(`regular5=${footHex(theme.colors['terminal.ansiMagenta'])}`);
-    expect(footTheme).toContain(`bright7=${footHex(theme.colors['terminal.ansiBrightWhite'])}`);
+    expect(footTheme).toContain(`regular0=${footHex(themeColor(theme, 'terminal:ansi.black'))}`);
+    expect(footTheme).toContain(`regular5=${footHex(themeColor(theme, 'terminal:ansi.magenta'))}`);
+    expect(footTheme).toContain(
+      `bright7=${footHex(themeColor(theme, 'terminal:ansi.brightWhite'))}`
+    );
     expect(footTheme).toContain(
       `selection-background=${footHex(
-        opaqueHex(theme.colors['terminal.selectionBackground'], theme.colors['terminal.background'])
+        opaqueHex(themeColor(theme, 'terminal:selection'), themeColor(theme, 'terminal:background'))
+      )}`
+    );
+    expect(footTheme).toContain(
+      `cursor=${footHex(themeColor(theme, 'terminal:background'))} ${footHex(
+        themeColor(theme, 'terminal:cursor')
       )}`
     );
     expect(footTheme).toContain(`[csd]`);
-    expect(footTheme).toContain(`color=ff${footHex(theme.colors['terminal.background'])}`);
-    expect(footTheme).toContain(`button-color=ff${footHex(theme.colors['terminal.foreground'])}`);
+    expect(footTheme).toContain(`color=ff${footHex(themeColor(theme, 'terminal:background'))}`);
+    expect(footTheme).toContain(
+      `button-color=ff${footHex(themeColor(theme, 'terminal:foreground'))}`
+    );
     expect(footTheme).not.toContain('#');
   }
 });
 
-test('Ghostty GTK chrome CSS derives titlebar colors from Tyrian Nocturne', () => {
-  const theme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
-  const css = requiredAsset('terminal/ghostty/ghostty.css');
-
-  expect(css).toContain(`background: ${theme.colors['terminal.background'].toLowerCase()};`);
-  expect(css).toContain(`color: ${theme.colors['terminal.foreground'].toLowerCase()};`);
-  expect(css).toContain(`background: ${rgba(theme.colors['terminal.ansiMagenta'], 0.32)};`);
-  expect(css).not.toContain('#F2F2F2');
+test('Ghostty mode-aware native themes are the only chrome color authority', () => {
+  expect(assets.has('terminal/ghostty/ghostty.css')).toBe(false);
+  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
+  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain(
+    'window-titlebar-background'
+  );
+  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain(
+    'window-titlebar-foreground'
+  );
 });
 
 test('fish themes derive shell syntax colors without owning terminal window colors', () => {
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
     const fishTheme = requiredAsset(`terminal/fish/themes/${source.slug}.fish`);
 
     expect(fishTheme).toContain(
-      `set -g fish_color_command ${fishHex(theme.semanticTokenColors.function.foreground)}`
+      `set -g fish_color_command ${fishHex(themeColor(theme, 'syntax:function'))}`
     );
     expect(fishTheme).toContain(
-      `set -g fish_color_param ${fishHex(theme.semanticTokenColors.parameter.foreground)}`
+      `set -g fish_color_param ${fishHex(themeColor(theme, 'syntax:data'))}`
     );
     expect(fishTheme).toContain(
-      `set -g fish_color_error ${fishHex(theme.colors['editorError.foreground'])} --bold`
+      `set -g fish_color_error ${fishHex(themeColor(theme, 'ui:status.error'))} --bold`
     );
     expect(fishTheme).not.toContain('set -U ');
     expect(fishTheme).not.toMatch(/#[0-9A-Fa-f]{6}/u);
@@ -165,7 +177,7 @@ test('fish themes derive shell syntax colors without owning terminal window colo
   }
 });
 
-test('Starship prompt uses named Tyrian palettes backed by the VS Code theme sources', () => {
+test('Starship prompt uses named Tyrian palettes backed by neutral roles', () => {
   const starshipConfig = requiredAsset('terminal/starship/tyrian-night.toml');
 
   expect(starshipConfig).toContain('palette = "tyrian_nocturne"');
@@ -178,22 +190,20 @@ test('Starship prompt uses named Tyrian palettes backed by the VS Code theme sou
   expect(starshipConfig).not.toContain('fg:container bg:accent');
 
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
 
     expect(starshipConfig).toContain(`[palettes.${source.paletteName}]`);
-    expect(starshipConfig).toContain(`surface = "${theme.colors['list.hoverBackground']}"`);
-    expect(starshipConfig).toContain(`text = "${theme.colors['terminal.foreground']}"`);
-    expect(starshipConfig).toContain(`accent = "${theme.colors['terminal.ansiMagenta']}"`);
-    expect(starshipConfig).toContain(`command = "${theme.colors['terminal.ansiCyan']}"`);
-    expect(starshipConfig).toContain(`language = "${theme.colors['terminal.ansiBlue']}"`);
-    expect(starshipConfig).toContain(
-      `container = "${theme.semanticTokenColors.parameter.foreground}"`
-    );
+    expect(starshipConfig).toContain(`surface = "${themeColor(theme, 'ui:surface.hover')}"`);
+    expect(starshipConfig).toContain(`text = "${themeColor(theme, 'terminal:foreground')}"`);
+    expect(starshipConfig).toContain(`accent = "${themeColor(theme, 'terminal:ansi.magenta')}"`);
+    expect(starshipConfig).toContain(`command = "${themeColor(theme, 'terminal:ansi.cyan')}"`);
+    expect(starshipConfig).toContain(`language = "${themeColor(theme, 'terminal:ansi.blue')}"`);
+    expect(starshipConfig).toContain(`container = "${themeColor(theme, 'syntax:data')}"`);
   }
 });
 
 test('Fastfetch startup config uses the default Tyrian terminal palette with the Chafa logo asset', () => {
-  const theme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
+  const theme = readSourceTheme(requiredThemeSource('tyrian-nocturne'));
   const fastfetchConfig = JSON.parse(requiredAsset('terminal/fastfetch/tyrian-night.jsonc'));
 
   expect(fs.existsSync(FASTFETCH_IMAGE_ASSET_PATH)).toBe(true);
@@ -207,9 +217,9 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
   expect(fastfetchConfig.logo.recache).toBe(false);
   expect(fastfetchConfig.logo.printRemaining).toBe(true);
   expect(fastfetchConfig.logo.chafa.symbols).toBe('braille');
-  expect(fastfetchConfig.display.color.keys).toBe(theme.colors['terminal.ansiMagenta']);
-  expect(fastfetchConfig.display.color.title).toBe(theme.colors['terminal.foreground']);
-  expect(fastfetchConfig.display.color.separator).toBe(theme.colors['breadcrumb.foreground']);
+  expect(fastfetchConfig.display.color.keys).toBe(themeColor(theme, 'terminal:ansi.magenta'));
+  expect(fastfetchConfig.display.color.title).toBe(themeColor(theme, 'terminal:foreground'));
+  expect(fastfetchConfig.display.color.separator).toBe(themeColor(theme, 'ui:text.muted'));
   expect(
     fastfetchConfig.modules.map((module: string | { type: string }) =>
       typeof module === 'string' ? module : module.type
@@ -234,8 +244,6 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
 });
 
 test('example configs point each terminal layer at the right owner', () => {
-  const nocturneTheme = readSourceTheme<VscodeTheme>(requiredThemeSource('tyrian-nocturne'));
-
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
     'theme = dark:tyrian-nocturne,light:tyrian-dawn'
   );
@@ -253,12 +261,6 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-decoration = client');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-theme = ghostty');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-vsync = true');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    `window-titlebar-background = ${nocturneTheme.colors['terminal.background']}`
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    `window-titlebar-foreground = ${nocturneTheme.colors['terminal.foreground']}`
-  );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar = true');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar-style = tabs');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-show-tab-bar = auto');
@@ -273,6 +275,10 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/foot/foot.ini')).toContain(
     'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-nocturne.ini'
   );
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain(
+    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-dawn.ini'
+  );
+  expect(requiredAsset('terminal/foot/foot.ini')).toContain('initial-color-theme=dark');
   expect(requiredAsset('terminal/foot/foot.ini')).toContain('font=Monaspace Neon:size=13');
   expect(requiredAsset('terminal/foot/foot.ini')).toContain('font-italic=Monaspace Radon:size=13');
   expect(requiredAsset('terminal/foot/foot.ini')).toContain('selection-target=clipboard');
@@ -316,10 +322,18 @@ test('example configs point each terminal layer at the right owner', () => {
 test('terminal docs list the generated theme and palette surfaces from source themes', () => {
   const ghosttyReadme = fs.readFileSync('terminal/ghostty/README.md', 'utf8');
   const footReadme = fs.readFileSync('terminal/foot/README.md', 'utf8');
+  const fishReadme = fs.readFileSync('terminal/fish/README.md', 'utf8');
   const starshipReadme = fs.readFileSync('terminal/starship/README.md', 'utf8');
 
+  for (const readme of [ghosttyReadme, footReadme, fishReadme, starshipReadme]) {
+    expect(readme).toContain('bun run build:terminal-themes');
+  }
+  expect(fishReadme).toContain('replace `/path/to/tyrian-night`');
+  expect(fishReadme).toContain('Do not symlink the unresolved template');
+  expect(ghosttyReadme).toContain('native Ghostty theme owns its matching titlebar colors');
+
   for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme<VscodeTheme>(source);
+    const theme = readSourceTheme(source);
 
     expect(ghosttyReadme).toContain(`- \`${source.slug}\``);
     expect(footReadme).toContain(`- \`${source.slug}.ini\``);
@@ -361,13 +375,4 @@ function footHex(color: string | undefined): string {
   }
 
   return opaqueHex(color).slice(1);
-}
-
-function rgba(color: string, alpha: number): string {
-  const hex = opaqueHex(color);
-  const red = Number.parseInt(hex.slice(1, 3), 16);
-  const green = Number.parseInt(hex.slice(3, 5), 16);
-  const blue = Number.parseInt(hex.slice(5, 7), 16);
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }

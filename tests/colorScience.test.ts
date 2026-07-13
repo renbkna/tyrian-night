@@ -11,6 +11,7 @@ import {
   themeRoleColors,
 } from '../scripts/colorScience.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import { uiColor } from '../scripts/themeDefinition.mjs';
 
 test('color science helpers expose stable perceptual metrics', () => {
   expect(contrastRatio('#FFFFFF', '#000000')).toBeCloseTo(21, 5);
@@ -36,7 +37,7 @@ test('color science helpers expose stable perceptual metrics', () => {
 });
 
 test('theme role audit treats receivers as italic data-shaped identifiers', () => {
-  const nocturne = readSourceTheme<any>(
+  const nocturne = readSourceTheme(
     SOURCE_THEMES.find((source) => source.slug === 'tyrian-nocturne')!
   );
   const audits = auditThemeRoles(nocturne);
@@ -51,9 +52,7 @@ test('theme role audit treats receivers as italic data-shaped identifiers', () =
 });
 
 test('candidate ranking rewards perceptual separation with background contrast', () => {
-  const night = readSourceTheme<any>(
-    SOURCE_THEMES.find((source) => source.slug === 'tyrian-night')!
-  );
+  const night = readSourceTheme(SOURCE_THEMES.find((source) => source.slug === 'tyrian-night')!);
   const ranked = rankCandidates(night, ['#9886D8', '#109BB4', '#C07AA8'], {
     neighbors: [
       { hex: '#8D69C1', role: 'def' },
@@ -64,13 +63,13 @@ test('candidate ranking rewards perceptual separation with background contrast',
   });
 
   expect(ranked[0]!.hex).toBe('#109BB4');
-  expect(colorMetrics(ranked[0]!.hex, night.colors['editor.background']).contrast).toBeGreaterThan(
+  expect(colorMetrics(ranked[0]!.hex, uiColor(night, 'surface.canvas')).contrast).toBeGreaterThan(
     4.5
   );
 });
 
 test('candidate ranking drops inaccessible candidates by default', () => {
-  const dawn = readSourceTheme<any>(SOURCE_THEMES.find((source) => source.slug === 'tyrian-dawn')!);
+  const dawn = readSourceTheme(SOURCE_THEMES.find((source) => source.slug === 'tyrian-dawn')!);
   const ranked = rankCandidates(dawn, ['#109BB4', '#097C93']);
 
   expect(ranked.map((candidate) => candidate.hex)).toEqual(['#097C93']);
@@ -90,7 +89,7 @@ test('role pair audit catches adjacent receiver/function confusion', () => {
 });
 
 test('candidate ranking penalizes role-pair risk separately from nearest distance', () => {
-  const nocturne = readSourceTheme<any>(
+  const nocturne = readSourceTheme(
     SOURCE_THEMES.find((source) => source.slug === 'tyrian-nocturne')!
   );
   const ranked = rankCandidates(nocturne, ['#109BB4', '#B957D0'], {
