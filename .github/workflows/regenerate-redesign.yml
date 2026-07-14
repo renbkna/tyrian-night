@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/rebuild-theme-state-system
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,10 +17,14 @@ concurrency:
 
 jobs:
   finalize:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' || github.head_ref == 'agent/rebuild-theme-state-system')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
@@ -50,4 +57,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "build: regenerate redesigned theme assets"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
