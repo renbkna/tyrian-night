@@ -46,6 +46,7 @@ jobs:
         with:
           name: tyrian-publication-diagnostics
           path: |
+            /tmp/tyrian-authored.patch
             /tmp/tyrian-patch.sha256
             /tmp/tyrian-apply.log
           retention-days: 1
