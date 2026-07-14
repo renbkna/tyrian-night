@@ -64,7 +64,20 @@ jobs:
       - name: Lint
         run: bun run lint
       - name: Test
-        run: bun run test
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: bun run test 2>&1 | tee /tmp/tyrian-test.log
+      - name: Preserve test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tyrian-test-log
+          path: /tmp/tyrian-test.log
+          retention-days: 1
+      - name: Require passing tests
+        if: steps.tests.outcome != 'success'
+        run: exit 1
       - name: Check formatting
         run: bun run format:check
       - name: Check generated assets
