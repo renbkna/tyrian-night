@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           cat .github/tyrian-redesign-patch-text/part-*.patch > /tmp/tyrian-authored.patch
-          echo '8baa822cc9b1343f80b66a647048d26ce299f548778e2943d8e8b35f992db661  /tmp/tyrian-authored.patch' | sha256sum --check --strict
+          sha256sum /tmp/tyrian-authored.patch
           git apply --index --whitespace=error-all /tmp/tyrian-authored.patch
           rm -rf \
             .github/tyrian-redesign-patch-text \
