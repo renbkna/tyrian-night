@@ -8,13 +8,13 @@
     "terminalDefault": true
   },
   {
-    "slug": "tyrian-night-old"
-  },
-  {
     "slug": "tyrian-abyss"
   },
   {
     "slug": "tyrian-dawn",
     "terminalDefault": true
+  },
+  {
+    "slug": "tyrian-night-old"
   }
 ]

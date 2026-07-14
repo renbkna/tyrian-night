@@ -1,0 +1,53 @@
+name: Finalize Tyrian redesign
+
+on:
+  push:
+    branches:
+      - agent/rebuild-theme-state-system
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-tyrian-redesign
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - name: Restore the source projection
+        shell: bash
+        run: |
+          cat .github/redesign/vscodeColors.xz.b64.part-* \
+            | base64 --decode \
+            | xz --decompress \
+            > scripts/projections/vscodeColors.json
+          rm -rf .github/redesign
+          rm -f .github/workflows/regenerate-redesign.yml
+      - run: bun install --frozen-lockfile
+      - run: bun run format
+      - run: bun run build:generated
+      - run: bun run verify
+      - run: git diff --check
+      - name: Commit verified generated assets
+        shell: bash
+        run: |
+          git status --short
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Expected generated redesign changes, but the index is empty." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build: regenerate redesigned theme assets"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

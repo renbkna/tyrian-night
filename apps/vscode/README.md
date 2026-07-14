@@ -1,6 +1,14 @@
 # Tyrian Night for VS Code
 
-Tyrian Night provides five generated VS Code color themes: Abyss, Night, Nocturne, Night Old, and Dawn.
+Tyrian Night provides five generated VS Code color themes:
+
+- **Night** is neutral-black, quiet, and canonical.
+- **Nocturne** is visibly purple and atmospheric.
+- **Abyss** is near-OLED and electric.
+- **Dawn** is the light counterpart.
+- **Night Old** preserves the previous palette as an exact legacy comparison.
+
+The projection explicitly maps modern control states and product surfaces, including checkbox and radio selection, input options, toolbar hover and press, action-bar toggles, status-bar states, chat and inline chat, notebooks, testing, terminal suggestions, gauges, and agent-session indicators.
 
 ## Support
 

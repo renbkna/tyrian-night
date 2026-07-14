@@ -1,6 +1,18 @@
 # Tyrian Night
 
-Tyrian Night is one visual system exported to several independently supported products. Neutral theme roles live in `source/`; editor, terminal, KDE, and Caelestia files are generated projections.
+Tyrian Night is one semantic color system exported to VS Code, Zed, terminals, KDE Plasma, Union, and Caelestia. Neutral roles live in `source/`; every product file is a generated projection.
+
+## Family
+
+The dark variants deliberately occupy different visual centers instead of averaging into one compromise:
+
+- **Tyrian Night** — neutral-black and quiet; the canonical default.
+- **Tyrian Nocturne** — visibly purple and atmospheric, with tonal controls.
+- **Tyrian Abyss** — OLED-black and electric, with the highest accent chroma.
+- **Tyrian Dawn** — the light counterpart, retaining the same categorical hue grammar.
+- **Tyrian Night Old** — the unchanged legacy comparison preset.
+
+All current variants share the same semantic anchors: Tyrian purple for accent and keywords, blue for types and information, teal for functions and ANSI cyan, green for strings and success, rose for data, amber for regular expressions and warnings, and red for errors. This prevents syntax and terminal categories from collapsing into status signals.
 
 ## Products and Support
 
@@ -9,72 +21,63 @@ Tyrian Night is one visual system exported to several independently supported pr
 | VS Code color themes | VS Code 1.118+ on Linux, macOS, and Windows | Standard extension install | [`apps/vscode/README.md`](apps/vscode/README.md) |
 | VS Code Island UI | Linux only | Patches the VS Code application | [`apps/vscode/README.md#island-ui`](apps/vscode/README.md#island-ui) |
 | Zed themes | Systems supported by Zed | Standard theme extension | [`apps/zed/README.md`](apps/zed/README.md) |
-| Terminal and desktop files | Manual use wherever the target application supports them | User-selected files | Component README files |
+| Terminal and desktop files | Wherever the target application supports them | User-selected files | Component README files |
 | Live desktop installer | Linux with `/proc` and GNU `mv --exchange` | Replaces user configuration transactionally | [`apps/desktop/README.md`](apps/desktop/README.md) |
 | Full rice installer | Linux, KDE Plasma 6, and the declared commands/widgets | Replaces Plasma layout and restarts Plasma | [`apps/desktop/README.md#full-rice`](apps/desktop/README.md#full-rice) |
 
-The repository workspace requires Bun 1.3.11 and Node.js 22.19 or newer. Product manifests own narrower runtime requirements.
-
-## Editor Installation
-
-For VS Code, install **Tyrian Night** from the Extensions panel and select a theme with **Preferences: Color Theme**. Island UI is a separate opt-in Linux feature; installing a color theme does not patch VS Code.
-
-For Zed, install the theme extension from `apps/zed/` or follow its [product README](apps/zed/README.md).
-
-## Desktop Commands
-
-Desktop preview commands are observational: they read repository and destination state, print the plan, and do not generate files, acquire mutation locks, or recover interrupted transactions.
-
-```sh
-# Preview or apply the terminal + KDE Plasma 6 profile.
-bun run desktop:plasma:preview
-bun run desktop:plasma:apply
-
-# Preview or apply the terminal + Caelestia/Hyprland profile.
-bun run desktop:caelestia:preview
-bun run desktop:caelestia:apply
-
-# Explicitly recover an interrupted style transaction.
-bun run desktop:recover
-
-# Preview the complete style and Plasma layout rice.
-bun run rice
-
-# Apply or recover the complete rice.
-bun run rice:apply
-bun run rice:recover
-```
-
-Read the [desktop product contract](apps/desktop/README.md) before applying it. The full rice is not a generic theme installer.
+The workspace requires Bun 1.3.11 and Node.js 22.19 or newer. Product manifests own narrower runtime requirements.
 
 ## Palette
 
-Tyrian Night’s default palette is generated from neutral roles. Main text is tuned for AAA contrast and syntax roles for AA contrast; quieter UI chrome is intentionally lower contrast. Syntax separation is audited with OKLab distance plus pair-specific hue and lightness guards.
+Tyrian Night’s default palette is generated from neutral roles. Primary text is AAA, current supporting text and syntax are AA, and category separation is guarded with OKLab distance and complete-dichromacy simulation tests.
 
 | Role | Hex | Ratio | Level |
 |:-----|:-----|------:|:------|
-| Background (Tyrian Canvas) | `#0C0C0C` | — | — |
-| Active line (Reading Surface) | `#181820` | — | — |
-| Variables (Soft Lilac) | `#D0C8E0` | 12.13:1 | AAA |
-| Keywords (Amethyst Purple) | `#8D69C1` | 4.59:1 | AA |
-| Types (Deep Cobalt) | `#5A78C0` | 4.55:1 | AA |
-| Functions (Soft Crimson) | `#BA5E6B` | 4.57:1 | AA |
-| Strings (Emerald) | `#489060` | 5.06:1 | AA |
-| Data Literals (Cool Mauve) | `#B58CBA` | 6.92:1 | AA |
+| Canvas | `#0C0C0C` | — | — |
+| Reading / hover surface | `#262330` | — | — |
+| Primary text | `#CDC7D9` | 11.89:1 | AAA |
+| Muted supporting text | `#7F7E91` | 4.93:1 | AA |
+| Keywords / accent | `#A17ADF` | 5.93:1 | AA |
+| Types / information | `#78A5EF` | 7.85:1 | AA |
+| Functions / cyan | `#41B2B2` | 7.67:1 | AA |
+| Strings / success | `#649C66` | 6.04:1 | AA |
+| Data literals | `#CF86B7` | 7.22:1 | AA |
+| Regular expressions / amber | `#C1A057` | 7.86:1 | AA |
 
-The family contains Tyrian Abyss, Night, Nocturne, Night Old, and Dawn. Italic syntax is reserved for prose surfaces such as comments and Markdown emphasis; deprecated code is strikethrough only.
+The redesigned variants enforce at least 20 OKLab points between function/cyan and error/red, and at least 10 points across function/string, keyword/type, and regexp/string pairs.
+
+## VS Code Coverage
+
+`scripts/projections/vscodeColors.json` owns the VS Code consumer contract. It maps 709 current workbench color IDs while retaining one owner per key. Coverage includes:
+
+- distinct hover, pressed, checked, selected, and keyboard-focus states;
+- checkbox, radio, input-option, toolbar, action-bar, and command-center toggles;
+- chat, inline chat, agent status, notebooks, testing, gauges, settings, SCM, charts, and terminal suggestions;
+- terminal search, selection, sticky scroll, command decorations, and overview-ruler states;
+- semantic tokens, TextMate scopes, symbol icons, and debug values.
+
+High-contrast-only borders and shadow colors remain unset so VS Code can preserve platform behavior.
+
+## Union State Grammar
+
+Union uses the same rule across controls, delegates, menus, tabs, views, and Kirigami components:
+
+- hover changes the local surface;
+- pressed uses a stronger active surface;
+- checked or selected uses a persistent low-chroma accent surface;
+- keyboard focus adds an outline without replacing semantic state;
+- saturated fills are reserved for primary actions and compact indicators.
+
+Shape scale is explicit: small radii for indicators, medium radii for controls and rows, and large radii for cards, dialogs, and popups.
 
 ## Authority and Repository Layout
 
 - `source/themeRoleContract.json` owns role membership.
-- `source/themeCatalog.json` owns ordered theme membership and defaults.
+- `source/themeCatalog.json` owns family order and defaults.
 - `source/themes/` owns neutral UI, syntax, effect, and ANSI values.
-- `scripts/projections/` owns consumer-specific key mappings.
-- `apps/vscode/` owns the VS Code manifest, build, runtime, package contents, and support contract.
-- `apps/zed/` owns the Zed extension.
-- `apps/desktop/` owns the Linux installer version, commands, and support contract.
-- `terminal/`, `desktop/`, and `rice/` contain generated or captured product assets.
-- The root `package.json` is private workspace orchestration; it is not a publishable extension manifest.
+- `scripts/projections/` owns consumer-specific key and grammar mappings.
+- `source/union-css/` owns component geometry and interaction behavior.
+- `apps/vscode/`, `apps/zed/`, `terminal/`, and `desktop/` contain generated product assets.
 
 Generated consumers never become palette inputs.
 
@@ -82,15 +85,12 @@ Generated consumers never become palette inputs.
 
 ```sh
 bun install --frozen-lockfile
+bun run color:audit
 bun run verify
 bun run package:vscode
 ```
 
-CI packages the static VS Code product on Linux, macOS, and Windows. Linux additionally runs the Island mutation proofs and desktop installer proofs.
-
-## Contributing
-
-Found a language or scope that needs work? [Open an issue](https://github.com/renbkna/tyrian-night/issues).
+CI verifies generated ownership, TypeScript, linting, formatting, tests, VS Code packaging on Linux/macOS/Windows, and the Linux desktop installer proofs.
 
 ## License
 
