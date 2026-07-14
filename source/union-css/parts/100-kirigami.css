@@ -10,22 +10,17 @@ applicationheader[colorset="window"] {
 card {
   background-color: var(--tyrian-panel-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-large);
+  border-radius: var(--tyrian-corner-radius);
   box-shadow: 0px 2px var(--tyrian-grid-unit) 0px rgba(0, 0, 0, 0.1);
   color: var(--tyrian-foreground);
 }
 
 card:hovered {
   background-color: var(--tyrian-panel-raised-bg);
-  border-color: var(--tyrian-border-hover);
 }
 
 card:pressed {
   background-color: var(--tyrian-control-active-bg);
-}
-
-card:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 chip {
@@ -37,7 +32,7 @@ chip {
   text-alignment: content fill center 0;
   icon-alignment: content start center 0;
   background-color: var(--tyrian-control-hover-bg);
-  border-radius: var(--tyrian-pill-radius);
+  border-radius: var(--tyrian-corner-radius);
   border: 1px solid var(--tyrian-border-color);
   color: var(--tyrian-foreground);
 }
@@ -57,18 +52,9 @@ chip.interactive {
   border-color: var(--tyrian-border-hover);
 }
 
-chip:hovered {
-  background-color: var(--tyrian-row-hover-bg);
-  border-color: var(--tyrian-border-hover);
-}
-
+chip:hovered,
 chip:pressed {
-  background-color: var(--tyrian-control-active-bg);
   border-color: var(--tyrian-focus-ring);
-}
-
-chip:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 heading {
@@ -110,8 +96,8 @@ heading.secondary {
 inlinemessage {
   padding: var(--tyrian-small-spacing);
   background-color: var(--tyrian-row-selected-bg);
-  border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-medium);
+  border: 1px solid var(--tyrian-focus-ring);
+  border-radius: var(--tyrian-corner-radius);
   color: var(--tyrian-foreground);
 }
 
@@ -155,32 +141,18 @@ navigationtabbar.footer {
 navigationtabbutton {
   inset: var(--tyrian-minimal-spacing);
   padding: var(--tyrian-small-spacing);
-  border: 1px solid transparent;
-  border-radius: var(--tyrian-radius-medium);
-  color: var(--tyrian-muted);
+  border-radius: var(--tyrian-corner-radius);
+  color: var(--tyrian-foreground);
   icon-size: var(--tyrian-icon-small-medium);
   text-alignment-horizontal: center;
   icon-alignment-horizontal: center;
 }
 
-navigationtabbutton:hovered {
-  background-color: var(--tyrian-control-hover-bg);
-  color: var(--tyrian-foreground);
-}
-
-navigationtabbutton:pressed {
-  background-color: var(--tyrian-control-active-bg);
-  color: var(--tyrian-foreground);
-}
-
+navigationtabbutton:hovered,
+navigationtabbutton:pressed,
 navigationtabbutton:checked {
-  background-color: var(--tyrian-selection);
-  border-color: var(--tyrian-focus-ring);
-  color: var(--tyrian-foreground);
-}
-
-navigationtabbutton:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
+  background-color: var(--tyrian-control-active-bg);
+  border: 1px solid var(--tyrian-focus-ring);
 }
 
 navigationtabbutton:disabled {

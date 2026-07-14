@@ -8,7 +8,7 @@ searchfield {
   padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
   background-color: var(--tyrian-field-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-medium);
+  border-radius: var(--tyrian-corner-radius);
   color: var(--tyrian-foreground);
 }
 
@@ -16,22 +16,13 @@ textfield:hovered,
 textarea:hovered,
 spinbox:hovered,
 doublespinbox:hovered,
-searchfield:hovered {
-  border-color: var(--tyrian-border-hover);
-}
-
+searchfield:hovered,
 textfield:active-focus,
 textarea:active-focus,
 spinbox:active-focus,
 doublespinbox:active-focus,
-searchfield:active-focus,
-textfield:visual-focus,
-textarea:visual-focus,
-spinbox:visual-focus,
-doublespinbox:visual-focus,
-searchfield:visual-focus {
-  border-color: var(--tyrian-focus-ring);
-  outline: 2px solid var(--tyrian-focus-ring);
+searchfield:active-focus {
+  border-color: var(--tyrian-border-hover);
 }
 
 textfield:disabled,
@@ -52,39 +43,33 @@ searchfield > .placeholder {
   color: var(--tyrian-muted);
 }
 
-spinbox,
-doublespinbox {
+spinbox {
   layout-alignment: content fill fill 0;
   text-alignment: content center fill 0;
 }
 
-spinbox > indicator,
-doublespinbox > indicator {
+spinbox > indicator {
   width: var(--tyrian-large-element);
   height: var(--tyrian-small-element);
   color: var(--tyrian-foreground);
-  border-radius: var(--tyrian-radius-small);
+  border-radius: var(--tyrian-corner-radius);
 }
 
 spinbox > indicator:hovered,
-doublespinbox > indicator:hovered {
-  background-color: var(--tyrian-control-hover-bg);
-  border: 1px solid var(--tyrian-border-hover);
-}
-
-spinbox > indicator:pressed,
-doublespinbox > indicator:pressed {
-  background-color: var(--tyrian-control-active-bg);
+doublespinbox > indicator:hovered,
+spinbox > indicator:pressed {
   border: 1px solid var(--tyrian-focus-ring);
 }
 
-spinbox > indicator.decrease,
-doublespinbox > indicator.decrease {
+spinbox > indicator:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+spinbox > indicator.decrease {
   icon-name: "spinbox-decrease";
 }
 
-spinbox > indicator.increase,
-doublespinbox > indicator.increase {
+spinbox > indicator.increase {
   icon-name: "spinbox-increase";
 }
 
@@ -112,7 +97,6 @@ searchfield > clearindicator {
 textfield.changed,
 textarea.changed,
 spinbox.changed,
-doublespinbox.changed,
 searchfield.changed {
   background-color: var(--tyrian-neutral-bg);
   border: 1px solid var(--tyrian-neutral);
@@ -125,7 +109,6 @@ spinbox.doublespinbox {
   background-color: var(--tyrian-field-bg);
 }
 
-spinbox.constrained,
-doublespinbox.constrained {
+spinbox.constrained {
   border-color: var(--tyrian-neutral);
 }

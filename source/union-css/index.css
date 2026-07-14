@@ -1,14 +1,11 @@
 /*
  * {{schemeName}} Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * Palette tokens are generated from neutral source/theme roles by scripts/desktopThemes.mjs.
+ * Palette and shape tokens are generated from neutral source/themes roles by scripts/desktopThemes.mjs.
  */
 
 :root {
   /* TYRIAN_GENERATED_TOKENS */
-  --tyrian-radius-small: 4px;
-  --tyrian-radius-medium: var(--tyrian-corner-radius);
-  --tyrian-radius-large: 10px;
 }
 
 @import "./parts/00-base.css";

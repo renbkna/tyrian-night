@@ -1,29 +1,20 @@
 tabbutton {
   height: 32px;
   padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
-  background: none;
-  border: 1px solid transparent;
-  color: var(--tyrian-muted);
-}
-
-tabbutton:hovered {
   background-color: var(--tyrian-control-hover-bg);
-  color: var(--tyrian-foreground);
-}
-
-tabbutton:pressed {
-  background-color: var(--tyrian-control-active-bg);
+  border: 1px solid var(--tyrian-border-color);
   color: var(--tyrian-foreground);
 }
 
 tabbutton:checked {
   background-color: var(--tyrian-window-bg);
-  border-top: 2px solid var(--tyrian-focus-ring);
-  color: var(--tyrian-foreground);
+  border-top: 3px solid var(--tyrian-focus-ring);
 }
 
-tabbutton:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
+tabbutton:hovered,
+tabbutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
 }
 
 tabbutton:disabled {
@@ -52,7 +43,7 @@ tabbar[tab-position="bottom"] {
 
 tabbarhighlight.itemview-highlight {
   background-color: var(--tyrian-fill-bg);
-  border-radius: var(--tyrian-radius-small);
+  border-radius: var(--tyrian-corner-radius);
 }
 
 tabbutton.itemview-highlight {

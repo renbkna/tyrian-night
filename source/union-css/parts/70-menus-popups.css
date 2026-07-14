@@ -5,24 +5,18 @@ menu {
 
 menuitem {
   width: var(--tyrian-menu-width);
-  border-radius: var(--tyrian-radius-medium);
+  border-radius: var(--tyrian-corner-radius);
 }
 
 menuitem:hovered,
 menuitem.with-submenu:highlighted {
-  background-color: var(--tyrian-row-hover-bg);
-}
-
-menuitem:highlighted {
-  background-color: var(--tyrian-row-selected-bg);
+  background-color: var(--tyrian-hover);
+  border: 1px solid var(--tyrian-accent);
 }
 
 menuitem:pressed {
-  background-color: var(--tyrian-control-active-bg);
-}
-
-menuitem:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
+  background-color: var(--tyrian-accent);
+  color: var(--tyrian-selection-text);
 }
 
 menuitem > indicator,
@@ -43,13 +37,14 @@ menuitem > shortcuttext {
 
 popup.combobox {
   padding: 0px;
-  background-color: var(--tyrian-panel-raised-bg);
+  background-color: var(--tyrian-panel-bg);
 }
 
 popup.combobox itemdelegate:highlighted,
 popup.combobox itemdelegate:highlight,
 popup.combobox menuitem:highlighted {
   background-color: var(--tyrian-row-selected-bg);
+  border-color: var(--tyrian-focus-ring);
 }
 
 overlay.modal,
@@ -75,31 +70,25 @@ menubaritem {
   height: var(--tyrian-medium-element);
   padding: var(--tyrian-small-spacing);
   spacing: var(--tyrian-small-spacing);
-  border-radius: var(--tyrian-radius-medium);
+  border-radius: var(--tyrian-corner-radius);
   color: var(--tyrian-foreground);
 }
 
-menubaritem:hovered {
-  background-color: var(--tyrian-row-hover-bg);
-}
-
+menubaritem:hovered,
 menubaritem:pressed,
 menubaritem:highlighted {
-  background-color: var(--tyrian-control-active-bg);
-}
-
-menubaritem:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
+  background-color: var(--tyrian-hover);
+  border: 1px solid var(--tyrian-focus-ring);
 }
 
 dialog {
   spacing: var(--tyrian-small-spacing);
   padding: var(--tyrian-large-spacing);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-large);
-  background-color: var(--tyrian-panel-raised-bg);
+  border-radius: var(--tyrian-corner-radius);
+  background-color: var(--tyrian-panel-bg);
   color: var(--tyrian-foreground);
-  box-shadow: var(--tyrian-shadow-elevation);
+  box-shadow: 0px 2px 32px 0px rgba(0, 0, 0, 0.3);
 }
 
 dialog .header {
@@ -136,6 +125,6 @@ tooltip {
   padding: var(--tyrian-large-spacing);
   color: var(--tyrian-foreground);
   background-color: var(--tyrian-panel-raised-bg);
-  border-radius: var(--tyrian-radius-large);
+  border-radius: var(--tyrian-corner-radius);
   border: 1px solid var(--tyrian-border-color);
 }

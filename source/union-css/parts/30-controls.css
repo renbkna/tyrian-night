@@ -13,7 +13,7 @@ delaybutton {
   icon-alignment-horizontal: center;
   background-color: var(--tyrian-control-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-medium);
+  border-radius: var(--tyrian-corner-radius);
   color: var(--tyrian-foreground);
 }
 
@@ -28,20 +28,16 @@ delaybutton:hovered {
 }
 
 abstractbutton:pressed,
+abstractbutton:checked,
 button:pressed,
+button:checked,
 toolbutton:pressed,
+toolbutton:checked,
 combobox:pressed,
 roundbutton:pressed,
+roundbutton:checked,
 delaybutton:pressed {
   background-color: var(--tyrian-control-active-bg);
-  border-color: var(--tyrian-border-hover);
-}
-
-abstractbutton:checked,
-button:checked,
-toolbutton:checked,
-roundbutton:checked {
-  background-color: var(--tyrian-selection);
   border-color: var(--tyrian-focus-ring);
 }
 
@@ -61,8 +57,10 @@ abstractbutton:visual-focus,
 button:visual-focus,
 toolbutton:visual-focus,
 combobox:visual-focus,
-roundbutton:visual-focus,
-delaybutton:visual-focus {
+textfield:visual-focus,
+textarea:visual-focus,
+searchfield:visual-focus,
+spinbox:visual-focus {
   outline: 2px solid var(--tyrian-focus-ring);
 }
 
@@ -72,24 +70,7 @@ combobox.flat,
 roundbutton.flat,
 toolbutton {
   background: none;
-  border-color: transparent;
   box-shadow: none;
-}
-
-abstractbutton.flat:hovered,
-button.flat:hovered,
-combobox.flat:hovered,
-roundbutton.flat:hovered,
-toolbutton:hovered {
-  background-color: var(--tyrian-control-hover-bg);
-}
-
-abstractbutton.flat:pressed,
-button.flat:pressed,
-combobox.flat:pressed,
-roundbutton.flat:pressed,
-toolbutton:pressed {
-  background-color: var(--tyrian-control-active-bg);
 }
 
 button.with-icon,
@@ -138,8 +119,8 @@ toolseparator.vertical {
 }
 
 delaybutton > fill {
-  border-radius: var(--tyrian-radius-medium);
-  border: 1px solid var(--tyrian-border-hover);
+  border-radius: var(--tyrian-corner-radius);
+  border: 1px solid var(--tyrian-focus-ring);
   background-color: var(--tyrian-fill-bg);
 }
 

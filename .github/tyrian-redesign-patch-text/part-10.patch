@@ -1,0 +1,383 @@
+foreground);
+ }
+@@ -96,8 +110,8 @@ heading.secondary {
+ inlinemessage {
+   padding: var(--tyrian-small-spacing);
+   background-color: var(--tyrian-row-selected-bg);
+-  border: 1px solid var(--tyrian-focus-ring);
+-  border-radius: var(--tyrian-corner-radius);
++  border: 1px solid var(--tyrian-border-color);
++  border-radius: var(--tyrian-radius-medium);
+   color: var(--tyrian-foreground);
+ }
+ 
+@@ -141,18 +155,32 @@ navigationtabbar.footer {
+ navigationtabbutton {
+   inset: var(--tyrian-minimal-spacing);
+   padding: var(--tyrian-small-spacing);
+-  border-radius: var(--tyrian-corner-radius);
+-  color: var(--tyrian-foreground);
++  border: 1px solid transparent;
++  border-radius: var(--tyrian-radius-medium);
++  color: var(--tyrian-muted);
+   icon-size: var(--tyrian-icon-small-medium);
+   text-alignment-horizontal: center;
+   icon-alignment-horizontal: center;
+ }
+ 
+-navigationtabbutton:hovered,
+-navigationtabbutton:pressed,
+-navigationtabbutton:checked {
++navigationtabbutton:hovered {
++  background-color: var(--tyrian-control-hover-bg);
++  color: var(--tyrian-foreground);
++}
++
++navigationtabbutton:pressed {
+   background-color: var(--tyrian-control-active-bg);
+-  border: 1px solid var(--tyrian-focus-ring);
++  color: var(--tyrian-foreground);
++}
++
++navigationtabbutton:checked {
++  background-color: var(--tyrian-selection);
++  border-color: var(--tyrian-focus-ring);
++  color: var(--tyrian-foreground);
++}
++
++navigationtabbutton:visual-focus {
++  outline: 2px solid var(--tyrian-focus-ring);
+ }
+ 
+ navigationtabbutton:disabled {
+diff --git a/source/union-css/parts/110-views-calendar-overrides.css b/source/union-css/parts/110-views-calendar-overrides.css
+index a8de014..98b81d8 100644
+--- a/source/union-css/parts/110-views-calendar-overrides.css
++++ b/source/union-css/parts/110-views-calendar-overrides.css
+@@ -4,6 +4,7 @@ tableviewdelegate {
+   height: var(--tyrian-medium-element);
+   padding: var(--tyrian-small-spacing);
+   spacing: var(--tyrian-small-spacing);
++  border: 1px solid transparent;
+   border-radius: 0px;
+   color: var(--tyrian-foreground);
+   background-color: var(--tyrian-window-bg);
+@@ -15,30 +16,28 @@ tableviewdelegate.alternating-colors {
+ }
+ 
+ treeviewdelegate:hovered,
+-treeviewdelegate:active-focus,
+-tableviewdelegate:hovered,
+-tableviewdelegate:active-focus {
+-  border: 1px solid var(--tyrian-focus-ring);
+-  background-color: transparent;
++tableviewdelegate:hovered {
++  background-color: var(--tyrian-row-hover-bg);
+ }
+ 
++treeviewdelegate:active-focus,
++tableviewdelegate:active-focus,
+ treeviewdelegate:visual-focus,
+ tableviewdelegate:visual-focus {
+-  outline: 1px solid var(--tyrian-focus-ring);
++  outline: 2px solid var(--tyrian-focus-ring);
+ }
+ 
+ treeviewdelegate:highlighted,
+ treeviewdelegate.selected,
+ tableviewdelegate:highlighted,
+ tableviewdelegate.selected {
+-  color: var(--tyrian-selection-text);
+-  background-color: var(--tyrian-fill-bg);
+-  border: 1px solid var(--tyrian-border-hover);
++  color: var(--tyrian-foreground);
++  background-color: var(--tyrian-row-selected-bg);
+ }
+ 
+ treeviewdelegate.selected > label,
+ tableviewdelegate.selected > label {
+-  color: var(--tyrian-selection-text);
++  color: var(--tyrian-foreground);
+ }
+ 
+ treeviewdelegate.editing,
+@@ -85,6 +84,12 @@ headerviewdelegate {
+   border-right: 1px solid var(--tyrian-border-color);
+ }
+ 
++horizontalheaderviewdelegate:hovered,
++verticalheaderviewdelegate:hovered,
++headerviewdelegate:hovered {
++  background-color: var(--tyrian-row-hover-bg);
++}
++
+ horizontalheaderviewdelegate.sort-ascending,
+ verticalheaderviewdelegate.sort-ascending,
+ headerviewdelegate.sort-ascending {
+@@ -100,7 +105,7 @@ headerviewdelegate.sort-descending {
+ selectionrectangle {
+   color: var(--tyrian-focus-ring);
+   border: 1px solid var(--tyrian-focus-ring);
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-medium);
+   background-color: var(--tyrian-row-selected-bg);
+ }
+ 
+diff --git a/source/union-css/parts/30-controls.css b/source/union-css/parts/30-controls.css
+index 660938b..5368366 100644
+--- a/source/union-css/parts/30-controls.css
++++ b/source/union-css/parts/30-controls.css
+@@ -13,7 +13,7 @@ delaybutton {
+   icon-alignment-horizontal: center;
+   background-color: var(--tyrian-control-bg);
+   border: 1px solid var(--tyrian-border-color);
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-medium);
+   color: var(--tyrian-foreground);
+ }
+ 
+@@ -28,16 +28,20 @@ delaybutton:hovered {
+ }
+ 
+ abstractbutton:pressed,
+-abstractbutton:checked,
+ button:pressed,
+-button:checked,
+ toolbutton:pressed,
+-toolbutton:checked,
+ combobox:pressed,
+ roundbutton:pressed,
+-roundbutton:checked,
+ delaybutton:pressed {
+   background-color: var(--tyrian-control-active-bg);
++  border-color: var(--tyrian-border-hover);
++}
++
++abstractbutton:checked,
++button:checked,
++toolbutton:checked,
++roundbutton:checked {
++  background-color: var(--tyrian-selection);
+   border-color: var(--tyrian-focus-ring);
+ }
+ 
+@@ -57,10 +61,8 @@ abstractbutton:visual-focus,
+ button:visual-focus,
+ toolbutton:visual-focus,
+ combobox:visual-focus,
+-textfield:visual-focus,
+-textarea:visual-focus,
+-searchfield:visual-focus,
+-spinbox:visual-focus {
++roundbutton:visual-focus,
++delaybutton:visual-focus {
+   outline: 2px solid var(--tyrian-focus-ring);
+ }
+ 
+@@ -70,9 +72,26 @@ combobox.flat,
+ roundbutton.flat,
+ toolbutton {
+   background: none;
++  border-color: transparent;
+   box-shadow: none;
+ }
+ 
++abstractbutton.flat:hovered,
++button.flat:hovered,
++combobox.flat:hovered,
++roundbutton.flat:hovered,
++toolbutton:hovered {
++  background-color: var(--tyrian-control-hover-bg);
++}
++
++abstractbutton.flat:pressed,
++button.flat:pressed,
++combobox.flat:pressed,
++roundbutton.flat:pressed,
++toolbutton:pressed {
++  background-color: var(--tyrian-control-active-bg);
++}
++
+ button.with-icon,
+ toolbutton.with-icon,
+ roundbutton.with-icon,
+@@ -119,8 +138,8 @@ toolseparator.vertical {
+ }
+ 
+ delaybutton > fill {
+-  border-radius: var(--tyrian-corner-radius);
+-  border: 1px solid var(--tyrian-focus-ring);
++  border-radius: var(--tyrian-radius-medium);
++  border: 1px solid var(--tyrian-border-hover);
+   background-color: var(--tyrian-fill-bg);
+ }
+ 
+diff --git a/source/union-css/parts/40-fields.css b/source/union-css/parts/40-fields.css
+index d31e61c..3095b09 100644
+--- a/source/union-css/parts/40-fields.css
++++ b/source/union-css/parts/40-fields.css
+@@ -8,7 +8,7 @@ searchfield {
+   padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+   background-color: var(--tyrian-field-bg);
+   border: 1px solid var(--tyrian-border-color);
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-medium);
+   color: var(--tyrian-foreground);
+ }
+ 
+@@ -16,13 +16,22 @@ textfield:hovered,
+ textarea:hovered,
+ spinbox:hovered,
+ doublespinbox:hovered,
+-searchfield:hovered,
++searchfield:hovered {
++  border-color: var(--tyrian-border-hover);
++}
++
+ textfield:active-focus,
+ textarea:active-focus,
+ spinbox:active-focus,
+ doublespinbox:active-focus,
+-searchfield:active-focus {
+-  border-color: var(--tyrian-border-hover);
++searchfield:active-focus,
++textfield:visual-focus,
++textarea:visual-focus,
++spinbox:visual-focus,
++doublespinbox:visual-focus,
++searchfield:visual-focus {
++  border-color: var(--tyrian-focus-ring);
++  outline: 2px solid var(--tyrian-focus-ring);
+ }
+ 
+ textfield:disabled,
+@@ -43,33 +52,39 @@ searchfield > .placeholder {
+   color: var(--tyrian-muted);
+ }
+ 
+-spinbox {
++spinbox,
++doublespinbox {
+   layout-alignment: content fill fill 0;
+   text-alignment: content center fill 0;
+ }
+ 
+-spinbox > indicator {
++spinbox > indicator,
++doublespinbox > indicator {
+   width: var(--tyrian-large-element);
+   height: var(--tyrian-small-element);
+   color: var(--tyrian-foreground);
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-small);
+ }
+ 
+ spinbox > indicator:hovered,
+-doublespinbox > indicator:hovered,
+-spinbox > indicator:pressed {
+-  border: 1px solid var(--tyrian-focus-ring);
++doublespinbox > indicator:hovered {
++  background-color: var(--tyrian-control-hover-bg);
++  border: 1px solid var(--tyrian-border-hover);
+ }
+ 
+-spinbox > indicator:pressed {
++spinbox > indicator:pressed,
++doublespinbox > indicator:pressed {
+   background-color: var(--tyrian-control-active-bg);
++  border: 1px solid var(--tyrian-focus-ring);
+ }
+ 
+-spinbox > indicator.decrease {
++spinbox > indicator.decrease,
++doublespinbox > indicator.decrease {
+   icon-name: "spinbox-decrease";
+ }
+ 
+-spinbox > indicator.increase {
++spinbox > indicator.increase,
++doublespinbox > indicator.increase {
+   icon-name: "spinbox-increase";
+ }
+ 
+@@ -97,6 +112,7 @@ searchfield > clearindicator {
+ textfield.changed,
+ textarea.changed,
+ spinbox.changed,
++doublespinbox.changed,
+ searchfield.changed {
+   background-color: var(--tyrian-neutral-bg);
+   border: 1px solid var(--tyrian-neutral);
+@@ -109,6 +125,7 @@ spinbox.doublespinbox {
+   background-color: var(--tyrian-field-bg);
+ }
+ 
+-spinbox.constrained {
++spinbox.constrained,
++doublespinbox.constrained {
+   border-color: var(--tyrian-neutral);
+ }
+diff --git a/source/union-css/parts/50-checkables-delegates.css b/source/union-css/parts/50-checkables-delegates.css
+index a976c5a..025e097 100644
+--- a/source/union-css/parts/50-checkables-delegates.css
++++ b/source/union-css/parts/50-checkables-delegates.css
+@@ -8,6 +8,7 @@ menuitem {
+   padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+   spacing: var(--tyrian-small-spacing);
+   background: none;
++  border: 1px solid transparent;
+   color: var(--tyrian-foreground);
+ }
+ 
+@@ -25,23 +26,34 @@ checkdelegate.hover-enabled,
+ radiodelegate.hover-enabled,
+ switchdelegate.hover-enabled,
+ swipedelegate.hover-enabled {
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-medium);
+ }
+ 
+ itemdelegate:highlighted,
+-itemdelegate:pressed,
+ checkdelegate:highlighted,
+-checkdelegate:pressed,
+ radiodelegate:highlighted,
+-radiodelegate:pressed,
+ switchdelegate:highlighted,
+-switchdelegate:pressed,
+ swipedelegate:highlighted,
++menuitem:highlighted {
++  background-color: var(--tyrian-row-selected-bg);
++}
++
++itemdelegate:pressed,
++checkdelegate:pressed,
++radiodelegate:pressed,
++switchdelegate:pressed,
+ swipedelegate:pressed,
+-menuitem:highlighted,
+ menuitem:pressed {
+-  background-color: var(--tyrian-row-selected-bg);
+-  border: 1px solid var(--tyrian-focus-ring);
++  background-color: var(--tyrian-control-active-bg);
++}
++
++itemdelegate:visual-focus,
++checkdelegate:visual-focus,
++radiodelegate:visual-focus,
++switchdelegate:visual-focus,
++swipedelegate:visual-focus,
++menuitem:visual-focus {
++  outline: 2px solid var(--tyrian-focus-ring);
+ }
+ 
+ itemdelegate:disabled,
+@@ -86,7 +98,7 @@ menuitem > indicator {
+   height: 18px;
+   background-color: var(--tyrian-indicator-bg);
+   border: 1px solid var(--tyrian-border-color);
+-  border-radius: var(--tyrian-corner-radius);
++  border-radius: var(--tyrian-radius-small);
+ }
+ 
+ checkbox:checked 

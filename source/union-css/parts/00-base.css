@@ -41,8 +41,8 @@ popup,
 menu,
 tooltip {
   padding: var(--tyrian-large-spacing);
-  background-color: var(--tyrian-panel-raised-bg);
+  background-color: var(--tyrian-panel-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-radius-large);
+  border-radius: var(--tyrian-corner-radius);
   box-shadow: var(--tyrian-shadow-elevation);
 }

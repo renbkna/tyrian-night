@@ -16,24 +16,6 @@ import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
 
 const AAA_TEXT_CONTRAST = 7;
 const AA_TEXT_CONTRAST = 4.5;
-const LEGACY_THEME_SLUG = 'tyrian-night-old';
-
-const REDESIGNED_SURFACE_PAIRS = [
-  ['surface.canvas', 'surface.navigation'],
-  ['surface.navigation', 'surface.chrome'],
-  ['surface.chrome', 'surface.sidebar'],
-  ['surface.sidebar', 'surface.field'],
-  ['surface.field', 'surface.raised'],
-  ['surface.raised', 'surface.hover'],
-] as const;
-
-const REDESIGNED_ROLE_PAIRS = [
-  ['syntax', 'function', 'ui', 'status.error', 20],
-  ['terminal', 'ansi.red', 'terminal', 'ansi.cyan', 20],
-  ['syntax', 'function', 'syntax', 'string', 10],
-  ['syntax', 'keyword', 'syntax', 'type', 10],
-  ['syntax', 'regexp', 'syntax', 'string', 10],
-] as const;
 
 test('theme definitions expose one strict consumer-neutral role contract', () => {
   for (const source of SOURCE_THEMES) {
@@ -56,16 +38,6 @@ test('theme definitions expose one strict consumer-neutral role contract', () =>
     expect(theme).not.toHaveProperty('semanticTokenColors');
     expect(theme).not.toHaveProperty('tokenColors');
   }
-});
-
-test('theme catalog orders current family members before the exact legacy comparison', () => {
-  expect(SOURCE_THEMES.map((source) => source.slug)).toEqual([
-    'tyrian-night',
-    'tyrian-nocturne',
-    'tyrian-abyss',
-    'tyrian-dawn',
-    'tyrian-night-old',
-  ]);
 });
 
 test('consumer-specific VS Code policy is isolated from every other projection', () => {
@@ -117,21 +89,6 @@ test('neutral theme roles keep load-bearing text within the contrast contract', 
   }
 });
 
-test('redesigned variants keep supporting text readable', () => {
-  const roles = ['text.secondary', 'text.muted', 'text.chrome', 'text.sidebar', 'text.status'];
-
-  for (const source of SOURCE_THEMES.filter((theme) => theme.slug !== LEGACY_THEME_SLUG)) {
-    const theme = readSourceTheme(source);
-    const background = uiColor(theme, 'surface.canvas');
-
-    for (const role of roles) {
-      expect(contrastRatio(uiColor(theme, role), background)).toBeGreaterThanOrEqual(
-        AA_TEXT_CONTRAST
-      );
-    }
-  }
-});
-
 test('neutral UI roles keep interactive labels legible', () => {
   const pairs = [
     ['buttons.foreground', 'buttons.background'],
@@ -156,36 +113,6 @@ test('neutral editor roles expose a visible active-line boundary', () => {
 
     expect(isTransparentHex(activeLineBorder)).toBe(false);
     expect(activeLineBorder).not.toBe(uiColor(theme, 'border.default'));
-  }
-});
-
-test('redesigned surface ladders remain perceptually distinct', () => {
-  for (const source of SOURCE_THEMES.filter((theme) => theme.slug !== LEGACY_THEME_SLUG)) {
-    const theme = readSourceTheme(source);
-
-    for (const [leftRole, rightRole] of REDESIGNED_SURFACE_PAIRS) {
-      expect(
-        oklabDelta(uiColor(theme, leftRole), uiColor(theme, rightRole))
-      ).toBeGreaterThanOrEqual(0.75);
-    }
-  }
-});
-
-test('redesigned semantic categories do not collapse into adjacent signals', () => {
-  for (const source of SOURCE_THEMES.filter((theme) => theme.slug !== LEGACY_THEME_SLUG)) {
-    const theme = readSourceTheme(source);
-
-    for (const [
-      leftNamespace,
-      leftRole,
-      rightNamespace,
-      rightRole,
-      minimum,
-    ] of REDESIGNED_ROLE_PAIRS) {
-      const left = roleColor(theme, leftNamespace, leftRole);
-      const right = roleColor(theme, rightNamespace, rightRole);
-      expect(oklabDelta(left, right)).toBeGreaterThanOrEqual(minimum);
-    }
   }
 });
 
@@ -216,28 +143,13 @@ test('muted editor hints remain outside syntax authority', () => {
   }
 });
 
-test('VS Code projection owns current control, chat, notebook, terminal, and agent states', () => {
+test('VS Code projection owns selectors, scopes, and consumer keys', () => {
   const requiredKeys = [
-    'actionBar.toggledBackground',
-    'agentStatusIndicator.background',
-    'chat.requestBubbleBackground',
-    'chat.thinkingShimmer',
-    'checkbox.selectBackground',
     'editor.background',
     'editor.foreground',
     'editorInlayHint.foreground',
-    'gauge.errorBackground',
-    'inlineChatInput.focusBorder',
-    'inputOption.hoverBackground',
-    'notebookScrollbarSlider.background',
-    'radio.activeBackground',
-    'settings.focusedRowBackground',
     'symbolIcon.constructorForeground',
     'terminal.ansiMagenta',
-    'terminalSymbolIcon.branchForeground',
-    'testing.iconPassed',
-    'toolbar.activeBackground',
-    'toolbar.hoverBackground',
     'diffEditor.insertedTextBackground',
   ];
 
@@ -245,27 +157,16 @@ test('VS Code projection owns current control, chat, notebook, terminal, and age
     const theme = readSourceTheme(source);
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
-    expect(Object.keys(projected.colors)).toHaveLength(709);
+    expect(Object.keys(projected.colors)).toHaveLength(302);
     for (const key of requiredKeys) expect(projected.colors[key]).toBeDefined();
     expect(projected.semanticTokenColors.parameter.foreground).toBe(syntaxColor(theme, 'data'));
     expect(projected.semanticTokenColors.type.foreground).toBe(syntaxColor(theme, 'type'));
     expect(projected.colors['symbolIcon.constructorForeground']).toBe(syntaxColor(theme, 'type'));
     expect(projected.colors['terminal.ansiMagenta']).toBe(terminalColor(theme, 'ansi.magenta'));
-    expect(projected.colors['actionBar.toggledBackground']).toBe(
-      uiColor(theme, 'effect.checkedSurface')
-    );
-    expect(projected.colors['toolbar.hoverBackground']).toBe(uiColor(theme, 'effect.hoverSurface'));
-    expect(projected.colors['toolbar.activeBackground']).toBe(
-      uiColor(theme, 'effect.activeSurface')
-    );
-    expect(projected.colors['testing.iconPassed']).toBe(uiColor(theme, 'status.success'));
-    expect(projected.colors['terminalSymbolIcon.branchForeground']).toBe(
-      syntaxColor(theme, 'type')
-    );
   }
 
   expect(VSCODE_PROJECTION.tokenColors).toHaveLength(28);
-  expect(Object.keys(VSCODE_PROJECTION.semanticTokenColors)).toHaveLength(42);
+  expect(Object.keys(VSCODE_PROJECTION.semanticTokenColors)).toHaveLength(31);
 });
 
 test('VS Code projection reserves italics for intended grammar surfaces', () => {
@@ -308,16 +209,6 @@ test('README advertises the default Night palette from neutral roles', () => {
   expect(readme).not.toContain('CIEDE2000');
   for (const color of advertisedPalette) expect(readme).toContain(`\`${color}\``);
 });
-
-function roleColor(
-  theme: ReturnType<typeof readSourceTheme>,
-  namespace: 'ui' | 'syntax' | 'terminal',
-  role: string
-): string {
-  if (namespace === 'ui') return uiColor(theme, role);
-  if (namespace === 'syntax') return syntaxColor(theme, role);
-  return terminalColor(theme, role);
-}
 
 function oklabDelta(leftColor: string, rightColor: string): number {
   return compareColors({ left: leftColor, right: rightColor }).oklabDelta;

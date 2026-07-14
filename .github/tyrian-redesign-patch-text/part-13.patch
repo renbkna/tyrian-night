@@ -1,0 +1,111 @@
+0]!, right: colors[1]! }).oklabDelta).toBeGreaterThan(2);
++    expect(compareColors({ left: colors[2]!, right: colors[4]! }).oklabDelta).toBeGreaterThan(8);
++  }
++});
+diff --git a/tests/vscodeProjectionCoverage.test.ts b/tests/vscodeProjectionCoverage.test.ts
+new file mode 100644
+index 0000000..0aa627d
+--- /dev/null
++++ b/tests/vscodeProjectionCoverage.test.ts
+@@ -0,0 +1,86 @@
++import { expect, test } from 'bun:test';
++
++import { VSCODE_PROJECTION } from '../scripts/themeDefinition.mjs';
++import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
++import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
++
++const REQUIRED_PUBLIC_KEYS = [
++  'actionBar.toggledBackground',
++  'agentSessionReadIndicator.foreground',
++  'agentSessionSelectedBadge.border',
++  'agentStatusIndicator.background',
++  'button.border',
++  'button.secondaryBorder',
++  'chat.requestBubbleBackground',
++  'chat.requestBubbleHoverBackground',
++  'checkbox.disabled.background',
++  'checkbox.disabled.foreground',
++  'checkbox.selectBackground',
++  'checkbox.selectBorder',
++  'editorActionList.focusBackground',
++  'editorMultiCursor.primary.foreground',
++  'editorMultiCursor.secondary.foreground',
++  'gauge.errorBackground',
++  'gauge.warningBackground',
++  'inlineChat.background',
++  'inlineChat.border',
++  'inlineChatInput.background',
++  'inlineChatInput.focusBorder',
++  'inputOption.activeBackground',
++  'inputOption.hoverBackground',
++  'list.activeSelectionIconForeground',
++  'list.focusAndSelectionOutline',
++  'quickInputList.focusIconForeground',
++  'list.focusOutline',
++  'list.inactiveFocusOutline',
++  'list.inactiveSelectionIconForeground',
++  'listFilterWidget.noMatchesOutline',
++  'listFilterWidget.outline',
++  'notebook.cellEditorBackground',
++  'notebook.cellHoverBackground',
++  'notebook.cellInsertionIndicator',
++  'notebook.focusedCellBorder',
++  'notebook.focusedEditorBorder',
++  'notebookEditorOverviewRuler.runningCellForeground',
++  'radio.activeBackground',
++  'radio.activeBorder',
++  'radio.inactiveHoverBackground',
++  'statusBarItem.activeBackground',
++  'terminalSymbolIcon.argumentForeground',
++  'terminalSymbolIcon.branchForeground',
++  'terminalSymbolIcon.fileForeground',
++  'terminalSymbolIcon.methodForeground',
++  'terminalSymbolIcon.stashForeground',
++  'terminalSymbolIcon.symbolicLinkFolderForeground',
++  'terminalSymbolIcon.tagForeground',
++  'testing.iconFailed',
++  'testing.iconPassed',
++  'testing.iconQueued',
++  'toolbar.activeBackground',
++  'toolbar.hoverBackground',
++  'toolbar.hoverOutline',
++  'window.activeBorder',
++  'window.inactiveBorder',
++] as const;
++
++const INTENTIONAL_DEFAULTS = [
++  'contrastBorder',
++  'contrastActiveBorder',
++  'widget.shadow',
++  'scrollbar.shadow',
++  'inlineChat.shadow',
++  'sideBarStickyScroll.shadow',
++  'panelStickyScroll.shadow',
++  'minimap.foregroundOpacity',
++  'listFilterWidget.shadow',
++  'terminal.selectionForeground',
++] as const;
++
++test('VS Code projection covers public state, chat, notebook, testing, terminal-symbol, gauge, and agent colors', () => {
++  for (const source of SOURCE_THEMES) {
++    const projected = buildVscodeTheme(readSourceTheme(source), VSCODE_PROJECTION);
++
++    for (const key of REQUIRED_PUBLIC_KEYS) expect(projected.colors[key]).toBeDefined();
++    for (const key of INTENTIONAL_DEFAULTS) expect(projected.colors[key]).toBeUndefined();
++  }
++});
+diff --git a/tests/zedExtension.test.ts b/tests/zedExtension.test.ts
+index 6cd8131..4916b26 100644
+--- a/tests/zedExtension.test.ts
++++ b/tests/zedExtension.test.ts
+@@ -295,9 +295,9 @@ test('Zed theme asset matches the generated projection of the neutral themes', (
+   expect(zedTheme.themes.map((theme) => [theme.name, theme.appearance])).toEqual([
+     ['Tyrian Night', 'dark'],
+     ['Tyrian Nocturne', 'dark'],
+-    ['Tyrian Night Old', 'dark'],
+     ['Tyrian Abyss', 'dark'],
+     ['Tyrian Dawn', 'light'],
++    ['Tyrian Night Old', 'dark'],
+   ]);
+ });
+ 
