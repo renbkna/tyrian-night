@@ -31,12 +31,33 @@ jobs:
           bun-version: 1.3.11
 
       - name: Verify and apply authored patch
+        id: apply
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cat .github/tyrian-redesign-patch-text/part-*.patch > /tmp/tyrian-authored.patch
+          sha256sum /tmp/tyrian-authored.patch | tee /tmp/tyrian-patch.sha256
+          git apply --index --whitespace=error-all --verbose /tmp/tyrian-authored.patch 2>&1 | tee /tmp/tyrian-apply.log
+
+      - name: Preserve publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tyrian-publication-diagnostics
+          path: |
+            /tmp/tyrian-patch.sha256
+            /tmp/tyrian-apply.log
+          retention-days: 1
+
+      - name: Require applied patch
+        if: steps.apply.outcome != 'success'
+        run: exit 1
+
+      - name: Remove publication inputs
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/tyrian-redesign-patch-text/part-*.patch > /tmp/tyrian-authored.patch
-          sha256sum /tmp/tyrian-authored.patch
-          git apply --index --whitespace=error-all /tmp/tyrian-authored.patch
           rm -rf \
             .github/tyrian-redesign-patch-text \
             .github/tyrian-redesign-patch \
