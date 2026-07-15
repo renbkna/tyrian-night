@@ -40,7 +40,7 @@ Tyrian Night is authored and audited perceptually with OKLab distance and OKLCH 
 | Variables (Soft Lilac) | `#CDC7D9` | 12.03:1 | AAA |
 | Keywords (Tyrian Violet) | `#A17ADF` | 6.00:1 | AA |
 | Types (Clear Cobalt) | `#78A5EF` | 7.94:1 | AAA |
-| Functions (Controlled Teal) | `#41B2B2` | 7.76:1 | AAA |
+| Functions (Controlled Teal) | `#50A9B1` | 7.21:1 | AAA |
 | Strings (Calm Green) | `#649C66` | 6.11:1 | AA |
 | Data Literals (Cool Rose) | `#D988B9` | 7.70:1 | AAA |
 | Regular Expressions (Amber) | `#C1A057` | 7.94:1 | AAA |

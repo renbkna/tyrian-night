@@ -5,6 +5,7 @@
       "activityBar.activeBorder",
       "editorBracketHighlight.foreground1",
       "focusBorder",
+      "checkbox.foreground",
       "inputOption.activeBorder",
       "panelTitle.activeBorder",
       "peekView.border",
@@ -33,7 +34,9 @@
       "interactive.activeCodeBorder",
       "editor.compositionBorder",
       "inlineEdit.gutterIndicator.primaryBorder",
-      "listFilterWidget.outline"
+      "listFilterWidget.outline",
+      "radio.activeForeground",
+      "settings.checkboxForeground"
     ],
     "surface.navigation": [
       "activityBar.background",
@@ -63,7 +66,8 @@
       "testing.iconQueued.retired",
       "testing.iconPassed.retired",
       "testing.iconFailed.retired",
-      "testing.iconErrored.retired"
+      "testing.iconErrored.retired",
+      "list.deemphasizedForeground"
     ],
     "surface.canvas": [
       "editor.background",
@@ -76,12 +80,16 @@
     ],
     "badges.background": [
       "badge.background",
+      "activityBarBadge.background",
+      "extensionBadge.remoteBackground",
       "chat.avatarBackground",
       "testing.coverCountBadgeBackground",
       "profileBadge.background"
     ],
     "badges.foreground": [
       "badge.foreground",
+      "activityBarBadge.foreground",
+      "extensionBadge.remoteForeground",
       "chat.avatarForeground",
       "testing.coverCountBadgeForeground",
       "profileBadge.foreground"
@@ -92,10 +100,12 @@
       "inputOption.activeForeground",
       "list.focusHighlightForeground",
       "chat.slashCommandForeground",
-      "chat.thinkingShimmer"
+      "chat.thinkingShimmer",
+      "editorHoverWidget.highlightForeground"
     ],
     "text.primary": [
       "breadcrumb.focusForeground",
+      "statusBarItem.prominentForeground",
       "dropdown.foreground",
       "editor.findMatchForeground",
       "editor.findMatchHighlightForeground",
@@ -131,7 +141,9 @@
       "settings.textInputForeground",
       "settings.numberInputForeground",
       "settings.headerForeground",
-      "commandCenter.activeForeground"
+      "commandCenter.activeForeground",
+      "editorSuggestWidget.selectedForeground",
+      "editorSuggestWidget.selectedIconForeground"
     ],
     "surface.raised": [
       "breadcrumbPicker.background",
@@ -316,7 +328,14 @@
       "activityErrorBadge.background",
       "notificationsErrorIcon.foreground",
       "notebookStatusErrorIcon.foreground",
-      "listFilterWidget.noMatchesOutline"
+      "listFilterWidget.noMatchesOutline",
+      "list.invalidItemForeground",
+      "statusBarItem.errorBackground",
+      "debugIcon.breakpointForeground",
+      "debugIcon.breakpointUnverifiedForeground",
+      "debugIcon.breakpointCurrentStackframeForeground",
+      "debugIcon.breakpointStackframeForeground",
+      "debugIcon.stopForeground"
     ],
     "status.warning": [
       "debugConsole.warningForeground",
@@ -335,7 +354,10 @@
       "activityWarningBadge.background",
       "notificationsWarningIcon.foreground",
       "notebookStatusRunningIcon.foreground",
-      "terminalSymbolIcon.flagForeground"
+      "terminalSymbolIcon.flagForeground",
+      "statusBarItem.warningBackground",
+      "statusBarItem.offlineForeground",
+      "debugIcon.pauseForeground"
     ],
     "status.success": [
       "chat.linesAddedForeground",
@@ -352,7 +374,15 @@
       "inlineEdit.gutterIndicator.successfulForeground",
       "notificationsInfoIcon.foreground",
       "notebookStatusSuccessIcon.foreground",
-      "terminalSymbolIcon.pullRequestDoneForeground"
+      "terminalSymbolIcon.pullRequestDoneForeground",
+      "debugIcon.startForeground",
+      "debugIcon.restartForeground",
+      "debugIcon.continueForeground",
+      "debugIcon.stepOverForeground",
+      "debugIcon.stepIntoForeground",
+      "debugIcon.stepOutForeground",
+      "debugIcon.stepBackForeground",
+      "editorBracketHighlight.foreground4"
     ],
     "text.secondary": [
       "descriptionForeground",
@@ -479,7 +509,8 @@
       "testing.uncoveredBranchBackground",
       "testing.uncoveredBackground",
       "testing.uncoveredBorder",
-      "testing.uncoveredGutterBackground"
+      "testing.uncoveredGutterBackground",
+      "statusBarItem.offlineBackground"
     ],
     "selection.inactive": [
       "list.inactiveSelectionBackground",
@@ -507,9 +538,7 @@
     "text.status": [
       "statusBar.foreground",
       "statusBar.noFolderForeground",
-      "statusBarItem.hoverForeground",
-      "statusBarItem.prominentForeground",
-      "statusBarItem.prominentHoverForeground"
+      "statusBarItem.hoverForeground"
     ],
     "surface.tab.active": [
       "tab.activeBackground",
@@ -519,14 +548,11 @@
     "border.tab": ["tab.border"],
     "surface.tab.inactive": ["tab.inactiveBackground", "tab.unfocusedInactiveBackground"],
     "text.onAccent": [
-      "activityBarBadge.foreground",
-      "extensionBadge.remoteForeground",
       "statusBarItem.errorForeground",
       "statusBarItem.remoteForeground",
+      "statusBarItem.remoteHoverForeground",
       "statusBarItem.warningForeground",
-      "checkbox.foreground",
-      "radio.activeForeground",
-      "settings.checkboxForeground",
+      "statusBarItem.prominentHoverForeground",
       "activityWarningBadge.foreground",
       "activityErrorBadge.foreground"
     ],
@@ -582,7 +608,8 @@
       "activityBarTop.activeBackground",
       "notebook.focusedCellBackground",
       "settings.focusedRowBackground",
-      "agentStatusIndicator.background"
+      "agentStatusIndicator.background",
+      "statusBarItem.prominentBackground"
     ],
     "effect.statusHover": [
       "statusBarItem.prominentHoverBackground",
@@ -594,7 +621,8 @@
     "emphasis": [
       "symbolIcon.arrayForeground",
       "symbolIcon.colorForeground",
-      "terminalSymbolIcon.inlineSuggestionForeground"
+      "terminalSymbolIcon.inlineSuggestionForeground",
+      "editorBracketHighlight.foreground6"
     ],
     "data": [
       "symbolIcon.booleanForeground",
@@ -625,7 +653,9 @@
       "symbolIcon.typeParameterForeground",
       "debugTokenExpression.type",
       "terminalSymbolIcon.folderForeground",
-      "terminalSymbolIcon.symbolicLinkFolderForeground"
+      "terminalSymbolIcon.symbolicLinkFolderForeground",
+      "editorBracketHighlight.foreground2",
+      "editorBracketHighlight.foreground5"
     ],
     "keyword": [
       "symbolIcon.eventForeground",
@@ -648,7 +678,8 @@
       "symbolIcon.functionForeground",
       "symbolIcon.methodForeground",
       "terminalSymbolIcon.methodForeground",
-      "terminalSymbolIcon.aliasForeground"
+      "terminalSymbolIcon.aliasForeground",
+      "editorBracketHighlight.foreground3"
     ],
     "null": ["symbolIcon.nullForeground"],
     "string": [
@@ -1003,8 +1034,6 @@
     ],
     "editor.inactive.selection.background": ["editor.inactiveSelectionBackground"],
     "editor.word.highlight.border": ["editor.wordHighlightBorder"],
-    "editor.bracket.function": ["editorBracketHighlight.foreground3"],
-    "editor.bracket.emphasis": ["editorBracketHighlight.foreground6"],
     "editor.error.border": ["editorError.border"],
     "editor.hint.border": ["editorHint.border"],
     "text.accent": [
@@ -1074,28 +1103,6 @@
       "tab.unfocusedActiveForeground",
       "tab.unfocusedInactiveForeground"
     ],
-    "chrome.titleBar.inactiveForeground": ["titleBar.inactiveForeground"],
-    "editor.bracket.secondary": [
-      "editorBracketHighlight.foreground2",
-      "editorBracketHighlight.foreground5"
-    ],
-    "debug.breakpoint": [
-      "debugIcon.breakpointForeground",
-      "debugIcon.breakpointUnverifiedForeground",
-      "debugIcon.breakpointCurrentStackframeForeground",
-      "debugIcon.breakpointStackframeForeground"
-    ],
-    "debug.stop": ["debugIcon.stopForeground"],
-    "debug.pause": ["debugIcon.pauseForeground"],
-    "debug.start": [
-      "debugIcon.startForeground",
-      "debugIcon.restartForeground",
-      "debugIcon.continueForeground",
-      "debugIcon.stepOverForeground",
-      "debugIcon.stepIntoForeground",
-      "debugIcon.stepOutForeground",
-      "debugIcon.stepBackForeground"
-    ],
-    "editor.bracket.success": ["editorBracketHighlight.foreground4"]
+    "chrome.titleBar.inactiveForeground": ["titleBar.inactiveForeground"]
   }
 }

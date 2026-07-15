@@ -3,7 +3,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isLightHex, isTransparentHex, withHexAlpha } from './colorUtils.mjs';
+import { contrastRatio } from './colorScience.mjs';
+import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
@@ -69,6 +70,7 @@ function buildZedTheme(theme) {
   const terminal = (role) => terminalColor(theme, role);
   const dimAnsi = buildDimAnsi(theme);
   const syntax = buildSyntax(theme);
+  const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
 
   return clean({
     name: theme.name,
@@ -80,7 +82,7 @@ function buildZedTheme(theme) {
         syntaxRole('function'),
         syntaxRole('string'),
         syntaxRole('data'),
-        syntaxRole('data'),
+        syntaxRole('regexp'),
       ],
       background: ui('surface.canvas'),
       'background.appearance': 'opaque',
@@ -97,10 +99,7 @@ function buildZedTheme(theme) {
       'created.background': ui('status.successBackground'),
       'created.border': ui('status.success'),
       deleted: ui('status.removed'),
-      'deleted.background': withHexAlpha(
-        ui('status.removed'),
-        isLightHex(ui('surface.canvas')) ? '18' : '20'
-      ),
+      'deleted.background': withHexAlpha(ui('status.removed'), subtleWashAlpha),
       'deleted.border': ui('status.removed'),
       'drop_target.background': ui('selection.primary'),
       'editor.active_line.background': ui('surface.hover'),
@@ -137,10 +136,7 @@ function buildZedTheme(theme) {
       'hidden.background': ui('surface.chrome'),
       'hidden.border': ui('border.tab'),
       hint: ui('editor.hint'),
-      'hint.background': withHexAlpha(
-        ui('editor.hint'),
-        isLightHex(ui('surface.canvas')) ? '18' : '20'
-      ),
+      'hint.background': withHexAlpha(ui('editor.hint'), subtleWashAlpha),
       'hint.border': ui('editor.hint'),
       icon: ui('text.chrome'),
       'icon.accent': ui('accent.primary'),
@@ -220,7 +216,7 @@ function buildZedTheme(theme) {
       'terminal.ansi.yellow': terminal('ansi.yellow'),
       'terminal.background': terminal('background'),
       'terminal.bright_foreground': terminal('ansi.brightWhite'),
-      'terminal.dim_foreground': ui('text.muted'),
+      'terminal.dim_foreground': dimAnsi.white,
       'terminal.foreground': terminal('foreground'),
       text: ui('text.primary'),
       'text.accent': ui('text.accentActive'),
@@ -242,10 +238,7 @@ function buildZedTheme(theme) {
       'version_control.deleted': ui('status.removed'),
       'version_control.modified': ui('status.modified'),
       'version_control.word_added': ui('status.successBackground'),
-      'version_control.word_deleted': withHexAlpha(
-        ui('status.removed'),
-        isLightHex(ui('surface.canvas')) ? '18' : '20'
-      ),
+      'version_control.word_deleted': withHexAlpha(ui('status.removed'), subtleWashAlpha),
     },
   });
 }
@@ -358,16 +351,49 @@ function highlight(settings) {
  * @returns {Record<string, string>}
  */
 function buildDimAnsi(theme) {
+  const background = terminalColor(theme, 'background');
+  const targetContrast = contrastRatio(uiColor(theme, 'text.muted'), background);
+  /** @param {string} role */
+  const dim = (role) =>
+    dimTerminalColor(terminalColor(theme, `ansi.${role}`), background, targetContrast);
+
   return {
-    black: terminalColor(theme, 'ansi.black'),
-    red: uiColor(theme, 'status.error'),
-    green: uiColor(theme, 'editor.hint'),
-    yellow: uiColor(theme, 'status.warning'),
-    blue: uiColor(theme, 'status.info'),
-    magenta: terminalColor(theme, 'ansi.magenta'),
-    cyan: terminalColor(theme, 'ansi.cyan'),
-    white: uiColor(theme, 'text.muted'),
+    black: dim('black'),
+    red: dim('red'),
+    green: dim('green'),
+    yellow: dim('yellow'),
+    blue: dim('blue'),
+    magenta: dim('magenta'),
+    cyan: dim('cyan'),
+    white: dim('white'),
   };
+}
+
+/**
+ * Preserve the ANSI hue while reducing it to the authored muted-text contrast envelope.
+ * Colors already below that envelope, notably ANSI black, remain unchanged.
+ * @param {string} color
+ * @param {string} background
+ * @param {number} targetContrast
+ * @returns {string}
+ */
+function dimTerminalColor(color, background, targetContrast) {
+  const opaqueColor = opaqueHex(color, background);
+
+  if (contrastRatio(opaqueColor, background) <= targetContrast) {
+    return opaqueColor;
+  }
+
+  for (let alpha = 1; alpha < 255; alpha += 1) {
+    const alphaHex = alpha.toString(16).padStart(2, '0');
+    const candidate = opaqueHex(withHexAlpha(opaqueColor, alphaHex), background);
+
+    if (contrastRatio(candidate, background) >= targetContrast) {
+      return candidate;
+    }
+  }
+
+  return opaqueColor;
 }
 
 /**
@@ -382,7 +408,7 @@ function zedBracketMatchBackground(theme) {
   }
 
   const border = uiColor(theme, 'editor.bracket.matchBorder');
-  const alpha = isLightHex(uiColor(theme, 'surface.canvas')) ? '1F' : '35';
+  const alpha = theme.appearance === 'light' ? '1F' : '35';
 
   return withHexAlpha(border, alpha);
 }

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
+import { contrastRatio } from '../scripts/colorScience.mjs';
 import { parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
@@ -410,6 +411,46 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style.syntax['selector.pseudo']?.color).toBe(source.syntax.keyword);
     expect(theme.style.syntax['property.readonly']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.type.color).toBe(source.syntax.type);
+  }
+});
+
+test('Zed collaborator accents are unique and dim ANSI colors use the muted contrast envelope', () => {
+  const generated = buildZedThemeFamily() as ZedThemeFamily;
+  const ansiNames = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+
+  for (const theme of generated.themes) {
+    const source = sourceTheme(theme.name);
+    const style = theme.style as unknown as Record<string, any>;
+    const background = source.terminal.background!;
+    const mutedContrast = contrastRatio(source.ui['text.muted']!, background);
+    const accents = [
+      source.ui['accent.primary'],
+      source.syntax.type,
+      source.syntax.function,
+      source.syntax.string,
+      source.syntax.data,
+      source.syntax.regexp,
+    ];
+
+    expect(style.accents).toEqual(accents);
+    expect(new Set(style.accents).size).toBe(accents.length);
+    expect(style['terminal.dim_foreground']).toBe(style['terminal.ansi.dim_white']);
+
+    for (const name of ansiNames) {
+      const normal = style[`terminal.ansi.${name}`] as string;
+      const dim = style[`terminal.ansi.dim_${name}`] as string;
+      const normalContrast = contrastRatio(normal, background);
+      const dimContrast = contrastRatio(dim, background);
+
+      expect(dimContrast).toBeLessThanOrEqual(normalContrast);
+      if (normalContrast <= mutedContrast) {
+        expect(dim).toBe(normal);
+      } else {
+        expect(dim).not.toBe(normal);
+        expect(dimContrast).toBeGreaterThanOrEqual(mutedContrast - 0.02);
+        expect(dimContrast).toBeLessThan(mutedContrast + 0.15);
+      }
+    }
   }
 });
 

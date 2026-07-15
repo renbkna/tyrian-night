@@ -13,6 +13,7 @@ import { syntaxColor, terminalColor, uiColor } from '../scripts/themeDefinition.
 
 const AA_TEXT_CONTRAST = 4.5;
 const AAA_TEXT_CONTRAST = 7;
+const CORE_SYNTAX_ROLES = ['keyword', 'type', 'function', 'string', 'data', 'regexp'] as const;
 
 test('the current family exposes four deliberate visual poles plus one exact legacy theme', () => {
   expect(SOURCE_THEMES.map(({ slug }) => slug)).toEqual([
@@ -171,6 +172,27 @@ test('critical adjacent roles remain distinguishable through complete dichromacy
     if (source.slug === 'tyrian-night-old') continue;
     const theme = readSourceTheme(source);
     const background = uiColor(theme, 'surface.canvas');
+
+    for (let leftIndex = 0; leftIndex < CORE_SYNTAX_ROLES.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < CORE_SYNTAX_ROLES.length; rightIndex += 1) {
+        const leftRole = CORE_SYNTAX_ROLES[leftIndex]!;
+        const rightRole = CORE_SYNTAX_ROLES[rightIndex]!;
+        const left = syntaxColor(theme, leftRole);
+        const right = syntaxColor(theme, rightRole);
+
+        for (const mode of COLOR_VISION_MODES) {
+          const delta = compareColors({
+            left: simulateColorVision(left, mode, background),
+            right: simulateColorVision(right, mode, background),
+          }).oklabDelta;
+
+          expect(delta).toBeGreaterThanOrEqual(3);
+          if (leftRole === 'function' && (rightRole === 'type' || rightRole === 'data')) {
+            expect(delta).toBeGreaterThanOrEqual(4);
+          }
+        }
+      }
+    }
 
     for (const [
       leftNamespace,

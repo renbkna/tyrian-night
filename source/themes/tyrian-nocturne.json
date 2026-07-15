@@ -78,7 +78,7 @@
   "syntax": {
     "variable": "#D4CCE5",
     "data": "#DD86C1",
-    "function": "#16BBBC",
+    "function": "#33AFB4",
     "type": "#78ABFF",
     "regexp": "#CDA448",
     "keyword": "#AB6FFF",
@@ -102,7 +102,7 @@
     "ansi.yellow": "#D5A13C",
     "ansi.blue": "#78ABFF",
     "ansi.magenta": "#AB6FFF",
-    "ansi.cyan": "#16BBBC",
+    "ansi.cyan": "#33AFB4",
     "ansi.white": "#D4CCE5",
     "ansi.brightBlack": "#80809E",
     "ansi.brightRed": "#FF9F9F",
@@ -130,8 +130,6 @@
     "editor.hover.highlight.background": "#AB6FFF26",
     "editor.inactive.selection.background": "#AB6FFF33",
     "editor.word.highlight.border": "#AB6FFF57",
-    "editor.bracket.function": "#16BBBC",
-    "editor.bracket.emphasis": "#CD8FF9",
     "editor.error.border": "#E8777A00",
     "editor.hint.border": "#60A56300",
     "text.accent": "#B6B4D0",
@@ -163,12 +161,6 @@
     "tabs.active.border.top": "#AB6FFF",
     "tabs.hover.foreground": "#D4CCE5",
     "tabs.inactive.foreground": "#80809E",
-    "chrome.titleBar.inactiveForeground": "#80809E",
-    "editor.bracket.secondary": "#78ABFF",
-    "debug.breakpoint": "#E8777A",
-    "debug.stop": "#E8777A",
-    "debug.pause": "#D5A13C",
-    "debug.start": "#60A563",
-    "editor.bracket.success": "#60A563"
+    "chrome.titleBar.inactiveForeground": "#80809E"
   }
 }

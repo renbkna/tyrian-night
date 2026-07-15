@@ -36,7 +36,7 @@ export const COLOR_VISION_MODES = Object.freeze(
  * @param {string} [background]
  * @returns {string}
  */
-export function simulateColorVision(color, mode, background = '#000000') {
+export function simulateColorVision(color, mode, background) {
   const matrix = MATRICES[mode];
   if (!matrix) throw new Error(`Unsupported color-vision mode '${mode}'.`);
 
