@@ -386,6 +386,7 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(extension.scripts.lint).toBe('oxlint src/ tsup.config.ts');
   expect(extension.scripts.build).toContain('tsup');
   expect(extension.scripts.package).toContain('bun run check');
+  expect(extension.scripts.package).toContain("mkdirSync('../../dist', { recursive: true })");
   expect(extension.scripts.package).toContain('vsce package --no-dependencies');
   expect(extension.scripts.package).toContain('--out ../../dist/tyrian-night.vsix');
   expect(extension.devDependencies['@vscode/vsce']).toBe('^3.9.1');

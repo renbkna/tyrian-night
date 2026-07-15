@@ -1421,7 +1421,7 @@ export function installRice(options = {}) {
   const layoutOnly = options.layoutOnly ?? false;
   const link = options.link ?? false;
   const runCommand = options.runCommand ?? execFileSync;
-  const commandExists = options.hasCommand ?? hasCommand;
+  const commandExists = options.hasCommand ?? (options.runCommand ? () => true : hasCommand);
   const environment = options.environment ?? (options.home === undefined ? process.env : {});
   const runtimeRoot = resolvePathIdentity(link ? root : path.join(userHome, TYRIAN_INSTALL_HOME));
 
@@ -1628,7 +1628,7 @@ export function installPlasmaLayout(options = {}) {
   );
   const apply = options.apply ?? false;
   const runCommand = options.runCommand ?? execFileSync;
-  const commandExists = options.hasCommand ?? hasCommand;
+  const commandExists = options.hasCommand ?? (options.runCommand ? () => true : hasCommand);
 
   if (apply) {
     assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Plasma layout install');

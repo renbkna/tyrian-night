@@ -98,7 +98,7 @@
     "lint": "oxlint src/ tsup.config.ts",
     "build": "node ../../scripts/islandCss.mjs && node ../../scripts/vscodePackageAssets.mjs && tsup",
     "watch": "tsup --watch",
-    "package": "bun run check && bun run build && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"
+    "package": "bun run check && bun run build && node -e \"require('node:fs').mkdirSync('../../dist', { recursive: true })\" && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

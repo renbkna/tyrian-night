@@ -67,15 +67,11 @@ test('generated asset sync never follows owned paths through symlinks', () => {
   }
 });
 
-test('generator entrypoints resolve the repository independently of cwd', () => {
+test('VS Code lane generator entrypoints resolve the repository independently of cwd', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generator-cwd-'));
 
   try {
-    for (const script of [
-      'scripts/islandCss.mjs',
-      'scripts/zedTheme.mjs',
-      'scripts/vscodeThemes.mjs',
-    ]) {
+    for (const script of ['scripts/islandCss.mjs', 'scripts/vscodeThemes.mjs']) {
       execFileSync('node', [path.resolve(script), '--check'], { cwd, stdio: 'pipe' });
     }
   } finally {
