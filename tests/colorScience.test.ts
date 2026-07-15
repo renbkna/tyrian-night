@@ -92,12 +92,12 @@ test('candidate ranking penalizes role-pair risk separately from nearest distanc
   const nocturne = readSourceTheme(
     SOURCE_THEMES.find((source) => source.slug === 'tyrian-nocturne')!
   );
-  const ranked = rankCandidates(nocturne, ['#109BB4', '#B957D0'], {
+  const ranked = rankCandidates(nocturne, ['#E09A6D', '#B957D0'], {
     neighbors: themeRoleColors(nocturne).filter((neighbor) => neighbor.role !== 'self'),
     role: 'self',
   });
 
-  expect(ranked[0]!.hex).toBe('#109BB4');
+  expect(ranked[0]!.hex).toBe('#E09A6D');
   expect(ranked.find((candidate) => candidate.hex === '#B957D0')!.pairRisk?.rule.name).toBe(
     'receiver/keyword distinction'
   );

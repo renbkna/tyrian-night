@@ -1,7 +1,7 @@
 {
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
-  "description": "Ultra-saturated Tyrian Abyss, Night, Nocturne, Night Old comparison, and Dawn themes with opt-in Linux Island UI controls",
+  "description": "Tyrian Night theme family: quiet Night, atmospheric Nocturne, electric Abyss, Dawn, and exact legacy Night Old, with opt-in Linux Island UI",
   "version": "2.1.1",
   "type": "module",
   "publisher": "renbkna",
@@ -11,17 +11,17 @@
     "README.md",
     "island/tyrian-night.css",
     "island/tyrian-nocturne.css",
-    "island/tyrian-night-old.css",
     "island/tyrian-abyss.css",
     "island/tyrian-dawn.css",
+    "island/tyrian-night-old.css",
     "assets/icon.png",
     "out/extension.js",
     "out/islandCli.js",
     "themes/tyrian-night.json",
     "themes/tyrian-nocturne.json",
-    "themes/tyrian-night-old.json",
     "themes/tyrian-abyss.json",
-    "themes/tyrian-dawn.json"
+    "themes/tyrian-dawn.json",
+    "themes/tyrian-night-old.json"
   ],
   "engines": {
     "vscode": "^1.118.0",
@@ -55,11 +55,6 @@
         "path": "./themes/tyrian-nocturne.json"
       },
       {
-        "label": "Tyrian Night Old",
-        "uiTheme": "vs-dark",
-        "path": "./themes/tyrian-night-old.json"
-      },
-      {
         "label": "Tyrian Abyss",
         "uiTheme": "vs-dark",
         "path": "./themes/tyrian-abyss.json"
@@ -68,6 +63,11 @@
         "label": "Tyrian Dawn",
         "uiTheme": "vs",
         "path": "./themes/tyrian-dawn.json"
+      },
+      {
+        "label": "Tyrian Night Old",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-night-old.json"
       }
     ],
     "commands": [

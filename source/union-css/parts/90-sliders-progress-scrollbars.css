@@ -5,7 +5,7 @@ dial {
   height: 20px;
   background-color: var(--tyrian-track-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-pill-radius);
 }
 
 busyindicator {
@@ -20,7 +20,7 @@ slider > fill,
 rangeslider > fill {
   background-color: var(--tyrian-fill-bg);
   border: 1px solid var(--tyrian-border-hover);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-pill-radius);
 }
 
 progressbar.indeterminate > track {
@@ -57,18 +57,23 @@ scrollindicator[orientation="vertical"] {
 slider:visual-focus > handle,
 rangeslider > handle:active-focus,
 selectionrectanglehandle:visual-focus {
-  border-color: var(--tyrian-focus-ring);
   outline: 2px solid var(--tyrian-focus-ring);
+}
+
+slider:hovered > handle,
+rangeslider > handle:hovered,
+scrollbar > handle:hovered,
+scrollindicator > handle:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
 }
 
 slider:pressed > handle,
 rangeslider > handle:pressed,
 scrollbar > handle:pressed,
-scrollbar > handle:hovered,
-scrollindicator > handle:pressed,
-scrollindicator > handle:hovered {
+scrollindicator > handle:pressed {
   background-color: var(--tyrian-fill-bg);
-  border-color: var(--tyrian-border-hover);
+  border-color: var(--tyrian-focus-ring);
 }
 
 slider.horizontal,
@@ -120,7 +125,11 @@ scrollbar.noninteractive {
   height: 10px;
 }
 
-dial:hovered,
+dial:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
 dial:pressed {
   background-color: var(--tyrian-control-active-bg);
   border-color: var(--tyrian-focus-ring);

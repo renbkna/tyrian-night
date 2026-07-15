@@ -8,6 +8,7 @@ menuitem {
   padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
   spacing: var(--tyrian-small-spacing);
   background: none;
+  border: 1px solid transparent;
   color: var(--tyrian-foreground);
 }
 
@@ -25,23 +26,34 @@ checkdelegate.hover-enabled,
 radiodelegate.hover-enabled,
 switchdelegate.hover-enabled,
 swipedelegate.hover-enabled {
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-radius-medium);
 }
 
 itemdelegate:highlighted,
-itemdelegate:pressed,
 checkdelegate:highlighted,
-checkdelegate:pressed,
 radiodelegate:highlighted,
-radiodelegate:pressed,
 switchdelegate:highlighted,
-switchdelegate:pressed,
 swipedelegate:highlighted,
-swipedelegate:pressed,
-menuitem:highlighted,
-menuitem:pressed {
+menuitem:highlighted {
   background-color: var(--tyrian-row-selected-bg);
-  border: 1px solid var(--tyrian-focus-ring);
+}
+
+itemdelegate:pressed,
+checkdelegate:pressed,
+radiodelegate:pressed,
+switchdelegate:pressed,
+swipedelegate:pressed,
+menuitem:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+itemdelegate:visual-focus,
+checkdelegate:visual-focus,
+radiodelegate:visual-focus,
+switchdelegate:visual-focus,
+swipedelegate:visual-focus,
+menuitem:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 itemdelegate:disabled,
@@ -86,7 +98,7 @@ menuitem > indicator {
   height: 18px;
   background-color: var(--tyrian-indicator-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-radius-small);
 }
 
 checkbox:checked > indicator,
@@ -95,7 +107,7 @@ radiobutton:checked > indicator,
 radiodelegate:checked > indicator,
 menuitem:checked > indicator {
   background-color: var(--tyrian-indicator-checked-bg);
-  border-color: var(--tyrian-border-hover);
+  border-color: var(--tyrian-focus-ring);
 }
 
 checkbox:visual-focus > indicator,
@@ -109,22 +121,22 @@ menuitem:visual-focus > indicator {
 switch > indicator,
 switchdelegate > indicator {
   width: 36px;
-  height: 12px;
+  height: 16px;
   background-color: var(--tyrian-indicator-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: 6px;
+  border-radius: var(--tyrian-pill-radius);
 }
 
 switch:checked > indicator,
 switchdelegate:checked > indicator {
   background-color: var(--tyrian-indicator-checked-bg);
-  border-color: var(--tyrian-border-hover);
+  border-color: var(--tyrian-focus-ring);
 }
 
 switch:checked > indicator > handle,
 switchdelegate:checked > indicator > handle {
   background-color: var(--tyrian-selection-text);
-  border-color: var(--tyrian-border-hover);
+  border-color: var(--tyrian-focus-ring);
 }
 
 checkbox:hovered > indicator,
@@ -154,9 +166,9 @@ menuitem.exclusive > indicator {
   border-radius: var(--tyrian-pill-radius);
 }
 
-checkbox:checked indicator,
-checkdelegate:checked indicator,
-menuitem:checked indicator {
+checkbox:checked > indicator,
+checkdelegate:checked > indicator,
+menuitem:checked > indicator {
   icon-name: "checkmark-symbolic";
   icon-color: var(--tyrian-selection-text);
 }
@@ -182,11 +194,11 @@ switchdelegate:visual-focus > indicator > handle {
   outline: 2px solid var(--tyrian-focus-ring);
 }
 
-checkbox.changed indicator,
-checkdelegate.changed indicator,
-radiobutton.changed indicator,
-radiodelegate.changed indicator,
-switch.changed indicator {
+checkbox.changed > indicator,
+checkdelegate.changed > indicator,
+radiobutton.changed > indicator,
+radiodelegate.changed > indicator,
+switch.changed > indicator {
   background-color: var(--tyrian-neutral-bg);
   border: 1px solid var(--tyrian-neutral);
 }

@@ -18,15 +18,6 @@ export const TYRIAN_THEME_CATALOG = [
     appearance: 'dark',
   },
   {
-    label: 'Tyrian Night Old',
-    slug: 'tyrian-night-old',
-    isDefault: false,
-    vscodeUiTheme: 'vs-dark',
-    islandCssFile: 'tyrian-night-old.css',
-    paletteName: 'tyrian_night_old',
-    appearance: 'dark',
-  },
-  {
     label: 'Tyrian Abyss',
     slug: 'tyrian-abyss',
     isDefault: false,
@@ -43,6 +34,15 @@ export const TYRIAN_THEME_CATALOG = [
     islandCssFile: 'tyrian-dawn.css',
     paletteName: 'tyrian_dawn',
     appearance: 'light',
+  },
+  {
+    label: 'Tyrian Night Old',
+    slug: 'tyrian-night-old',
+    isDefault: false,
+    vscodeUiTheme: 'vs-dark',
+    islandCssFile: 'tyrian-night-old.css',
+    paletteName: 'tyrian_night_old',
+    appearance: 'dark',
   },
 ] as const;
 

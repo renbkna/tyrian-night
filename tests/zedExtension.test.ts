@@ -295,9 +295,9 @@ test('Zed theme asset matches the generated projection of the neutral themes', (
   expect(zedTheme.themes.map((theme) => [theme.name, theme.appearance])).toEqual([
     ['Tyrian Night', 'dark'],
     ['Tyrian Nocturne', 'dark'],
-    ['Tyrian Night Old', 'dark'],
     ['Tyrian Abyss', 'dark'],
     ['Tyrian Dawn', 'light'],
+    ['Tyrian Night Old', 'dark'],
   ]);
 });
 

@@ -302,7 +302,7 @@ test('VS Code generation consumes the projection from the injected repository ro
     const generated = JSON.parse(nightAsset!.content) as {
       colors: Record<string, string>;
     };
-    expect(generated.colors['injectedOwner.background']).toBe('#0C0C0C');
+    expect(generated.colors['injectedOwner.background']).toBe('#0A0A0C');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

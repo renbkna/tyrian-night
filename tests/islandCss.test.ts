@@ -12,9 +12,9 @@ import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 const ISLAND_CSS_FILES = [
   'apps/vscode/island/tyrian-night.css',
   'apps/vscode/island/tyrian-nocturne.css',
-  'apps/vscode/island/tyrian-night-old.css',
   'apps/vscode/island/tyrian-abyss.css',
   'apps/vscode/island/tyrian-dawn.css',
+  'apps/vscode/island/tyrian-night-old.css',
 ];
 
 test('Island UI theme list stays in lockstep with source themes', () => {
