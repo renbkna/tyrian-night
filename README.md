@@ -51,11 +51,11 @@ Function teal and error red are separated by more than 20 units of OKLab distanc
 
 The component and workbench state language is shared across products:
 
-- Hover changes the local surface.
+- Hover changes the local surface and may add a low-chroma neutral border.
 - Pressed uses a stronger active surface.
 - Checked or selected uses a persistent low-chroma accent surface.
 - Keyboard focus adds an outline without replacing hover, press, selection, or validation state.
-- Saturated fills are reserved for primary actions, destructive actions, progress, and compact indicators.
+- Saturated accent is reserved for keyboard focus, primary actions, progress, and compact indicators; destructive actions retain semantic red.
 - Small radii belong to indicators, medium radii to controls and rows, and large radii to cards, dialogs, and popups.
 
 The VS Code projection maps these states explicitly for toolbar actions, checkboxes, radios, input options, the action bar, status-bar items, command center, chat, notebooks, tests, and current agent UI. High-contrast-only defaults such as `contrastBorder` remain unset so normal themes do not acquire duplicate outlines.

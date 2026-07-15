@@ -392,8 +392,8 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(extension.devDependencies.tsup).toBe('^8.5.1');
   expect(extension).not.toHaveProperty('dependencies');
   expect(extension).not.toHaveProperty('simple-git-hooks');
-  expect(lockfile).toContain('"": {\n      "name": "tyrian-night-workspace"');
-  expect(lockfile).toContain('"apps/vscode": {\n      "name": "tyrian-night"');
+  expect(lockfile).toMatch(/"":\s*\{\s*"name":\s*"tyrian-night-workspace"/u);
+  expect(lockfile).toMatch(/"apps\/vscode":\s*\{\s*"name":\s*"tyrian-night"/u);
   expect(lockfile).not.toContain('simple-git-hooks');
 
   expect(desktop.tyrianNight.supportedPlatforms).toEqual(['linux']);

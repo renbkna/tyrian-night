@@ -4,11 +4,11 @@
 
 The state grammar is shared across component families:
 
-- hover changes the local surface;
+- hover changes the local surface and may add a low-chroma neutral border;
 - pressed uses the stronger active surface;
 - checked or selected uses a persistent low-chroma selection surface;
 - keyboard focus adds an outline without replacing the semantic state;
-- saturated accent fills are reserved for primary actions and compact indicators.
+- the saturated accent is reserved for keyboard focus, primary actions, and compact indicators.
 
 Use the three shape tokens by component scale: `--tyrian-radius-small` for indicators, `--tyrian-radius-medium` for controls and rows, and `--tyrian-radius-large` for cards, dialogs, and popups.
 

@@ -9,6 +9,7 @@
     "badges.background",
     "badges.foreground",
     "border.default",
+    "border.hover",
     "border.tab",
     "buttons.background",
     "buttons.foreground",

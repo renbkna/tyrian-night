@@ -21,6 +21,7 @@
     "surface.field": "#1B1921",
     "surface.chrome": "#141318",
     "border.default": "#2F2B39",
+    "border.hover": "#4B4757",
     "status.error": "#D87879",
     "status.warning": "#C99D4E",
     "status.success": "#649C66",

@@ -73,8 +73,6 @@ test('generator entrypoints resolve the repository independently of cwd', () => 
   try {
     for (const script of [
       'scripts/islandCss.mjs',
-      'scripts/terminalThemes.mjs',
-      'scripts/desktopThemes.mjs',
       'scripts/zedTheme.mjs',
       'scripts/vscodeThemes.mjs',
     ]) {

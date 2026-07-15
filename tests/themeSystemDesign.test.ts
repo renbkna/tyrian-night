@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { COLOR_VISION_MODES, simulateColorVision } from '../scripts/colorVision.mjs';
 import {
   auditRolePairs,
+  colorMetrics,
   compareColors,
   contrastRatio,
   themeRoleColors,
@@ -110,6 +111,19 @@ test('supporting text stays subordinate and focus remains visible against adjace
     for (const surface of ['surface.canvas', 'surface.field', 'surface.raised', 'surface.hover']) {
       expect(contrastRatio(focus, uiColor(theme, surface))).toBeGreaterThanOrEqual(3);
     }
+
+    const field = uiColor(theme, 'surface.field');
+    const quietBorder = uiColor(theme, 'border.default');
+    const hoverBorder = uiColor(theme, 'border.hover');
+    const quietContrast = contrastRatio(quietBorder, field);
+    const hoverContrast = contrastRatio(hoverBorder, field);
+    const focusContrast = contrastRatio(focus, field);
+
+    expect(hoverContrast).toBeGreaterThan(quietContrast);
+    expect(focusContrast).toBeGreaterThan(hoverContrast);
+    expect(colorMetrics(hoverBorder, field).oklch.C).toBeLessThan(
+      colorMetrics(focus, field).oklch.C
+    );
   }
 });
 

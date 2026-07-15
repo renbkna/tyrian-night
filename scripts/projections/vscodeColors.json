@@ -274,21 +274,23 @@
       "profiles.sashBorder",
       "tab.dragAndDropBorder",
       "tab.lastPinnedBorder",
-      "sash.hoverBorder",
       "checkbox.selectBorder",
       "radio.activeBorder",
-      "toolbar.hoverOutline",
       "list.inactiveFocusOutline",
       "notebook.inactiveFocusedCellBorder",
       "notebook.inactiveSelectedCellBorder",
       "notebook.selectedCellBorder",
       "tab.unfocusedActiveBorder",
       "tab.unfocusedActiveBorderTop",
-      "tab.hoverBorder",
-      "tab.unfocusedHoverBorder",
       "agentSessionSelectedBadge.border",
       "simpleFindWidget.sashBorder",
       "inlineEdit.gutterIndicator.secondaryBorder"
+    ],
+    "border.hover": [
+      "sash.hoverBorder",
+      "toolbar.hoverOutline",
+      "tab.hoverBorder",
+      "tab.unfocusedHoverBorder"
     ],
     "status.error": [
       "chat.linesRemovedForeground",

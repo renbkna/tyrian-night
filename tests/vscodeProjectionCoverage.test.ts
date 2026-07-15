@@ -89,19 +89,22 @@ const FOCUS_OUTLINES = [
   'inlineChatInput.focusBorder',
 ] as const;
 
-const QUIET_SECONDARY_OUTLINES = [
+const HOVER_OUTLINES = [
   'sash.hoverBorder',
+  'toolbar.hoverOutline',
+  'tab.hoverBorder',
+  'tab.unfocusedHoverBorder',
+] as const;
+
+const QUIET_SECONDARY_OUTLINES = [
   'checkbox.selectBorder',
   'radio.activeBorder',
-  'toolbar.hoverOutline',
   'list.inactiveFocusOutline',
   'notebook.inactiveFocusedCellBorder',
   'notebook.inactiveSelectedCellBorder',
   'notebook.selectedCellBorder',
   'tab.unfocusedActiveBorder',
   'tab.unfocusedActiveBorderTop',
-  'tab.hoverBorder',
-  'tab.unfocusedHoverBorder',
   'agentSessionSelectedBadge.border',
   'simpleFindWidget.sashBorder',
   'inlineEdit.gutterIndicator.secondaryBorder',
@@ -121,10 +124,14 @@ test('VS Code projection reserves maximum-accent outlines for focus and primary 
     const theme = readSourceTheme(source);
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
     const focus = uiColor(theme, 'accent.primary');
+    const hover = uiColor(theme, 'border.hover');
     const quiet = uiColor(theme, 'border.default');
 
     expect(focus).not.toBe(quiet);
+    expect(hover).not.toBe(quiet);
+    expect(hover).not.toBe(focus);
     for (const key of FOCUS_OUTLINES) expect(projected.colors[key]).toBe(focus);
+    for (const key of HOVER_OUTLINES) expect(projected.colors[key]).toBe(hover);
     for (const key of QUIET_SECONDARY_OUTLINES) expect(projected.colors[key]).toBe(quiet);
   }
 });

@@ -25,6 +25,7 @@ const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)
  *   surfaceHigh: string;
  *   surfaceHighest: string;
  *   border: string;
+ *   borderHover: string;
  *   muted: string;
  *   accent: string;
  *   accentHover: string;
@@ -314,6 +315,7 @@ function buildDesktopPalette(theme) {
     surfaceHigh: desktopColor(theme, 'ui:selection.inactive'),
     surfaceHighest: desktopColor(theme, 'ui:selection.active'),
     border: desktopColor(theme, 'ui:border.default'),
+    borderHover: desktopColor(theme, 'ui:border.hover'),
     muted: desktopColor(theme, 'ui:editor.lineNumber.normal'),
     accent: desktopColor(theme, 'ui:accent.primary'),
     accentHover: desktopColor(theme, 'ui:buttons.hover.background'),
@@ -697,7 +699,7 @@ function buildUnionCssTokens(palette) {
     ['--tyrian-track-bg', 'var(--tyrian-surface-low)'],
     ['--tyrian-fill-bg', 'var(--tyrian-accent)'],
     ['--tyrian-border-color', 'var(--tyrian-border)'],
-    ['--tyrian-border-hover', 'var(--tyrian-accent-hover)'],
+    ['--tyrian-border-hover', palette.borderHover],
     ['--tyrian-focus-ring', 'var(--tyrian-accent)'],
     ['--tyrian-overlay-modal-bg', 'rgba(0, 0, 0, 0.35)'],
     ['--tyrian-overlay-modeless-bg', 'rgba(0, 0, 0, 0.18)'],
