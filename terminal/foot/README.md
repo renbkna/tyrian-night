@@ -12,6 +12,7 @@ Generated themes live in `terminal/foot/themes/`:
 
 - `tyrian-night.ini`
 - `tyrian-nocturne.ini`
+- `tyrian-pastel.ini`
 - `tyrian-night-old.ini`
 - `tyrian-abyss.ini`
 - `tyrian-dawn.ini`

@@ -11,6 +11,7 @@
     "README.md",
     "island/tyrian-night.css",
     "island/tyrian-nocturne.css",
+    "island/tyrian-pastel.css",
     "island/tyrian-abyss.css",
     "island/tyrian-dawn.css",
     "island/tyrian-night-old.css",
@@ -19,6 +20,7 @@
     "out/islandCli.js",
     "themes/tyrian-night.json",
     "themes/tyrian-nocturne.json",
+    "themes/tyrian-pastel.json",
     "themes/tyrian-abyss.json",
     "themes/tyrian-dawn.json",
     "themes/tyrian-night-old.json"
@@ -53,6 +55,11 @@
         "label": "Tyrian Nocturne",
         "uiTheme": "vs-dark",
         "path": "./themes/tyrian-nocturne.json"
+      },
+      {
+        "label": "Tyrian Pastel",
+        "uiTheme": "vs-dark",
+        "path": "./themes/tyrian-pastel.json"
       },
       {
         "label": "Tyrian Abyss",

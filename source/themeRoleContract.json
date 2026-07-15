@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "brackets": ["depth1", "depth2", "depth3", "depth4", "depth5", "depth6"],
   "ui": [
     "accent.cursor",
     "accent.cursorText",
@@ -117,6 +118,7 @@
     "buttons.secondary.foreground",
     "buttons.secondary.hover.background",
     "chrome.statusBar.debuggingBackground",
+    "chrome.statusBar.offlineForeground",
     "chrome.titleBar.inactiveForeground",
     "command.palette.title.background",
     "debug.icon.breakpointDisabledForeground",

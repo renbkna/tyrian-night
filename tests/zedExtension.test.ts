@@ -3,14 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { expect, test } from 'bun:test';
-
 import { contrastRatio } from '../scripts/colorScience.mjs';
 import { parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
+import { REQUIRED_THEME_ROLES, bracketColor } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 type ThemeDefinition = {
   appearance: 'dark' | 'light';
+  brackets: Record<string, string>;
   name: string;
   syntax: Record<string, string>;
   terminal: Record<string, string>;
@@ -296,6 +297,7 @@ test('Zed theme asset matches the generated projection of the neutral themes', (
   expect(zedTheme.themes.map((theme) => [theme.name, theme.appearance])).toEqual([
     ['Tyrian Night', 'dark'],
     ['Tyrian Nocturne', 'dark'],
+    ['Tyrian Pastel', 'dark'],
     ['Tyrian Abyss', 'dark'],
     ['Tyrian Dawn', 'light'],
     ['Tyrian Night Old', 'dark'],
@@ -321,17 +323,22 @@ test('Zed generation resolves theme membership and identity from the injected ro
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
-    const theme = readJson<ThemeDefinition>(themePath);
+    const theme = readJson<{
+      name: string;
+      pigments: Record<string, string>;
+    }>(themePath);
     theme.name = 'Injected Zed Night';
-    theme.ui['surface.canvas'] = '#112233';
-    theme.syntax.function = '#445566';
-    theme.terminal['ansi.red'] = '#778899';
+    theme.pigments['ui:surface.canvas'] = '#112233';
+    theme.pigments['syntax:function'] = '#445566';
+    theme.pigments['brackets:depth1'] = '#667788';
+    theme.pigments['ui:status.error'] = '#778899';
     fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
 
     const generated = buildZedThemeFamily(root) as ZedThemeFamily;
     expect(generated.themes[0]?.name).toBe('Injected Zed Night');
     expect(generated.themes[0]?.style['editor.background']).toBe('#112233');
     expect(generated.themes[0]?.style.syntax.function?.color).toBe('#445566');
+    expect(generated.themes[0]?.style.accents[0]).toBe('#667788');
     expect(generated.themes[0]?.style['terminal.ansi.red']).toBe('#778899');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -379,7 +386,7 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style['search.active_match_background']).toBe(source.ui['search.match.active']);
     expect(theme.style['search.match_background']).toBe(source.ui['search.match.passive']);
     expect(theme.style.players[0]?.cursor).toBe(source.ui['accent.cursor']);
-    expect(theme.style.accents[0]).toBe(source.ui['accent.primary']);
+    expect(theme.style.accents[0]).toBe(bracketColor(source, 'depth1'));
     expect(theme.style['pane.focused_border']).toBe(source.ui['accent.primary']);
     expect(theme.style['panel.focused_border']).toBe(source.ui['accent.primary']);
     expect(theme.style.predictive).toBe(source.ui['text.hint']);
@@ -391,8 +398,10 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
       new RegExp(`^${source.ui['status.removed'].slice(0, 7)}`, 'u')
     );
     expect(theme.style.syntax.function.color).toBe(source.syntax.function);
+    expect(theme.style.syntax.function.font_weight).toBe(500);
     expect(theme.style.syntax.constructor.color).toBe(source.syntax.type);
     expect(theme.style.syntax['function.builtin']?.color).toBe(source.syntax.function);
+    expect(theme.style.syntax['function.builtin']?.font_weight).toBe(500);
     expect(theme.style.syntax.hint?.color).toBe(source.ui['text.hint']);
     expect(theme.style.syntax.hint?.font_style).toBe('italic');
     expect(theme.style.syntax['markup.quote']?.color).toBe(source.syntax.string);
@@ -414,7 +423,7 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
   }
 });
 
-test('Zed collaborator accents are unique and dim ANSI colors use the muted contrast envelope', () => {
+test('Zed bracket accents are exact source projections and dim ANSI colors use the muted contrast envelope', () => {
   const generated = buildZedThemeFamily() as ZedThemeFamily;
   const ansiNames = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
 
@@ -423,17 +432,10 @@ test('Zed collaborator accents are unique and dim ANSI colors use the muted cont
     const style = theme.style as unknown as Record<string, any>;
     const background = source.terminal.background!;
     const mutedContrast = contrastRatio(source.ui['text.muted']!, background);
-    const accents = [
-      source.ui['accent.primary'],
-      source.syntax.type,
-      source.syntax.function,
-      source.syntax.string,
-      source.syntax.data,
-      source.syntax.regexp,
-    ];
+    const sourceAccents = REQUIRED_THEME_ROLES.brackets.map((role) => bracketColor(source, role));
+    const accents = style.accents as string[];
 
-    expect(style.accents).toEqual(accents);
-    expect(new Set(style.accents).size).toBe(accents.length);
+    expect(accents).toEqual(sourceAccents);
     expect(style['terminal.dim_foreground']).toBe(style['terminal.ansi.dim_white']);
 
     for (const name of ansiNames) {

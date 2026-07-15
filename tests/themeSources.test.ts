@@ -8,9 +8,16 @@ import {
   getTerminalDefaultThemeSource,
   loadThemeRepository,
   normalizeThemeCatalog,
+  readSourceTheme,
+  readSourceThemeRecipe,
   readThemeSources,
 } from '../scripts/themeSources.mjs';
-import { REQUIRED_THEME_ROLES, loadVscodeProjectionContext } from '../scripts/themeDefinition.mjs';
+import {
+  loadThemeDefinitionContext,
+  loadVscodeProjectionContext,
+  themePigmentOwner,
+  validateThemeRecipe,
+} from '../scripts/themeDefinition.mjs';
 import { collectVscodeThemeAssets } from '../scripts/vscodeThemes.mjs';
 
 const VALID_CATALOG = [
@@ -22,6 +29,7 @@ const VALID_IDENTITIES = {
   'tyrian-test-dark': { appearance: 'dark', name: 'Tyrian Test Dark' },
   'tyrian-test-light': { appearance: 'light', name: 'Tyrian Test Light' },
 } as const;
+const DEFAULT_DEFINITION = loadThemeDefinitionContext();
 
 test('theme catalog derives identity and appearance from theme sources', () => {
   const themes = normalizeThemeCatalog(VALID_CATALOG, readIdentity);
@@ -103,10 +111,7 @@ test('theme source reader resolves catalog and identity from the injected reposi
 
   try {
     fs.mkdirSync(path.join(root, 'source/themes'), { recursive: true });
-    fs.copyFileSync(
-      'source/themeRoleContract.json',
-      path.join(root, 'source/themeRoleContract.json')
-    );
+    copyThemeContracts(root);
     fs.writeFileSync(
       path.join(root, 'source/themeCatalog.json'),
       `${JSON.stringify(VALID_CATALOG)}\n`
@@ -132,10 +137,7 @@ test('theme catalog is the exact authority for source JSON membership', () => {
 
   try {
     fs.mkdirSync(path.join(root, 'source/themes'), { recursive: true });
-    fs.copyFileSync(
-      'source/themeRoleContract.json',
-      path.join(root, 'source/themeRoleContract.json')
-    );
+    copyThemeContracts(root);
     fs.writeFileSync(
       path.join(root, 'source/themeCatalog.json'),
       `${JSON.stringify(VALID_CATALOG)}\n`
@@ -174,18 +176,78 @@ test('injected repository role membership is validated by that repository contex
     for (const fileName of fs.readdirSync(path.join(root, 'source/themes'))) {
       const themePath = path.join(root, 'source/themes', fileName);
       const theme = readJson<Record<string, unknown>>(themePath) as {
-        ui: Record<string, string>;
+        pigments: Record<string, string>;
       };
-      theme.ui['injected.owner.role'] = '#123456';
+      theme.pigments['ui:injected.owner.role'] = '#123456';
       fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
     }
 
     const repository = loadThemeRepository(root);
     expect(repository.definition.requiredThemeRoles.ui).toContain('injected.owner.role');
-    expect(repository.sources).toHaveLength(5);
+    expect(repository.sources).toHaveLength(6);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('source recipes own pigments once and resolve declared alpha projections', () => {
+  const repository = loadThemeRepository();
+  const source = repository.sources.find(({ slug }) => slug === 'tyrian-nocturne');
+  expect(source).toBeDefined();
+  const recipe = readSourceThemeRecipe(source!, repository.root, repository.definition);
+  const theme = readSourceTheme(source!, repository.root, repository.definition);
+
+  expect(recipe).not.toHaveProperty('ui');
+  expect(recipe.pigments['ui:status.success']).toBe('#9D769F');
+  expect(recipe.opacities['ui:status.successBackground']).toBe('1C');
+  expect(theme.ui['status.successBackground']).toBe('#9D769F1C');
+  expect(themePigmentOwner(repository.definition, recipe.bindingProfile, 'syntax:function')).toBe(
+    'syntax:function'
+  );
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:diff.editor.inserted.text.background'
+    )
+  ).toBe('ui:status.success');
+});
+
+test('color bindings contain only aliases and alpha-derived exceptions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-color-bindings-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const bindingsPath = path.join(root, 'source/themeColorBindings.json');
+    const bindings = readJson<any>(bindingsPath);
+    bindings.profiles.current.aliases['syntax:function'] = 'syntax:function';
+    fs.writeFileSync(bindingsPath, `${JSON.stringify(bindings)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow("has redundant alias 'syntax:function'");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('theme recipe validation rejects split or incomplete color authority', () => {
+  const source = loadThemeRepository().sources.find(({ slug }) => slug === 'tyrian-night');
+  expect(source).toBeDefined();
+  const recipe = readSourceThemeRecipe(source!);
+
+  const split = structuredClone(recipe) as any;
+  split.ui = { 'surface.canvas': '#000000' };
+  expect(() => validateThemeRecipe(split, source!.slug)).toThrow('unsupported fields: ui');
+
+  const missing = structuredClone(recipe);
+  delete missing.pigments['syntax:function'];
+  expect(() => validateThemeRecipe(missing, source!.slug)).toThrow(
+    'invalid pigments; missing: syntax:function'
+  );
+
+  const unknownProfile = structuredClone(recipe);
+  unknownProfile.bindingProfile = 'shadow-authority';
+  expect(() => validateThemeRecipe(unknownProfile, source!.slug)).toThrow(
+    'unknown binding profile'
+  );
 });
 
 test('VS Code projection rejects invalid shapes and competing consumer ownership', () => {
@@ -203,9 +265,9 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
       [
         'schema version',
         (projection) => {
-          projection.schemaVersion = 2;
+          projection.schemaVersion = 1;
         },
-        'schemaVersion 1',
+        'schemaVersion 3',
       ],
       [
         'top-level namespace',
@@ -248,6 +310,13 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
           projection.ui['surface.navigation'].push('focusBorder');
         },
         "color 'focusBorder' has multiple owners",
+      ],
+      [
+        'contrast color owner',
+        (projection) => {
+          projection.contrastPairs[0].foreground = 'unowned.foreground';
+        },
+        "references unowned color 'unowned.foreground'",
       ],
       [
         'grammar scope owner',
@@ -302,7 +371,7 @@ test('VS Code generation consumes the projection from the injected repository ro
     const generated = JSON.parse(nightAsset!.content) as {
       colors: Record<string, string>;
     };
-    expect(generated.colors['injectedOwner.background']).toBe('#0A0A0C');
+    expect(generated.colors['injectedOwner.background']).toBe('#0F0E13');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -317,14 +386,37 @@ function readJson<T>(filePath: string): T {
 }
 
 function definitionFor(identity: { appearance: 'dark' | 'light'; name: string }) {
-  const roles = (names: readonly string[]) =>
-    Object.fromEntries(names.map((name) => [name, '#123456']));
+  const profile = DEFAULT_DEFINITION.colorBindingProfiles.current;
+  const bindings = Object.values(profile.bindings).flatMap((roles) => Object.values(roles));
+  const pigments = Object.fromEntries(
+    [
+      ...new Set(
+        bindings.map((binding) => (typeof binding === 'string' ? binding : binding.pigment))
+      ),
+    ]
+      .toSorted()
+      .map((pigment) => [pigment, '#123456'])
+  );
+  const opacities = Object.fromEntries(
+    bindings
+      .filter(
+        (binding): binding is { opacity: string; pigment: string } => typeof binding === 'object'
+      )
+      .map((binding) => binding.opacity)
+      .toSorted()
+      .map((opacity) => [opacity, 'FF'])
+  );
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     ...identity,
-    ui: roles(REQUIRED_THEME_ROLES.ui),
-    syntax: roles(REQUIRED_THEME_ROLES.syntax),
-    terminal: roles(REQUIRED_THEME_ROLES.terminal),
-    vscode: roles(REQUIRED_THEME_ROLES.vscode),
+    bindingProfile: 'current',
+    pigments,
+    opacities,
   };
+}
+
+function copyThemeContracts(root: string) {
+  for (const fileName of ['themeRoleContract.json', 'themeColorBindings.json']) {
+    fs.copyFileSync(path.join('source', fileName), path.join(root, 'source', fileName));
+  }
 }

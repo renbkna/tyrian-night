@@ -82,7 +82,8 @@ const ISLAND_CSS_THEME_TOKENS = {
   },
   'tyrian-night': neutralDarkIslandTokens(),
   'tyrian-night-old': neutralDarkIslandTokens(),
-  'tyrian-nocturne': {
+  'tyrian-nocturne': neutralDarkIslandTokens(),
+  'tyrian-pastel': {
     '--islands-breathe-rest': 'drop-shadow(0 0 2px rgba(var(--islands-accent-glow-rgb), 0))',
     '--islands-breathe-peak': 'drop-shadow(0 0 9px rgba(var(--islands-accent-glow-rgb), 0.36))',
     '--islands-aurora-primary': 'rgba(var(--islands-accent-glow-rgb), 0.38)',

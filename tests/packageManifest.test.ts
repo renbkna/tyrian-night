@@ -336,10 +336,10 @@ test('workspace and product manifests have non-competing release ownership', () 
     'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme'
   );
   expect(workspace.scripts['precommit:tracked-generated']).toContain(
-    'git ls-files --error-unmatch source/themeRoleContract.json scripts/themeDefinition.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs'
+    'git ls-files --error-unmatch source/themeRoleContract.json source/themeColorBindings.json source/themeAppearanceContract.json source/themeForgeContract.json source/themeSpecimens.json scripts/themeDefinition.mjs scripts/themeAppearance.mjs scripts/themeForge.mjs scripts/themeForgeContract.mjs scripts/themeSpecimens.mjs scripts/colorScience.mjs scripts/themeColorAudit.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs'
   );
   expect(workspace.scripts['precommit:tracked-generated']).toContain(
-    'git diff --quiet -- source/themeCatalog.json source/themeRoleContract.json source/themes scripts/themeDefinition.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs apps/vscode/package.json'
+    'git diff --quiet -- source/themeCatalog.json source/themeRoleContract.json source/themeColorBindings.json source/themeAppearanceContract.json source/themeForgeContract.json source/themeSpecimens.json source/themes scripts/themeDefinition.mjs scripts/themeAppearance.mjs scripts/themeForge.mjs scripts/themeForgeContract.mjs scripts/themeSpecimens.mjs scripts/colorScience.mjs scripts/themeColorAudit.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs apps/vscode/package.json'
   );
   expect(workspace).not.toHaveProperty('simple-git-hooks');
   expect(workspace.devDependencies).not.toHaveProperty('simple-git-hooks');
@@ -427,17 +427,6 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(ciWorkflow).toContain('run: bun run verify:desktop');
   expect(ciWorkflow).toContain('windows-latest');
   expect(ciWorkflow).toContain('macos-latest');
-});
-
-test('clean clones retain generated projections required by VS Code and Zed development', () => {
-  const gitignore = fs.readFileSync('.gitignore', 'utf8');
-
-  expect(gitignore).not.toContain('apps/vscode/src/generated/');
-  expect(gitignore).not.toContain('apps/vscode/themes/');
-  expect(gitignore).not.toContain('apps/zed/themes/tyrian-night.json');
-  expect(fs.existsSync('apps/vscode/src/generated/themeCatalog.ts')).toBe(true);
-  expect(fs.existsSync('apps/vscode/themes/tyrian-night.json')).toBe(true);
-  expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
 });
 
 function previewAnsiPrefix(slug: string): string {

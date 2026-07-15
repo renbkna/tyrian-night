@@ -18,6 +18,15 @@ export const TYRIAN_THEME_CATALOG = [
     appearance: 'dark',
   },
   {
+    label: 'Tyrian Pastel',
+    slug: 'tyrian-pastel',
+    isDefault: false,
+    vscodeUiTheme: 'vs-dark',
+    islandCssFile: 'tyrian-pastel.css',
+    paletteName: 'tyrian_pastel',
+    appearance: 'dark',
+  },
+  {
     label: 'Tyrian Abyss',
     slug: 'tyrian-abyss',
     isDefault: false,

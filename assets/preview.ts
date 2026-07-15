@@ -6,9 +6,10 @@
  * types, functions, classes, diagnostics, strings, regex, and markdown text.
  */
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { loadThemeRepository, readSourceTheme } from '../scripts/themeSources.mjs';
 
 // TODO(theme): check comments, notes, and AI ghost text against Monaspace Radon.
 // NOTE: JSON property names should read like attributes, not function calls.
@@ -72,27 +73,24 @@ export class ThemePreviewController {
   constructor(private readonly root = process.cwd()) {}
 
   async readThemeManifest(mode: ThemeMode): Promise<ReadonlyArray<ThemeToken>> {
-    const sourceFile = path.join(this.root, 'source', 'themes', `tyrian-${mode}.json`);
-    const payload = await fs.readFile(sourceFile, 'utf8');
-    const theme = JSON.parse(payload) as {
-      appearance: 'dark' | 'light';
-      name: string;
-      syntax: Record<string, `#${string}`>;
-      terminal: Record<string, `#${string}`>;
-    };
+    const repository = loadThemeRepository(this.root);
+    const slug = `tyrian-${mode}`;
+    const source = repository.sources.find((candidate) => candidate.slug === slug);
+    if (!source) throw new Error(`Unknown preview theme: ${slug}`);
+    const theme = readSourceTheme(source, repository.root, repository.definition);
 
     if (!theme.name.includes('Tyrian') || !['dark', 'light'].includes(theme.appearance)) {
       throw new Error(`Unexpected theme name: ${theme.name}`);
     }
 
-    const tokens = Object.entries(theme.syntax).map(([scope, foreground]) => ({
+    const tokens: ThemeToken[] = Object.entries(theme.syntax).map(([scope, foreground]) => ({
       scope,
-      foreground,
+      foreground: foreground as `#${string}`,
     }));
     const ansi = ANSI_ROLES.map((role) => {
       const color = theme.terminal[role];
       if (!color) throw new Error(`Theme ${theme.name} is missing terminal role ${role}.`);
-      return color;
+      return color as `#${string}`;
     });
     this.#cache.set(mode, {
       ansi,

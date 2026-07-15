@@ -1,256 +1,159 @@
 #!/usr/bin/env node
 // @ts-check
 
-import { parseArgs as parseNodeArgs } from 'node:util';
+import { parseArgs } from 'node:util';
 
 import {
-  auditRolePairs,
-  auditSampleSequence,
-  auditThemeRoles,
-  compareColors,
-  colorMetrics,
-  rankCandidates,
-  themeRoleColor,
-  themeRoleColors,
-} from './colorScience.mjs';
+  auditThemeAppearance,
+  readThemeAppearanceContract,
+  reportThemeApca,
+} from './themeAppearance.mjs';
+import { proposeThemePalette } from './themeForge.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
-import { themeColor } from './themeDefinition.mjs';
 
-const args = parseAuditArgs(process.argv.slice(2));
-const repository = loadThemeRepository();
-const themes = repository.sources.map((source) =>
-  readSourceTheme(source, repository.root, repository.definition)
-);
+const { values } = parseArgs({
+  allowPositionals: false,
+  options: {
+    help: { short: 'h', type: 'boolean' },
+    json: { type: 'boolean' },
+    limit: { short: 'n', type: 'string' },
+    move: { short: 'm', type: 'string' },
+    roles: { short: 'r', type: 'string' },
+    theme: { short: 't', type: 'string' },
+  },
+  strict: true,
+});
 
-if (args.help) {
+if (values.help) {
   printHelp();
-} else if (args.candidates.length > 0) {
-  printCandidateRanking();
-} else if (args.role) {
-  printRoleAudit(args.role);
+} else if (values.roles) {
+  printProposals();
 } else {
-  printThemeAudit();
+  printAudit();
 }
 
-function printThemeAudit() {
-  for (const theme of themes) {
-    console.log(`\n${theme.name}`);
-    console.log('role     hex      okL   okC    okh    hT    hC    cM contrast nearest');
+function printAudit() {
+  const repository = loadThemeRepository();
+  const contract = readThemeAppearanceContract();
+  const sources = values.theme
+    ? repository.sources.filter((source) => source.slug === values.theme)
+    : repository.sources;
+  if (sources.length === 0) throw new Error(`Unknown source theme '${values.theme}'.`);
 
-    for (const audit of auditThemeRoles(theme)) {
-      console.log(
-        [
-          audit.color.role.padEnd(8),
-          audit.color.hex.padEnd(8),
-          formatNumber(audit.oklch.L * 100, 1).padStart(5),
-          formatNumber(audit.oklch.C, 3).padStart(6),
-          formatNumber(audit.oklch.h, 1).padStart(6),
-          formatNumber(audit.metrics.hct.tone, 1).padStart(5),
-          formatNumber(audit.metrics.hct.chroma, 1).padStart(5),
-          formatNumber(audit.metrics.cam16.m, 1).padStart(5),
-          formatNumber(audit.contrast, 2).padStart(8),
-          `${audit.nearest.role}:${formatNumber(audit.nearest.delta, 1)}`,
-        ].join(' ')
-      );
-    }
-
-    printPairRisks(theme);
-    printSampleSequence(theme);
-  }
-}
-
-/**
- * @param {string} role
- */
-function printRoleAudit(role) {
-  const rows = themes.map((theme) => {
-    const hex = themeRoleColor(theme, role);
-    const metrics = colorMetrics(hex, themeColor(theme, 'ui:surface.canvas'));
-    const roleNeighbors = themeRoleColors(theme).filter((neighbor) => neighbor.role !== role);
-    const nearest = rankCandidates(theme, [hex], { neighbors: roleNeighbors })[0].nearest;
-
-    return { hex, metrics, nearest, theme };
+  const reports = sources.map((source) => {
+    const theme = readSourceTheme(source, repository.root, repository.definition);
+    const violations = auditThemeAppearance(theme, source.slug, contract);
+    const apca = reportThemeApca(theme, source.slug, contract);
+    return { apca, source, violations };
   });
-
-  console.log(`\nRole: ${role}`);
-  console.log('theme              hex      okL   okC    okh    hT    hC    cM contrast nearest');
-  for (const row of rows) {
-    console.log(
-      [
-        row.theme.name.padEnd(18),
-        row.hex.padEnd(8),
-        formatNumber(row.metrics.oklch.L * 100, 1).padStart(5),
-        formatNumber(row.metrics.oklch.C, 3).padStart(6),
-        formatNumber(row.metrics.oklch.h, 1).padStart(6),
-        formatNumber(row.metrics.hct.tone, 1).padStart(5),
-        formatNumber(row.metrics.hct.chroma, 1).padStart(5),
-        formatNumber(row.metrics.cam16.m, 1).padStart(5),
-        formatNumber(row.metrics.contrast ?? 0, 2).padStart(8),
-        `${row.nearest.role}:${formatNumber(row.nearest.delta, 1)}`,
-      ].join(' ')
-    );
-  }
-
-  console.log('\nCross-theme same-role OKLab deltas');
-  for (let leftIndex = 0; leftIndex < rows.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < rows.length; rightIndex += 1) {
-      const left = rows[leftIndex];
-      const right = rows[rightIndex];
-      const comparison = compareColors({ left: left.hex, right: right.hex });
-
-      console.log(
-        `${left.theme.name} -> ${right.theme.name}: ${formatNumber(comparison.oklabDelta, 1)}`
-      );
+  if (values.json) {
+    console.log(JSON.stringify(reports, null, 2));
+  } else {
+    for (const report of reports) {
+      console.log(`\n${report.source.label}: ${report.violations.length === 0 ? 'PASS' : 'FAIL'}`);
+      for (const violation of report.violations) {
+        const roles = violation.roles?.join(' / ') ?? violation.role ?? '';
+        const mode = violation.mode ? ` (${violation.mode})` : '';
+        console.log(
+          `  ${violation.constraint}: ${violation.kind}${mode} ${roles} ` +
+            `${formatNumber(violation.actual ?? violation.actualChroma ?? violation.actualLightness)}`
+        );
+      }
+      if (report.apca.warnings.length > 0) {
+        console.log(`  APCA advisory warnings: ${report.apca.warnings.length}`);
+      }
     }
   }
-
-  console.log('\nPair risks');
-  for (const theme of themes) {
-    const risks = auditRolePairs(themeRoleColors(theme)).filter(
-      (risk) => risk.left.role === role || risk.right.role === role
-    );
-
-    if (risks.length > 0) {
-      console.log(`${theme.name}: ${formatRisks(risks)}`);
-    }
-  }
+  if (reports.some((report) => report.violations.length > 0)) process.exitCode = 1;
 }
 
-function printCandidateRanking() {
-  const role = args.role ?? 'candidate';
-
-  for (const theme of themes) {
-    const neighbors = themeRoleColors(theme).filter((neighbor) => neighbor.role !== role);
-    const ranked = rankCandidates(theme, args.candidates, { neighbors, role }).slice(0, args.limit);
-
-    console.log(`\n${theme.name} candidates for ${role}`);
-    console.log('hex      score  okL   okC    okh    hT    hC    cM contrast nearest risk');
-    for (const candidate of ranked) {
-      console.log(
-        [
-          candidate.hex.padEnd(8),
-          formatNumber(candidate.score, 1).padStart(6),
-          formatNumber(candidate.oklch.L * 100, 1).padStart(5),
-          formatNumber(candidate.oklch.C, 3).padStart(6),
-          formatNumber(candidate.oklch.h, 1).padStart(6),
-          formatNumber(candidate.metrics.hct.tone, 1).padStart(5),
-          formatNumber(candidate.metrics.hct.chroma, 1).padStart(5),
-          formatNumber(candidate.metrics.cam16.m, 1).padStart(5),
-          formatNumber(candidate.contrast, 2).padStart(8),
-          `${candidate.nearest.role}:${formatNumber(candidate.nearest.delta, 1)}`,
-          candidate.pairRisk ? formatRisk(candidate.pairRisk) : '-',
-        ].join(' ')
-      );
-    }
-  }
-}
-
-/**
- * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- */
-function printPairRisks(theme) {
-  const risks = auditRolePairs(themeRoleColors(theme));
-
-  if (risks.length === 0) {
+function printProposals() {
+  const theme = values.theme ?? 'tyrian-night';
+  const roles = values.roles
+    ?.split(',')
+    .map((role) => role.trim())
+    .filter(Boolean);
+  if (!roles || roles.length === 0) throw new Error('Color proposals require --roles.');
+  const limit = values.limit === undefined ? undefined : Number(values.limit);
+  const result = proposeThemePalette(theme, roles, {
+    limit,
+    move: values.move,
+  });
+  if (result.status === 'no-contract-valid-proposal') process.exitCode = 1;
+  if (values.json) {
+    console.log(JSON.stringify(result, jsonNumbers, 2));
     return;
   }
 
-  console.log(`pair risks ${formatRisks(risks)}`);
-}
+  console.log(`\n${result.theme} ${result.requestedRoles.join(', ')}`);
+  for (const owner of result.owners) {
+    console.log(
+      `owner: ${owner.pigment} (${owner.current}); projects to: ${owner.ownedRoles.join(', ')}`
+    );
+  }
+  console.log(`move: ${result.move}`);
+  console.log(`claim: ${result.certificate.claim}`);
+  console.log(
+    `corpus: ${result.certificate.corpus.set} ${result.certificate.corpus.hash.slice(0, 12)} ` +
+      `(${result.certificate.corpus.coverage.witnessedPairCount}/${result.certificate.corpus.coverage.requiredPairCount} required pairs)`
+  );
+  if (result.status === 'no-contract-valid-proposal') {
+    console.error(
+      `no contract-valid proposal: ${result.reason}; ` +
+        `${result.baseline.violations.length} baseline violation(s), ` +
+        `${result.certificate.search.evaluatedAssignments} assignment(s) evaluated`
+    );
+    return;
+  }
 
-/**
- * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- */
-function printSampleSequence(theme) {
-  const samples = auditSampleSequence(themeRoleColors(theme));
-  const formatted = samples
-    .map(
-      (sample) =>
-        `${sample.left.role}-${sample.right.role}:${formatNumber(sample.comparison.oklabDelta, 1)}`
-    )
-    .join(' ');
-
-  console.log(`sample def add self value T ${formatted}`);
+  console.log('rank fixed edge-CVD edge-OK exposure change harmony changes');
+  for (const [index, candidate] of result.candidates.entries()) {
+    const changes = Object.entries(candidate.changes)
+      .map(([pigment, hex]) => `${pigment}=${hex}`)
+      .join(', ');
+    console.log(
+      [
+        String(index + 1).padStart(4),
+        String(candidate.resolved.length).padStart(5),
+        formatNumber(candidate.interaction.minimumCvdOklabDelta).padStart(9),
+        formatNumber(candidate.interaction.minimumOklabDelta).padStart(8),
+        formatNumber(candidate.interaction.exposure, 0).padStart(8),
+        formatNumber(candidate.change.maximum).padStart(6),
+        formatNumber(candidate.harmony.maximum).padStart(7),
+        changes || '(source palette)',
+      ].join(' ')
+    );
+  }
 }
 
 function printHelp() {
   console.log(`Usage:
-  node scripts/themeColorAudit.mjs
-  node scripts/themeColorAudit.mjs --role self
-  node scripts/themeColorAudit.mjs --role self --candidates '#109BB4,#0C91A9,#097C93'
+  bun run color:audit
+  bun run color:audit -- --theme tyrian-night
+  bun run color:audit -- --theme tyrian-night --roles syntax:function,syntax:data [--move separate]
 
-Metrics:
-  okL/okC/okh OKLCH perceptual lightness, chroma, hue
-  hT/hC       Material HCT tone and CAM16 chroma
-  cM          CAM16 colorfulness
-  contrast    WCAG contrast against editor.background
-  nearest     closest syntax role by OKLab distance; low values mean visual collision
-  risk        pair-specific adjacent-role risk; catches realistic self/add-style collisions`);
+Without --roles, validates the repository-owned appearance contract.
+With --roles, generates bounded HCT candidates for every distinct pigment owner,
+then searches their combinations deterministically. Hard contract constraints rank
+before the requested move, witnessed specimen/CVD robustness, harmony, and change.
+Reports include source, corpus, dependency, lineage, coverage, and search provenance.
+Only themes admitted by the forge contract and roles required by its specimen set are forgeable;
+the frozen legacy theme is rejected. If bounded search finds no contract-valid proposal, the
+result is explicit and the command exits unsuccessfully.
+
+Moves: separate, promote, quiet, warmer, cooler. Recommendations are corpus-local;
+every recommendation satisfies the appearance contract, and the command never writes colors
+or claims a universal optimum.`);
 }
 
-/**
- * @param {string[]} rawArgs
- * @returns {{ candidates: string[]; help: boolean; limit: number; role?: string }}
- */
-function parseAuditArgs(rawArgs) {
-  const { values } = parseNodeArgs({
-    allowPositionals: false,
-    args: rawArgs,
-    options: {
-      candidates: { type: 'string' },
-      help: { type: 'boolean', short: 'h' },
-      limit: { type: 'string' },
-      role: { type: 'string' },
-    },
-    strict: true,
-  });
-  const limit = values.limit === undefined ? 8 : Number.parseInt(values.limit, 10);
-
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new Error(`Invalid --limit '${values.limit}'.`);
-  }
-
-  return {
-    candidates:
-      values.candidates === undefined
-        ? []
-        : values.candidates
-            .split(',')
-            .map((candidate) => candidate.trim())
-            .filter(Boolean),
-    help: values.help === true,
-    limit,
-    role: values.role,
-  };
-}
-
-/**
- * @param {number} value
- * @param {number} digits
- * @returns {string}
- */
-function formatNumber(value, digits) {
+/** @param {number | undefined} value @param {number} [digits] */
+function formatNumber(value, digits = 2) {
+  if (value === undefined) return '-';
+  if (!Number.isFinite(value)) return 'n/a';
   return value.toFixed(digits);
 }
 
-/**
- * @param {import('./colorScience.mjs').RolePairRisk[]} risks
- * @returns {string}
- */
-function formatRisks(risks) {
-  return risks
-    .sort((left, right) => right.penalty - left.penalty)
-    .map(formatRisk)
-    .join(' ');
-}
-
-/**
- * @param {import('./colorScience.mjs').RolePairRisk} risk
- * @returns {string}
- */
-function formatRisk(risk) {
-  return `${risk.left.role}-${risk.right.role}:${formatNumber(
-    risk.comparison.oklabDelta,
-    1
-  )}/${risk.reasons.join('+')}`;
+/** @param {string} _key @param {unknown} value */
+function jsonNumbers(_key, value) {
+  return typeof value === 'number' && !Number.isFinite(value) ? null : value;
 }

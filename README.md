@@ -22,30 +22,35 @@ The variants are intentionally different expressions of the same semantic system
 | Theme | Visual center | Purpose |
 |---|---|---|
 | **Tyrian Night** | Neutral-black and quiet | Canonical daily theme; restrained chrome, readable hierarchy, perceptible surfaces |
-| **Tyrian Nocturne** | Visibly purple and atmospheric | The same role grammar with purple-tinted depth and tonal controls |
+| **Tyrian Nocturne** | Cold-black, gothic, and dangerous | Cobalt structure, hard-indigo types, dried-blood data, the sole moss-green string pigment, and carved low-energy depth |
+| **Tyrian Pastel** | Soft dark dream | Periwinkle, sea-glass, dusty rose, mint, apricot, and lavender across every colored role |
 | **Tyrian Abyss** | Near-OLED and electric | Maximum contrast and chroma without collapsing semantic hues into purple |
 | **Tyrian Dawn** | Soft light and ink-dark | Light counterpart with the same categorical syntax and state behavior |
 | **Tyrian Night Old** | Legacy comparison | Exact previous palette, kept last in the catalog and excluded from new family constraints |
 
-Purple owns identity, focus, keywords, and selected emphasis. It does not replace red errors, amber warnings and regular expressions, green strings and success, teal functions and ANSI cyan, or blue types and information.
+Purple owns identity, focus, keywords, and selected emphasis. It does not replace salmon errors, amber warnings and regular expressions, the controlled green string pigment, deep-blue functions, cool structural types, cool-rose data, or blue information. Terminal ANSI names remain protocol slots; each theme owns their rendered material.
+
+Bracket nesting uses a dedicated six-depth palette rather than borrowing syntax or UI accents. Its APCA band stays narrowly above Zed's renderer guard, while low OKLCH chroma and minimum OKLab separation keep depths distinguishable without turning punctuation into the dominant layer.
 
 ## Palette
 
-Tyrian Night is authored and audited perceptually with OKLab distance and OKLCH coordinates, then stored as portable hexadecimal source values. Primary text is AAA; core syntax, statuses, and ANSI colors are AA or stronger against the editor canvas.
+Tyrian Night is authored as exact sRGB pigments and role-owned opacities. The family contract evaluates those values with WCAG contrast, APCA prominence, OKLab separation, OKLCH material envelopes, complete dichromacy simulations, and witnessed code neighborhoods compiled from semantic specimens. Primary text is AAA; core syntax, statuses, and ANSI colors are AA or stronger against the editor canvas.
+
+Authority is deliberately asymmetric. Product meaning and atmosphere live in this repository. Source recipes own exact colors; the binding contract owns which roles share a pigment; the appearance contract owns hierarchy and visual constraints; the forge contract owns the advisory search envelope; hashed semantic specimens own reviewed code evidence from which exposure and co-occurrence are derived. APCA, OKLab, OKLCH, HCT, and CVD simulation are measurements or proposal mechanisms, never competing palette authorities. Material Color Utilities seeds bounded HCT candidates and harmony tie-breaks, but it cannot redefine Tyrian semantics. Generated consumers receive the resolved source colors exactly.
 
 | Role | Hex | Ratio | Level |
 |:-----|:-----|------:|:------|
-| Background (Neutral Canvas) | `#0A0A0C` | — | — |
-| Active line / Hover Surface | `#262330` | — | — |
-| Variables (Soft Lilac) | `#CDC7D9` | 12.03:1 | AAA |
-| Keywords (Tyrian Violet) | `#A17ADF` | 6.00:1 | AA |
-| Types (Clear Cobalt) | `#78A5EF` | 7.94:1 | AAA |
-| Functions (Controlled Teal) | `#50A9B1` | 7.21:1 | AAA |
-| Strings (Calm Green) | `#649C66` | 6.11:1 | AA |
-| Data Literals (Cool Rose) | `#D988B9` | 7.70:1 | AAA |
-| Regular Expressions (Amber) | `#C1A057` | 7.94:1 | AAA |
+| Background (Neutral Canvas) | `#0F0E13` | — | — |
+| Active line / Hover Surface | `#2A2633` | — | — |
+| Variables (Soft Lilac) | `#AFA9B9` | 8.42:1 | AAA |
+| Keywords (Tyrian Violet) | `#8F70BE` | 4.79:1 | AA |
+| Types (Cool Cyan) | `#408F99` | 5.13:1 | AA |
+| Functions (Blue) | `#7193C2` | 6.09:1 | AA |
+| Strings (Calm Green) | `#57885B` | 4.65:1 | AA |
+| Data / Receivers (Cool Rose) | `#AA738C` | 5.07:1 | AA |
+| Regular Expressions (Amber) | `#9A7B38` | 4.82:1 | AA |
 
-Function teal and error red are separated by more than 20 units of OKLab distance in every current family member. ANSI red and cyan preserve the same categorical distinction.
+Blue functions and salmon errors remain perceptually separate across the current family. Cool-rose data stays distinct from errors, cool structural types retain their category, and ANSI red retains the error category.
 
 ## Interaction Contract
 
@@ -89,7 +94,11 @@ Read the desktop product contract before applying it. The full rice is not a gen
 
 - `source/themeRoleContract.json` owns role membership.
 - `source/themeCatalog.json` owns ordered family membership and defaults.
-- `source/themes/` owns neutral UI, syntax, state, and ANSI values.
+- `source/themeColorBindings.json` owns explicit role aliases and alpha derivations; unlisted roles self-own one opaque pigment.
+- `source/themes/` owns each variant's exact pigments and opacities; current themes and the frozen legacy theme use explicit binding profiles.
+- `source/themeAppearanceContract.json` owns family hierarchy, hue language, variant material, accessibility, CVD, and renderer constraints.
+- `source/themeForgeContract.json` owns forge admission, candidate bounds, harmony reference, and deterministic search limits; it cannot define visual semantics.
+- `source/themeSpecimens.json` owns versioned code specimens, complete semantic spans, source hashes, and required language/context/interaction coverage; the forge derives exposure and neighborhoods and fingerprints the annotations and sampling policy.
 - `source/union-css/` owns reusable component geometry and interaction rules.
 - `scripts/projections/` owns consumer-specific key and grammar mappings.
 - `apps/vscode/` owns the VS Code manifest, build, runtime, package contents, and support contract.
@@ -104,9 +113,12 @@ Generated consumers never become palette inputs.
 ```sh
 bun install --frozen-lockfile
 bun run color:audit
+bun run color:audit -- --theme tyrian-night --roles syntax:regexp,syntax:string --move separate
 bun run verify
 bun run package:vscode
 ```
+
+The color forge is read-only and admits only themes selected by its forge contract and roles required by its reviewed specimen set; the frozen legacy profile cannot be retuned. It resolves requested roles to their pigment owners, derives exposure and a witnessed interaction graph from the selected specimen corpus, generates bounded HCT candidates, and searches interacting assignments with a pinned deterministic beam. The default move maximizes normal/CVD neighborhood separation while the appearance contract preserves semantic prominence; explicit `promote`, `quiet`, `warmer`, and `cooler` moves remain available. Contract-invalid states may be explored only inside the bounded search and are never returned as recommendations. Reports carry appearance, forge, role, binding, source, and corpus hashes plus dependency, candidate-lineage, coverage, and search provenance, and claim only the best contract-valid result found inside that declared envelope. If the bounded search finds no valid result, it reports that outcome explicitly and exits unsuccessfully. Accepted pigments remain explicit source-theme edits.
 
 CI packages the static VS Code product on Linux, macOS, and Windows. Linux additionally runs the Island mutation proofs and desktop installer proofs.
 

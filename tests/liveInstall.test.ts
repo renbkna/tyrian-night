@@ -634,8 +634,8 @@ test('live installer renders from its injected repo and materializes only declar
     fs.rmSync(path.join(repoRoot, 'source/themes/tyrian-abyss.json'));
     const themePath = path.join(repoRoot, 'source/themes/tyrian-nocturne.json');
     const theme = JSON.parse(fs.readFileSync(themePath, 'utf8'));
-    theme.terminal.background = '#112233';
-    theme.terminal.foreground = '#DDEEFF';
+    theme.pigments['ui:surface.canvas'] = '#112233';
+    theme.pigments['ui:text.primary'] = '#DDEEFF';
     fs.writeFileSync(themePath, `${JSON.stringify(theme, null, 2)}\n`);
     fs.writeFileSync(path.join(repoRoot, 'terminal/ghostty/themes/tyrian-stale'), 'stale\n');
 

@@ -12,8 +12,9 @@ import { flattenCssFile } from '../scripts/union/flattenCss.mjs';
 
 type ThemeDefinition = {
   appearance: 'dark' | 'light';
+  brackets: Record<string, string>;
   name: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   syntax: Record<string, string>;
   terminal: Record<string, string>;
   ui: Record<string, string>;

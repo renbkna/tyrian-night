@@ -12,6 +12,7 @@ import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 const ISLAND_CSS_FILES = [
   'apps/vscode/island/tyrian-night.css',
   'apps/vscode/island/tyrian-nocturne.css',
+  'apps/vscode/island/tyrian-pastel.css',
   'apps/vscode/island/tyrian-abyss.css',
   'apps/vscode/island/tyrian-dawn.css',
   'apps/vscode/island/tyrian-night-old.css',
@@ -46,7 +47,7 @@ test('Island CSS generation resolves catalog identity from the injected reposito
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
     const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as Record<string, unknown>;
     theme.name = 'Injected Island Night';
-    (theme.ui as Record<string, string>)['accent.glow'] = '#123456';
+    (theme.pigments as Record<string, string>)['ui:accent.glow'] = '#123456';
     fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
 
     expect(buildAllIslandCss(root)[0]?.css).toContain('Injected Island Night - Custom UI Styles');

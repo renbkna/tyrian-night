@@ -1,6 +1,6 @@
 # Tyrian Night for Starship
 
-Starship controls the prompt. `terminal/starship/tyrian-night.toml` uses a Tyrian prompt layout and includes named palettes for Night, Nocturne, Night Old, Abyss, and Dawn.
+Starship controls the prompt. `terminal/starship/tyrian-night.toml` uses a Tyrian prompt layout and includes named palettes for Night, Nocturne, Pastel, Night Old, Abyss, and Dawn.
 
 From a clean checkout, materialize the generated terminal assets first:
 

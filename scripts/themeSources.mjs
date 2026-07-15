@@ -3,7 +3,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadThemeDefinitionContext, validateThemeDefinition } from './themeDefinition.mjs';
+import {
+  loadThemeDefinitionContext,
+  validateThemeDefinition,
+  validateThemeRecipe,
+} from './themeDefinition.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -115,6 +119,27 @@ export function readSourceTheme(
 ) {
   const resolvedRoot = requireContextRoot(root, definition);
   return validateThemeDefinition(
+    readJson(path.join(resolvedRoot, source.sourcePath)),
+    source.slug,
+    definition
+  );
+}
+
+/**
+ * Reads the editable pigment recipe for tooling that deliberately operates at the owner boundary.
+ * Generators should continue to consume readSourceTheme().
+ * @param {ThemeSource} source
+ * @param {string} [root]
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @returns {import('./themeDefinition.mjs').ThemeRecipe}
+ */
+export function readSourceThemeRecipe(
+  source,
+  root = repoRoot,
+  definition = loadThemeDefinitionContext(root)
+) {
+  const resolvedRoot = requireContextRoot(root, definition);
+  return validateThemeRecipe(
     readJson(path.join(resolvedRoot, source.sourcePath)),
     source.slug,
     definition

@@ -6,16 +6,17 @@ import { fileURLToPath } from 'node:url';
 import { contrastRatio } from './colorScience.mjs';
 import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
+import { bracketColor, syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
- * @typedef {{ color: string; italic?: boolean; bold?: boolean }} ZedHighlight
+ * @typedef {{ color: string; italic?: boolean; bold?: boolean; weight?: number }} ZedHighlight
  */
 
 const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ZED_FUNCTION_FONT_WEIGHT = 500;
 
 /**
  * @param {string} [repoRoot]
@@ -30,7 +31,8 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
     author: 'renbkna',
     themes: repository.sources.map((source) =>
       buildZedTheme(
-        /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot, repository.definition))
+        /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot, repository.definition)),
+        repository.definition.requiredThemeRoles.brackets
       )
     ),
   };
@@ -59,9 +61,10 @@ export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
 
 /**
  * @param {ThemeDefinition} theme
+ * @param {readonly string[]} bracketRoles
  * @returns {unknown}
  */
-function buildZedTheme(theme) {
+function buildZedTheme(theme, bracketRoles) {
   /** @param {string} role */
   const ui = (role) => uiColor(theme, role);
   /** @param {string} role */
@@ -71,20 +74,15 @@ function buildZedTheme(theme) {
   const dimAnsi = buildDimAnsi(theme);
   const syntax = buildSyntax(theme);
   const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
+  const editorBackground = ui('surface.canvas');
+  const accents = bracketRoles.map((role) => bracketColor(theme, role));
 
-  return clean({
+  return {
     name: theme.name,
     appearance: theme.appearance,
     style: {
-      accents: [
-        ui('accent.primary'),
-        syntaxRole('type'),
-        syntaxRole('function'),
-        syntaxRole('string'),
-        syntaxRole('data'),
-        syntaxRole('regexp'),
-      ],
-      background: ui('surface.canvas'),
+      accents,
+      background: editorBackground,
       'background.appearance': 'opaque',
       border: ui('border.tab'),
       'border.disabled': ui('border.tab'),
@@ -105,7 +103,7 @@ function buildZedTheme(theme) {
       'editor.active_line.background': ui('surface.hover'),
       'editor.active_line_number': ui('editor.lineNumber.active'),
       'editor.active_wrap_guide': ui('editor.indentGuide.active'),
-      'editor.background': ui('surface.canvas'),
+      'editor.background': editorBackground,
       'editor.document_highlight.bracket_background': zedBracketMatchBackground(theme),
       'editor.document_highlight.read_background': ui('editor.reference.read'),
       'editor.document_highlight.write_background': ui('editor.reference.write'),
@@ -240,7 +238,7 @@ function buildZedTheme(theme) {
       'version_control.word_added': ui('status.successBackground'),
       'version_control.word_deleted': withHexAlpha(ui('status.removed'), subtleWashAlpha),
     },
-  });
+  };
 }
 
 /**
@@ -272,9 +270,9 @@ function buildSyntax(theme) {
     'enum.member': syntax('data'),
     enumMember: syntax('data'),
     error: ui('status.error'),
-    function: syntax('function'),
-    'function.builtin': syntax('function'),
-    'function.method': syntax('function'),
+    function: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    'function.builtin': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    'function.method': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
     hint: ui('text.hint', { italic: true }),
     'invalid.deprecated': syntax('data'),
     keyword: syntax('keyword'),
@@ -283,8 +281,8 @@ function buildSyntax(theme) {
     link_uri: syntax('type'),
     macro: syntax('type'),
     'markup.quote': syntax('string', { italic: true }),
-    method: syntax('function'),
-    'method.builtin': syntax('function'),
+    method: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    'method.builtin': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
     module: syntax('type'),
     namespace: syntax('type'),
     number: syntax('data'),
@@ -298,7 +296,7 @@ function buildSyntax(theme) {
     'property.json_key': syntax('data'),
     'property.readonly': syntax('data'),
     punctuation: syntax('punctuation'),
-    'punctuation.bracket': syntax('punctuation'),
+    'punctuation.bracket': syntax('type'),
     'punctuation.delimiter': syntax('punctuation'),
     'punctuation.list_marker': syntax('data'),
     'punctuation.markup': syntax('data'),
@@ -343,6 +341,7 @@ function highlight(settings) {
   const style = { color: settings.color };
   if (settings.italic) style.font_style = 'italic';
   if (settings.bold) style.font_weight = 700;
+  if (settings.weight !== undefined) style.font_weight = settings.weight;
   return style;
 }
 
@@ -411,26 +410,6 @@ function zedBracketMatchBackground(theme) {
   const alpha = theme.appearance === 'light' ? '1F' : '35';
 
   return withHexAlpha(border, alpha);
-}
-
-/**
- * @param {any} value
- * @returns {any}
- */
-function clean(value) {
-  if (Array.isArray(value)) {
-    return value.map(clean);
-  }
-
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, entryValue]) => entryValue !== undefined)
-        .map(([key, entryValue]) => [key, clean(entryValue)])
-    );
-  }
-
-  return value;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

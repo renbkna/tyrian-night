@@ -2,10 +2,13 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { contrastRatio } from './colorScience.mjs';
+import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import {
   loadVscodeProjectionContext,
+  bracketColor,
   syntaxColor,
   terminalColor,
   uiColor,
@@ -21,10 +24,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 export function buildVscodeTheme(theme, projection) {
   /** @type {Record<string, string>} */
   const colors = {};
+  projectColors(colors, projection.brackets, (role) => bracketColor(theme, role));
   projectColors(colors, projection.ui, (role) => uiColor(theme, role));
   projectColors(colors, projection.syntax, (role) => syntaxColor(theme, role));
   projectColors(colors, projection.terminal, (role) => terminalColor(theme, role));
   projectColors(colors, projection.vscode, (role) => vscodeColor(theme, role));
+  enforceContrastContract(colors, projection.contrastPairs, theme.name);
 
   const semanticTokenColors = Object.fromEntries(
     Object.entries(projection.semanticTokenColors).map(([selector, settings]) => [
@@ -54,6 +59,26 @@ export function buildVscodeTheme(theme, projection) {
     semanticTokenColors,
     tokenColors,
   };
+}
+
+/**
+ * @param {Record<string, string>} colors
+ * @param {import('./themeDefinition.mjs').VscodeProjection['contrastPairs']} pairs
+ * @param {string} themeName
+ */
+function enforceContrastContract(colors, pairs, themeName) {
+  for (const pair of pairs) {
+    const backdrop = pair.backdrop ? opaqueHex(colors[pair.backdrop]) : undefined;
+    const background = opaqueHex(colors[pair.background], backdrop);
+    const foreground = opaqueHex(colors[pair.foreground], background);
+    const actual = contrastRatio(foreground, background);
+    if (actual < pair.minimum) {
+      throw new Error(
+        `VS Code contrast contract failed for '${themeName}' at ` +
+          `${pair.foreground}/${pair.background}: ${actual.toFixed(2)} < ${pair.minimum}.`
+      );
+    }
+  }
 }
 
 export function collectVscodeThemeAssets(root = repoRoot) {

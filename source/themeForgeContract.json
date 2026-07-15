@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "appearanceThemeSet": "current",
+  "specimenSet": "syntax-core",
+  "harmonyRole": "ui:accent.primary",
+  "hueOffsets": [-36, -24, -12, 0, 12, 24, 36],
+  "chromaScales": [0.65, 0.85, 1, 1.15, 1.35],
+  "toneOffsets": [-8, -6, -4, -2, 0, 2, 4, 6, 8],
+  "candidatePoolSize": 16,
+  "maximumJointPigments": 6,
+  "search": {
+    "algorithm": "seeded-beam-v1",
+    "beamWidth": 72,
+    "seed": 20260715,
+    "variableOrders": 4
+  }
+}

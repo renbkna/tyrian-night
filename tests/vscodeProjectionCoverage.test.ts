@@ -1,8 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { contrastRatio } from '../scripts/colorScience.mjs';
-import { opaqueHex } from '../scripts/colorUtils.mjs';
-import { VSCODE_PROJECTION, syntaxColor, uiColor } from '../scripts/themeDefinition.mjs';
+import { VSCODE_PROJECTION, bracketColor, uiColor } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
 
@@ -130,25 +128,6 @@ const QUIET_SECONDARY_OUTLINES = [
   'inlineEdit.gutterIndicator.secondaryBorder',
 ] as const;
 
-const CONTROL_INDICATOR_PAIRS = [
-  ['checkbox.foreground', 'checkbox.background'],
-  ['checkbox.foreground', 'checkbox.selectBackground'],
-  ['radio.activeForeground', 'radio.activeBackground'],
-  ['settings.checkboxForeground', 'settings.checkboxBackground'],
-] as const;
-
-const OWNED_TEXT_PAIRS = [
-  ['activityBarBadge.foreground', 'activityBarBadge.background'],
-  ['extensionBadge.remoteForeground', 'extensionBadge.remoteBackground'],
-  ['statusBarItem.errorForeground', 'statusBarItem.errorBackground'],
-  ['statusBarItem.warningForeground', 'statusBarItem.warningBackground'],
-  ['statusBarItem.offlineForeground', 'statusBarItem.offlineBackground'],
-  ['statusBarItem.prominentForeground', 'statusBarItem.prominentBackground'],
-  ['statusBarItem.prominentHoverForeground', 'statusBarItem.prominentHoverBackground'],
-  ['statusBarItem.remoteForeground', 'statusBarItem.remoteBackground'],
-  ['statusBarItem.remoteHoverForeground', 'statusBarItem.remoteHoverBackground'],
-] as const;
-
 test('VS Code projection covers required state, chat, notebook, testing, terminal-symbol, gauge, and agent colors', () => {
   for (const source of SOURCE_THEMES) {
     const projected = buildVscodeTheme(readSourceTheme(source), VSCODE_PROJECTION);
@@ -175,27 +154,15 @@ test('VS Code projection reserves maximum-accent outlines for focus and primary 
   }
 });
 
-test('VS Code control indicators and owned status pairs remain visible on their backgrounds', () => {
-  for (const source of SOURCE_THEMES) {
-    const theme = readSourceTheme(source);
-    const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
-    const statusBarBackground = uiColor(theme, 'surface.navigation');
+test('VS Code generation enforces its owned foreground/background contrast contract', () => {
+  const night = readSourceTheme(SOURCE_THEMES[0]!);
+  expect(() => buildVscodeTheme(night, VSCODE_PROJECTION)).not.toThrow();
 
-    for (const [foregroundKey, backgroundKey] of CONTROL_INDICATOR_PAIRS) {
-      const foreground = projected.colors[foregroundKey]!;
-      const background = opaqueHex(projected.colors[backgroundKey]!, statusBarBackground);
-
-      expect(foreground).toBe(uiColor(theme, 'accent.primary'));
-      expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(3);
-    }
-
-    for (const [foregroundKey, backgroundKey] of OWNED_TEXT_PAIRS) {
-      const foreground = projected.colors[foregroundKey]!;
-      const background = opaqueHex(projected.colors[backgroundKey]!, statusBarBackground);
-
-      expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5);
-    }
-  }
+  const broken = structuredClone(night);
+  broken.ui['accent.primary'] = broken.ui['surface.field'];
+  expect(() => buildVscodeTheme(broken, VSCODE_PROJECTION)).toThrow(
+    'VS Code contrast contract failed'
+  );
 });
 
 test('VS Code categorical editor colors resolve directly from neutral owners', () => {
@@ -204,10 +171,10 @@ test('VS Code categorical editor colors resolve directly from neutral owners', (
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
     expect(projected.colors['editorBracketHighlight.foreground3']).toBe(
-      syntaxColor(theme, 'function')
+      bracketColor(theme, 'depth3')
     );
     expect(projected.colors['editorBracketHighlight.foreground6']).toBe(
-      syntaxColor(theme, 'emphasis')
+      bracketColor(theme, 'depth6')
     );
     expect(projected.colors['debugIcon.stopForeground']).toBe(uiColor(theme, 'status.error'));
     expect(projected.colors['debugIcon.pauseForeground']).toBe(uiColor(theme, 'status.warning'));

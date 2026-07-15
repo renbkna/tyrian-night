@@ -3,7 +3,8 @@
 Tyrian Night provides five generated VS Code color themes:
 
 - **Night** — neutral-black, quiet, and canonical;
-- **Nocturne** — visibly purple and atmospheric;
+- **Nocturne** — cold-black, mineral, and dangerous;
+- **Pastel** — a complete soft dark-dream palette;
 - **Abyss** — OLED black with ultraviolet-electric accents;
 - **Dawn** — the light counterpart;
 - **Night Old** — an unchanged legacy comparison theme.
