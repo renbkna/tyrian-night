@@ -33,17 +33,6 @@ export function parseHexColor(color) {
  * @param {string} color
  * @returns {boolean}
  */
-export function isLightHex(color) {
-  const { red, green, blue } = parseHexColor(color);
-  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-
-  return luminance > 0.5;
-}
-
-/**
- * @param {string} color
- * @returns {boolean}
- */
 export function isTransparentHex(color) {
   return parseHexColor(color).alpha === 0;
 }
@@ -64,14 +53,23 @@ export function withHexAlpha(color, alpha) {
  * @param {string} [background]
  * @returns {string}
  */
-export function opaqueHex(color, background = '#000000') {
+export function opaqueHex(color, background) {
   const foreground = parseHexColor(color);
 
   if (foreground.alpha === 255) {
     return `#${foreground.hex}`;
   }
 
+  if (background === undefined) {
+    throw new Error(`Translucent color '${color}' requires an explicit opaque background`);
+  }
+
   const backdrop = parseHexColor(background);
+
+  if (backdrop.alpha !== 255) {
+    throw new Error(`Backdrop '${background}' must be opaque`);
+  }
+
   const alpha = foreground.alpha / 255;
   const red = blendChannel(foreground.red, backdrop.red, alpha);
   const green = blendChannel(foreground.green, backdrop.green, alpha);

@@ -10,7 +10,8 @@ import {
   buildVscodeThemeContributions,
   syncGeneratedContracts,
 } from '../scripts/generatedContracts.mjs';
-import { SOURCE_THEMES } from '../scripts/themeSources.mjs';
+import { terminalColor } from '../scripts/themeDefinition.mjs';
+import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 import { syncVscodePackageAssets } from '../scripts/vscodePackageAssets.mjs';
 
 type ExtensionPackage = {
@@ -271,7 +272,7 @@ test('preview output derives palette and identity entirely from the selected mod
   await controller.readThemeManifest('night');
   const nightSummary = controller.summarize('night');
   expect(nightSummary).toContain('mode=night');
-  expect(nightSummary).toContain('#252530 #C06868 #489060 #C09040');
+  expect(nightSummary).toContain(previewAnsiPrefix('tyrian-night'));
   expect(nightSummary).toContain('"dark": "Tyrian Night"');
   expect(nightSummary).toContain('# Tyrian Night');
   expect(nightSummary).not.toContain('Tyrian Dawn');
@@ -279,7 +280,7 @@ test('preview output derives palette and identity entirely from the selected mod
   await controller.readThemeManifest('dawn');
   const dawnSummary = controller.summarize('dawn');
   expect(dawnSummary).toContain('mode=dawn');
-  expect(dawnSummary).toContain('#2A2433 #B63A3A #2B7A4F #8A5D00');
+  expect(dawnSummary).toContain(previewAnsiPrefix('tyrian-dawn'));
   expect(dawnSummary).toContain('"light": "Tyrian Dawn"');
   expect(dawnSummary).toContain('# Tyrian Dawn');
   expect(dawnSummary).not.toContain('Tyrian Night');
@@ -385,14 +386,15 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(extension.scripts.lint).toBe('oxlint src/ tsup.config.ts');
   expect(extension.scripts.build).toContain('tsup');
   expect(extension.scripts.package).toContain('bun run check');
+  expect(extension.scripts.package).toContain("mkdirSync('../../dist', { recursive: true })");
   expect(extension.scripts.package).toContain('vsce package --no-dependencies');
   expect(extension.scripts.package).toContain('--out ../../dist/tyrian-night.vsix');
   expect(extension.devDependencies['@vscode/vsce']).toBe('^3.9.1');
   expect(extension.devDependencies.tsup).toBe('^8.5.1');
   expect(extension).not.toHaveProperty('dependencies');
   expect(extension).not.toHaveProperty('simple-git-hooks');
-  expect(lockfile).toContain('"": {\n      "name": "tyrian-night-workspace"');
-  expect(lockfile).toContain('"apps/vscode": {\n      "name": "tyrian-night"');
+  expect(lockfile).toMatch(/"":\s*\{\s*"name":\s*"tyrian-night-workspace"/u);
+  expect(lockfile).toMatch(/"apps\/vscode":\s*\{\s*"name":\s*"tyrian-night"/u);
   expect(lockfile).not.toContain('simple-git-hooks');
 
   expect(desktop.tyrianNight.supportedPlatforms).toEqual(['linux']);
@@ -437,6 +439,15 @@ test('clean clones retain generated projections required by VS Code and Zed deve
   expect(fs.existsSync('apps/vscode/themes/tyrian-night.json')).toBe(true);
   expect(fs.existsSync('apps/zed/themes/tyrian-night.json')).toBe(true);
 });
+
+function previewAnsiPrefix(slug: string): string {
+  const source = SOURCE_THEMES.find((candidate) => candidate.slug === slug);
+  expect(source).toBeDefined();
+  const theme = readSourceTheme(source!);
+  return ['ansi.black', 'ansi.red', 'ansi.green', 'ansi.yellow']
+    .map((role) => terminalColor(theme, role))
+    .join(' ');
+}
 
 function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;

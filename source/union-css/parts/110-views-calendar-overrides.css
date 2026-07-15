@@ -4,6 +4,7 @@ tableviewdelegate {
   height: var(--tyrian-medium-element);
   padding: var(--tyrian-small-spacing);
   spacing: var(--tyrian-small-spacing);
+  border: 1px solid transparent;
   border-radius: 0px;
   color: var(--tyrian-foreground);
   background-color: var(--tyrian-window-bg);
@@ -15,30 +16,28 @@ tableviewdelegate.alternating-colors {
 }
 
 treeviewdelegate:hovered,
-treeviewdelegate:active-focus,
-tableviewdelegate:hovered,
-tableviewdelegate:active-focus {
-  border: 1px solid var(--tyrian-focus-ring);
-  background-color: transparent;
+tableviewdelegate:hovered {
+  background-color: var(--tyrian-row-hover-bg);
 }
 
+treeviewdelegate:active-focus,
+tableviewdelegate:active-focus,
 treeviewdelegate:visual-focus,
 tableviewdelegate:visual-focus {
-  outline: 1px solid var(--tyrian-focus-ring);
+  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 treeviewdelegate:highlighted,
 treeviewdelegate.selected,
 tableviewdelegate:highlighted,
 tableviewdelegate.selected {
-  color: var(--tyrian-selection-text);
-  background-color: var(--tyrian-fill-bg);
-  border: 1px solid var(--tyrian-border-hover);
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-row-selected-bg);
 }
 
 treeviewdelegate.selected > label,
 tableviewdelegate.selected > label {
-  color: var(--tyrian-selection-text);
+  color: var(--tyrian-foreground);
 }
 
 treeviewdelegate.editing,
@@ -85,6 +84,12 @@ headerviewdelegate {
   border-right: 1px solid var(--tyrian-border-color);
 }
 
+horizontalheaderviewdelegate:hovered,
+verticalheaderviewdelegate:hovered,
+headerviewdelegate:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
 horizontalheaderviewdelegate.sort-ascending,
 verticalheaderviewdelegate.sort-ascending,
 headerviewdelegate.sort-ascending {
@@ -100,7 +105,7 @@ headerviewdelegate.sort-descending {
 selectionrectangle {
   color: var(--tyrian-focus-ring);
   border: 1px solid var(--tyrian-focus-ring);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-radius-medium);
   background-color: var(--tyrian-row-selected-bg);
 }
 

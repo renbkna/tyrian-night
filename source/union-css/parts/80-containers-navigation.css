@@ -18,7 +18,7 @@ toolbar.footer {
 drawer.modal,
 overlaydrawer.modal {
   color: var(--tyrian-foreground);
-  background-color: var(--tyrian-window-bg);
+  background-color: var(--tyrian-panel-bg);
 }
 
 drawer[edge="left"],
@@ -41,10 +41,7 @@ overlaydrawer[edge="bottom"] {
   border-top: 1px solid var(--tyrian-border-color);
 }
 
-swipeview.horizontal {
-  layout-alignment: content fill fill 0;
-}
-
+swipeview.horizontal,
 swipeview.vertical {
   layout-alignment: content fill fill 0;
 }
@@ -60,13 +57,18 @@ scrollview.horizontal-scroll {
 scrollview.framed-background {
   background-color: var(--tyrian-panel-bg);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-radius-large);
 }
 
 splitview handle {
   width: 1px;
   height: 1px;
   background-color: var(--tyrian-border-color);
+}
+
+splitview handle:hovered,
+splitview handle:pressed {
+  background-color: var(--tyrian-border-hover);
 }
 
 splitview.horizontal handle {
@@ -90,8 +92,12 @@ pageindicatordelegate {
   background-color: var(--tyrian-muted);
 }
 
-pageindicatordelegate:pressed {
+pageindicatordelegate:hovered {
   background-color: var(--tyrian-border-hover);
+}
+
+pageindicatordelegate:pressed {
+  background-color: var(--tyrian-control-active-bg);
 }
 
 pageindicatordelegate.current {
@@ -102,7 +108,7 @@ frame,
 groupbox {
   padding: var(--tyrian-small-spacing);
   border: 1px solid var(--tyrian-border-color);
-  border-radius: var(--tyrian-corner-radius);
+  border-radius: var(--tyrian-radius-large);
 }
 
 groupbox {

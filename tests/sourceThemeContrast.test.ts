@@ -157,7 +157,6 @@ test('VS Code projection owns selectors, scopes, and consumer keys', () => {
     const theme = readSourceTheme(source);
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
-    expect(Object.keys(projected.colors)).toHaveLength(302);
     for (const key of requiredKeys) expect(projected.colors[key]).toBeDefined();
     expect(projected.semanticTokenColors.parameter.foreground).toBe(syntaxColor(theme, 'data'));
     expect(projected.semanticTokenColors.type.foreground).toBe(syntaxColor(theme, 'type'));

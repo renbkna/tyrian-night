@@ -21,6 +21,7 @@
     "surface.field": "#0F0F0F",
     "surface.chrome": "#0C0C0C",
     "border.default": "#252530",
+    "border.hover": "#8762B8",
     "status.error": "#C06868",
     "status.warning": "#C09040",
     "status.success": "#489060",
@@ -129,8 +130,6 @@
     "editor.hover.highlight.background": "#8B6ABD20",
     "editor.inactive.selection.background": "#6B5A9030",
     "editor.word.highlight.border": "#8B6ABD50",
-    "editor.bracket.function": "#3A9690",
-    "editor.bracket.emphasis": "#AA7DD0",
     "editor.error.border": "#C0686800",
     "editor.hint.border": "#48906000",
     "text.accent": "#A088C0",
@@ -162,12 +161,6 @@
     "tabs.active.border.top": "#8B6ABD00",
     "tabs.hover.foreground": "#A088C0",
     "tabs.inactive.foreground": "#6B6080",
-    "chrome.titleBar.inactiveForeground": "#585868",
-    "editor.bracket.secondary": "#5A78C0",
-    "debug.breakpoint": "#C06868",
-    "debug.stop": "#C06868",
-    "debug.pause": "#C09040",
-    "debug.start": "#489060",
-    "editor.bracket.success": "#489060"
+    "chrome.titleBar.inactiveForeground": "#585868"
   }
 }

@@ -32,7 +32,9 @@ const UNION_TOKEN_CONTRACT = [
   '--tyrian-row-selected-bg: var(--tyrian-selection);',
   '--tyrian-indicator-checked-bg: var(--tyrian-accent);',
   '--tyrian-focus-ring: var(--tyrian-accent);',
-  '--tyrian-corner-radius: 5px;',
+  '--tyrian-radius-small: 4px;',
+  '--tyrian-radius-medium: 5px;',
+  '--tyrian-radius-large: 10px;',
   '--tyrian-scrollbar-size:',
 ];
 const UNION_FORBIDDEN_CONTRACT = [
@@ -41,6 +43,7 @@ const UNION_FORBIDDEN_CONTRACT = [
   'custom-color("kcolorscheme"',
   'kcolorscheme',
   'Breeze',
+  '--tyrian-corner-radius:',
 ];
 
 test('desktop theme assets match the neutral theme definitions', () => {

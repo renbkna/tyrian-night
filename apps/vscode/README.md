@@ -1,6 +1,14 @@
 # Tyrian Night for VS Code
 
-Tyrian Night provides five generated VS Code color themes: Abyss, Night, Nocturne, Night Old, and Dawn.
+Tyrian Night provides five generated VS Code color themes:
+
+- **Night** — neutral-black, quiet, and canonical;
+- **Nocturne** — visibly purple and atmospheric;
+- **Abyss** — OLED black with ultraviolet-electric accents;
+- **Dawn** — the light counterpart;
+- **Night Old** — an unchanged legacy comparison theme.
+
+The projection covers a curated set of documented public VS Code colors for control states, selection and keyboard focus, chat and inline chat, notebooks, testing, terminal symbol icons, gauges, and agent-session indicators. High-contrast-only borders, shadows, and opacity controls intentionally keep VS Code defaults.
 
 ## Support
 
@@ -11,7 +19,7 @@ Tyrian Night provides five generated VS Code color themes: Abyss, Night, Nocturn
 
 The color themes use the normal VS Code extension contract. Merely installing or selecting a theme does not modify the VS Code application.
 
-## Install and Select a Theme
+## Install and select a theme
 
 1. Open the Extensions panel and install **Tyrian Night**.
 2. Run **Preferences: Color Theme**.
@@ -43,7 +51,7 @@ VS Code may display “Your installation appears to be corrupt” while Island U
 
 Island UI is based on [vscode-dark-islands](https://github.com/bwya77/vscode-dark-islands) by [bwya77](https://github.com/bwya77).
 
-## Build This Product
+## Build this product
 
 From the repository root:
 

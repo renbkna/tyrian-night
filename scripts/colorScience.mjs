@@ -192,6 +192,8 @@ export function auditThemeRoles(theme, roleColors = themeRoleColors(theme)) {
 }
 
 /**
+ * Advisory ordering for exploration only. Theme contract tests, not this heuristic score,
+ * decide whether a candidate is acceptable.
  * @param {ThemeDefinition} theme
  * @param {string[]} candidates
  * @param {{ minContrast?: number; neighbors?: ThemeRoleColor[]; pairRules?: RolePairRule[]; role?: string; targetContrast?: number }} [options]
@@ -203,7 +205,7 @@ export function rankCandidates(theme, candidates, options = {}) {
   const neighbors = options.neighbors ?? themeRoleColors(theme);
   const pairRules = options.pairRules ?? DEFAULT_ROLE_PAIR_RULES;
   const role = options.role ?? 'candidate';
-  const targetContrast = options.targetContrast ?? (isLightBackground(background) ? 5.5 : 6);
+  const targetContrast = options.targetContrast ?? (theme.appearance === 'light' ? 5.5 : 6);
 
   return candidates
     .map((candidate) => {
@@ -323,19 +325,20 @@ export function hexToOklab(color) {
  */
 export function hexToOklch(color) {
   const lab = hexToOklab(color);
+  const chroma = Math.hypot(lab.a, lab.b);
   const hue = radiansToDegrees(Math.atan2(lab.b, lab.a));
 
   return {
-    C: Math.hypot(lab.a, lab.b),
+    C: chroma,
     L: lab.L,
-    h: hue < 0 ? hue + 360 : hue,
+    h: chroma <= 0.000004 ? Number.NaN : hue < 0 ? hue + 360 : hue,
   };
 }
 
 /**
  * @param {Oklab} left
  * @param {Oklab} right
- * @returns {number}
+ * @returns {number} Euclidean Delta E OK scaled by 100; 2 units equal the CSS JND of 0.02.
  */
 export function oklabDelta(left, right) {
   return Math.hypot(left.L - right.L, left.a - right.a, left.b - right.b) * 100;
@@ -499,12 +502,4 @@ function requiredRoleColor(roleColors, role) {
  */
 function formatRuleNumber(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-
-/**
- * @param {string} background
- * @returns {boolean}
- */
-function isLightBackground(background) {
-  return relativeLuminance(background) > 0.5;
 }
