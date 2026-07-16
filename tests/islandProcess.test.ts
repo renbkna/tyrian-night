@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 
-import { IslandProcessFailure, parseIslandProcessFailure } from '../apps/vscode/src/islandProcess';
+import {
+  IslandProcessFailure,
+  IslandProcessInvalidOutputError,
+  parseIslandProcessFailure,
+  runIslandJsonProcess,
+} from '../apps/vscode/src/islandProcess';
 
 test('Island CLI failures preserve semantic code and mutation facts', () => {
   const failure = {
@@ -49,4 +54,30 @@ test('legacy aggregate-only failure envelopes are rejected instead of inventing 
 
 test('non-Island process failures retain their plain diagnostic', () => {
   expect(parseIslandProcessFailure('plain failure\n')).toBeUndefined();
+});
+
+test('successful JSON must satisfy its command-specific runtime validator', async () => {
+  const result = runIslandJsonProcess(
+    [process.execPath, '-e', `console.log(JSON.stringify({ unexpected: true }))`],
+    {
+      fallbackMessage: 'process failed',
+      invalidOutputMessage: (error) =>
+        `invalid success payload: ${error instanceof Error ? error.message : String(error)}`,
+      validate: (value) => {
+        if (
+          typeof value !== 'object' ||
+          value === null ||
+          !('kind' in value) ||
+          value.kind !== 'expected'
+        ) {
+          throw new Error('missing expected command discriminant');
+        }
+        return { kind: 'expected' as const };
+      },
+    }
+  );
+  await expect(result).rejects.toBeInstanceOf(IslandProcessInvalidOutputError);
+  await expect(result).rejects.toThrow(
+    'invalid success payload: missing expected command discriminant'
+  );
 });

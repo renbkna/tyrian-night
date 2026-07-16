@@ -17,7 +17,7 @@ The workspace requires Bun 1.3.11 and Node.js 22.19 or newer. Product manifests 
 
 ## Family
 
-The variants are intentionally different expressions of the same semantic system rather than five near-duplicate palettes.
+The six variants are intentionally different expressions of the same semantic system rather than near-duplicate palettes.
 
 | Theme | Visual center | Purpose |
 |---|---|---|

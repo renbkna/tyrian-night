@@ -1,7 +1,7 @@
 {
   "name": "tyrian-night",
   "displayName": "Tyrian Night",
-  "description": "Tyrian Night theme family: quiet Night, atmospheric Nocturne, electric Abyss, Dawn, and exact legacy Night Old, with opt-in Linux Island UI",
+  "description": "Tyrian Night theme family: quiet Night, atmospheric Nocturne, soft Pastel, electric Abyss, Dawn, and exact legacy Night Old, with opt-in Linux Island UI",
   "version": "2.1.1",
   "type": "module",
   "publisher": "renbkna",
@@ -102,7 +102,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit --project tsconfig.json",
-    "lint": "oxlint src/ tsup.config.ts",
+    "lint": "oxlint -c ../../.oxlintrc.json src/ tsup.config.ts",
     "build": "node ../../scripts/islandCss.mjs && node ../../scripts/vscodePackageAssets.mjs && tsup",
     "watch": "tsup --watch",
     "package": "bun run check && bun run build && node -e \"require('node:fs').mkdirSync('../../dist', { recursive: true })\" && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"

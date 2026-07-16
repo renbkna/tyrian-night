@@ -1,6 +1,6 @@
 # Tyrian Night for VS Code
 
-Tyrian Night provides five generated VS Code color themes:
+Tyrian Night provides six generated VS Code color themes:
 
 - **Night** — neutral-black, quiet, and canonical;
 - **Nocturne** — cold-black, mineral, and dangerous;

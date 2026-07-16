@@ -43,6 +43,7 @@ export const RICE_ROOT = 'rice';
 export const RICE_WALLPAPER_PLACEHOLDER = `{{TYRIAN_RICE_ROOT}}/${WALLPAPER_ASSET_PATH}`;
 export const RICE_WALLPAPER_PATH = WALLPAPER_ASSET_PATH;
 export const RICE_MANIFEST_PATH = `${RICE_ROOT}/plasma-layout/manifest.json`;
+export const RICE_MANIFEST_OWNER = 'Tyrian Night rice';
 export const RICE_REQUIREMENTS_PATH = `${RICE_ROOT}/plasma-layout/requirements.md`;
 export const RICE_LAYOUT_FILES = [
   {
@@ -86,7 +87,8 @@ const PLASMA_LIFECYCLE_CANDIDATE_PATH = `${PLASMA_LIFECYCLE_PATH}.next`;
 /**
  * @typedef {(command: string, args: string[], options?: import('node:child_process').ExecFileSyncOptions) => Buffer | string} CommandRunner
  * @typedef {'top' | 'bottom' | 'left' | 'right' | 'floating'} PanelLocation
- * @typedef {{ hiding?: string; alignment?: string; lengthRatio?: number; height?: number; screen?: number; location?: PanelLocation }} PanelRuntimeState
+ * @typedef {{ hiding: string; alignment: string; lengthRatio: number; height: number; location: PanelLocation }} PanelSnapshotState
+ * @typedef {PanelSnapshotState & { screen: number }} PanelRuntimeState
  * @typedef {{ activityId: string; screen: number; image: string; wallpaperPlugin: string }} WallpaperRuntimeState
  * @typedef {{
  *   apply: boolean;
@@ -98,11 +100,13 @@ const PLASMA_LIFECYCLE_CANDIDATE_PATH = `${PLASMA_LIFECYCLE_PATH}.next`;
  *     stagedPath: string;
  *     targetPath: string;
  *   }>;
- *   panelStateById: Map<string, PanelRuntimeState>;
+ *   panelStateById: Map<string, PanelSnapshotState>;
  *   previousPanelStateById: Map<string, PanelRuntimeState>;
  *   previousWallpaperState: WallpaperRuntimeState[];
  *   primaryTarget: { screen: number; width: number; height: number; otherScreens: number[] };
  *   runCommand: CommandRunner;
+ *   materializeWallpaper: boolean;
+ *   wallpaperSourcePath: string;
  *   wallpaperPath: string;
  *   testInterruptAfterStop?: boolean;
  *   testInterruptAfterRuntime?: boolean;
@@ -162,6 +166,7 @@ function checkRiceSnapshotOwned(root, captureHome) {
   }
 
   assertPortablePlasmaLayoutSnapshot(desktopLayout);
+  readSnapshotPanelStateById(desktopLayout);
   assertNoHomePaths(layoutContents, captureHome);
 
   const manifestPath = path.join(root, RICE_MANIFEST_PATH);
@@ -246,7 +251,7 @@ function captureRiceLayoutOwned(
   const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
   assertRegularSourceFileUnder(userHome, desktopLayoutPath, desktopLayoutPath);
   const beforeStopDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
-  const beforeStopPanels = readSnapshotPanelStateById(beforeStopDesktop);
+  const beforeStopPanels = readSnapshotPanelGenerationById(beforeStopDesktop);
   const preStopPanelState = readLivePanelStateById(runCommand);
   const preStopWallpaperState = readLivePlasmaWallpaperState(runCommand);
   const primaryScreen = readPrimaryPlasmaTarget(runCommand).screen;
@@ -279,7 +284,7 @@ function captureRiceLayoutOwned(
     }
 
     const frozenDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
-    const frozenPanels = readSnapshotPanelStateById(frozenDesktop);
+    const frozenPanels = readSnapshotPanelGenerationById(frozenDesktop);
 
     if (!sameKeySet(beforeStopPanels, frozenPanels)) {
       throw new Error('Plasma panel generation changed while the capture was being frozen');
@@ -345,7 +350,7 @@ function captureRiceLayoutOwned(
     throw new SimulatedCaptureProofInterruption();
   }
 
-  /** @type {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>} */
+  /** @type {Map<string, PanelRuntimeState>} */
   let postStartPanelState;
 
   try {
@@ -768,6 +773,7 @@ function validateCapturedRiceSnapshot(layoutContents, captureHome) {
   }
 
   assertPortablePlasmaLayoutSnapshot(desktopLayout);
+  readSnapshotPanelStateById(desktopLayout);
   assertNoHomePaths(layoutContents, captureHome);
 }
 
@@ -1391,7 +1397,7 @@ function sameWallpaperRuntimeState(before, after) {
 }
 
 /**
- * @param {Map<string, PanelRuntimeState>} panelStateById
+ * @param {Map<string, PanelSnapshotState>} panelStateById
  * @param {number} screen
  * @returns {Map<string, PanelRuntimeState>}
  */
@@ -1646,6 +1652,7 @@ export function installPlasmaLayout(options = {}) {
         repoRoot: root,
         home: userHome,
         runtimeRoot,
+        materializeWallpaper: true,
         apply,
         runCommand,
         testInterruptAfterStop: options.testInterruptAfterStop,
@@ -1679,7 +1686,7 @@ export function installPlasmaLayout(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; materializeWallpaper?: boolean; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
  * @returns {PreparedPlasmaLayoutInstall}
  */
 function preparePlasmaLayoutInstallOwned(options = {}) {
@@ -1728,7 +1735,11 @@ function preparePlasmaLayoutInstallOwned(options = {}) {
   const panelStateById = readSnapshotPanelStateById(
     installEntries.find(({ file }) => file.portableWallpaper)?.installedContent ?? ''
   );
+  const wallpaperSourcePath = path.join(root, RICE_WALLPAPER_PATH);
   const wallpaperPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
+  const materializeWallpaper =
+    (options.materializeWallpaper ?? false) &&
+    path.resolve(wallpaperSourcePath) !== path.resolve(wallpaperPath);
 
   return {
     apply,
@@ -1740,6 +1751,8 @@ function preparePlasmaLayoutInstallOwned(options = {}) {
     previousWallpaperState,
     primaryTarget,
     runCommand,
+    materializeWallpaper,
+    wallpaperSourcePath,
     wallpaperPath,
     testInterruptAfterStop: options.testInterruptAfterStop,
     testInterruptAfterRuntime: options.testInterruptAfterRuntime,
@@ -1753,6 +1766,9 @@ function preparePlasmaLayoutInstallOwned(options = {}) {
  */
 function installPreparedPlasmaLayout(plan) {
   if (!plan.apply) {
+    if (plan.materializeWallpaper) {
+      materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.home, plan.wallpaperPath, false);
+    }
     applyPlasmaLayoutInstall(plan);
     return;
   }
@@ -1760,10 +1776,9 @@ function installPreparedPlasmaLayout(plan) {
   const transaction = withHomeFilesystemTransaction(
     plan.home,
     {
-      targetPaths: plan.installEntries.flatMap(({ stagedPath, targetPath }) => [
-        targetPath,
-        stagedPath,
-      ]),
+      targetPaths: plan.installEntries
+        .flatMap(({ stagedPath, targetPath }) => [targetPath, stagedPath])
+        .concat(plan.materializeWallpaper ? [plan.wallpaperPath] : []),
       backupRoot: plan.backupRoot,
       owner: 'layout',
       shouldLeavePrepared: (error) =>
@@ -1778,7 +1793,12 @@ function installPreparedPlasmaLayout(plan) {
         finishPlasmaLifecycle(plan.home);
       },
     },
-    () => applyPlasmaLayoutInstall(plan)
+    () => {
+      if (plan.materializeWallpaper) {
+        materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.home, plan.wallpaperPath, true);
+      }
+      applyPlasmaLayoutInstall(plan);
+    }
   );
 
   if (transaction.receipt) {
@@ -2365,28 +2385,88 @@ function applyPanelStateToDesktopLayout(desktopLayout, panelStateById) {
 
 /**
  * @param {string} desktopLayout
- * @returns {Map<string, { hiding?: string; alignment?: string; lengthRatio?: number; height?: number }>}
+ * @returns {Map<string, PanelSnapshotState>}
  */
 function readSnapshotPanelStateById(desktopLayout) {
-  const panelStateById = new Map();
+  /** @type {Map<string, Partial<PanelSnapshotState>>} */
+  const candidates = new Map();
 
   replaceContainmentSections(desktopLayout, (section, id) => {
     if (!/^plugin=org\.kde\.panel$/mu.test(section)) {
       return section;
     }
 
-    panelStateById.set(id, {
-      alignment: section.match(/^tyrianPanelAlignment=(.+)$/mu)?.[1],
-      height: parseOptionalNumber(section.match(/^tyrianPanelHeight=(.+)$/mu)?.[1]),
-      hiding: section.match(/^hiding=(.+)$/mu)?.[1],
-      lengthRatio: parseOptionalNumber(section.match(/^tyrianPanelLengthRatio=(.+)$/mu)?.[1]),
-      location: parsePanelLocationFromKConfig(section.match(/^location=(.+)$/mu)?.[1], id),
+    const alignment = section.match(/^tyrianPanelAlignment=(.+)$/mu)?.[1];
+    const height = parseOptionalNumber(section.match(/^tyrianPanelHeight=(.+)$/mu)?.[1]);
+    const hiding = section.match(/^hiding=(.+)$/mu)?.[1];
+    const lengthRatio = parseOptionalNumber(section.match(/^tyrianPanelLengthRatio=(.+)$/mu)?.[1]);
+    const location = parsePanelLocationFromKConfig(section.match(/^location=(.+)$/mu)?.[1], id);
+    assertUniqueSnapshotPanelIdentity(candidates, id);
+    candidates.set(id, {
+      ...(alignment === undefined ? {} : { alignment }),
+      ...(height === undefined ? {} : { height }),
+      ...(hiding === undefined ? {} : { hiding }),
+      ...(lengthRatio === undefined ? {} : { lengthRatio }),
+      ...(location === undefined ? {} : { location }),
     });
 
     return section;
   });
 
+  /** @type {Map<string, PanelSnapshotState>} */
+  const panelStateById = new Map();
+  for (const [id, state] of candidates) {
+    if (
+      !PLASMA_PANEL_ALIGNMENTS.has(state.alignment ?? '') ||
+      !PLASMA_PANEL_HIDING_MODES.has(state.hiding ?? '') ||
+      state.height === undefined ||
+      !Number.isFinite(state.height) ||
+      state.height <= 0 ||
+      state.lengthRatio === undefined ||
+      !Number.isFinite(state.lengthRatio) ||
+      state.lengthRatio <= 0 ||
+      state.location === undefined
+    ) {
+      throw new Error(
+        `Plasma panel ${id} has incomplete or invalid owned runtime state: ${JSON.stringify(state)}`
+      );
+    }
+
+    panelStateById.set(id, /** @type {PanelSnapshotState} */ (state));
+  }
+
   return panelStateById;
+}
+
+/**
+ * Capture reads the raw Plasma file before repository-owned runtime metadata is
+ * projected into it. At that boundary only panel identity is authoritative.
+ *
+ * @param {string} desktopLayout
+ * @returns {Map<string, true>}
+ */
+function readSnapshotPanelGenerationById(desktopLayout) {
+  const panels = new Map();
+
+  replaceContainmentSections(desktopLayout, (section, id) => {
+    if (!/^plugin=org\.kde\.panel$/mu.test(section)) return section;
+    assertUniqueSnapshotPanelIdentity(panels, id);
+    panels.set(id, true);
+    return section;
+  });
+
+  return panels;
+}
+
+/**
+ * @param {Map<string, unknown>} panels
+ * @param {string} id
+ * @returns {void}
+ */
+function assertUniqueSnapshotPanelIdentity(panels, id) {
+  if (panels.has(id)) {
+    throw new Error(`Plasma snapshot contains duplicate panel identity ${id}.`);
+  }
 }
 
 /**
@@ -2592,6 +2672,21 @@ function materializeRiceLayoutAssets(root, ownerRoot, runtimeRoot, apply) {
   const sourcePath = path.join(root, RICE_WALLPAPER_PATH);
   const targetPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
 
+  materializeRiceLayoutAsset(sourcePath, ownerRoot, targetPath, apply);
+}
+
+/**
+ * @param {string} sourcePath
+ * @param {string} ownerRoot
+ * @param {string} targetPath
+ * @param {boolean} apply
+ * @returns {void}
+ */
+function materializeRiceLayoutAsset(sourcePath, ownerRoot, targetPath, apply) {
+  if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+    return;
+  }
+
   if (!apply) {
     operation(false, `would copy ${sourcePath} -> ${targetPath}`, () => {});
     return;
@@ -2736,6 +2831,13 @@ function restorePlasmaWallpaperState(wallpaperState, runCommand) {
  */
 function assertPlasmaWallpaperApplied(wallpaperPath, runCommand) {
   const expectedPath = path.resolve(wallpaperPath);
+  const wallpaperStats = fs.lstatSync(expectedPath);
+
+  if (wallpaperStats.isSymbolicLink() || !wallpaperStats.isFile()) {
+    throw new Error('Plasma wallpaper asset is not a regular file at the requested path');
+  }
+
+  fs.accessSync(expectedPath, fs.constants.R_OK);
   const actualState = readLivePlasmaWallpaperState(runCommand);
 
   if (
@@ -2924,7 +3026,7 @@ function assertNoHomePaths(layoutContents, captureHome) {
 function buildRiceManifest() {
   return {
     version: 1,
-    owner: 'Tyrian Night rice',
+    owner: RICE_MANIFEST_OWNER,
     requirements: RICE_REQUIREMENTS_PATH,
     wallpaperAsset: RICE_WALLPAPER_PATH,
     layoutFiles: RICE_LAYOUT_FILES,
@@ -2941,12 +3043,16 @@ function assertRiceManifest(manifest) {
   }
 
   const candidate =
-    /** @type {{ version?: unknown; requirements?: unknown; wallpaperAsset?: unknown; layoutFiles?: unknown }} */ (
+    /** @type {{ version?: unknown; owner?: unknown; requirements?: unknown; wallpaperAsset?: unknown; layoutFiles?: unknown }} */ (
       manifest
     );
 
   if (candidate.version !== 1) {
     throw new Error('Rice layout manifest has an unsupported version');
+  }
+
+  if (candidate.owner !== RICE_MANIFEST_OWNER) {
+    throw new Error(`Rice layout manifest owner must be ${RICE_MANIFEST_OWNER}`);
   }
 
   if (candidate.requirements !== RICE_REQUIREMENTS_PATH) {

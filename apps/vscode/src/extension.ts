@@ -8,15 +8,20 @@ import {
   getIslandCssFileForTheme,
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
-import type { IslandShellStatus } from './islandShell.js';
-import { isIslandApplyPlatformSupported } from './islandPlatform.js';
+import type { IslandDesiredSeedResult, IslandShellResult } from './islandShell.js';
+import { readIslandApplyPlatformSupport } from './islandPlatform.js';
 import type {
-  IslandUiApplySupervisionResult as IslandApplyResult,
-  IslandUiRestoreSupervisionResult as IslandRestoreResult,
-  IslandUiSupervisorInventory,
-  IslandUiRecommendedAction,
+  IslandUiApplySupervisionResult,
+  IslandUiRestoreSupervisionResult,
 } from './islandSupervisor.js';
-import { runIslandJsonProcess } from './islandProcess.js';
+import { IslandProcessFailure, runIslandJsonProcess } from './islandProcess.js';
+import {
+  decodeIslandReconciliationStatus,
+  decodeIslandSupervisorInventory,
+  type IslandDoctorStatus,
+  type IslandReconciliationStatus,
+  type IslandUiRecommendedAction,
+} from './islandWire.js';
 
 const OPEN_DOCTOR_ACTION = 'Open Doctor';
 const TRUST_DOCS_ACTION = 'Why This Is Needed';
@@ -39,6 +44,54 @@ type LegacyStateMigration = {
   keys: string[];
 };
 
+type IslandApplyResult = IslandUiApplySupervisionResult extends infer Result
+  ? Result extends IslandUiApplySupervisionResult
+    ? Pick<Result, Extract<keyof Result, 'kind' | 'physicalChanged' | 'reason'>> &
+        (Result extends { writeAccess: infer WriteAccess }
+          ? {
+              writeAccess: Pick<WriteAccess, Extract<keyof WriteAccess, 'blockedPaths'>>;
+            }
+          : object)
+    : never
+  : never;
+
+type IslandRestoreResult = IslandUiRestoreSupervisionResult extends infer Result
+  ? Result extends IslandUiRestoreSupervisionResult
+    ? Pick<Result, Extract<keyof Result, 'kind' | 'physicalChanged' | 'reason'>> &
+        (Result extends { kind: 'permission-required' | 'blocked' }
+          ? {
+              failedAppRoots: Array<Pick<Result['failedAppRoots'][number], 'appRoot' | 'reason'>>;
+            }
+          : object)
+    : never
+  : never;
+
+const DESIRED_SEED_RESULT_KINDS: {
+  [Kind in IslandDesiredSeedResult['kind']]: Kind;
+} = {
+  seeded: 'seeded',
+  existing: 'existing',
+};
+
+const APPLY_RESULT_KINDS: {
+  [Kind in IslandUiApplySupervisionResult['kind']]: Kind;
+} = {
+  applied: 'applied',
+  'already-current': 'already-current',
+  'permission-required': 'permission-required',
+  unsupported: 'unsupported',
+  blocked: 'blocked',
+};
+
+const RESTORE_RESULT_KINDS: {
+  [Kind in IslandUiRestoreSupervisionResult['kind']]: Kind;
+} = {
+  restored: 'restored',
+  'already-classic': 'already-classic',
+  'permission-required': 'permission-required',
+  blocked: 'blocked',
+};
+
 function isTyrianTheme(theme: string | undefined): theme is string {
   return isTyrianThemeLabel(theme);
 }
@@ -56,6 +109,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await enqueueSync(() => reconcileIslandUi(legacyMigration));
     await maybePromptToSwitchTheme(getActiveTheme());
   } catch (error) {
+    if (error instanceof IslandProcessFailure) {
+      await showIslandProcessFailure(error, 'startup reconciliation');
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Tyrian Night: ${message}`);
   }
@@ -100,10 +157,10 @@ async function consumeLegacyState(): Promise<LegacyStateMigration | undefined> {
 function registerCommands(): void {
   extContext.subscriptions.push(
     vscode.commands.registerCommand('tyrianNight.applyIslandUi', () =>
-      enqueueSync(applyIslandUiCommand)
+      enqueueSync(() => runIslandCommand(applyIslandUiCommand, 'Island UI apply'))
     ),
     vscode.commands.registerCommand('tyrianNight.repairIslandUi', () =>
-      enqueueSync(repairIslandUi)
+      enqueueSync(() => runIslandCommand(repairIslandUi, 'Island UI repair'))
     ),
     vscode.commands.registerCommand('tyrianNight.restoreClassicUi', () =>
       enqueueSync(restoreClassicUi)
@@ -112,16 +169,25 @@ function registerCommands(): void {
   );
 }
 
+async function runIslandCommand(task: () => Promise<void>, operation: string): Promise<void> {
+  try {
+    await task();
+  } catch (error) {
+    if (!(error instanceof IslandProcessFailure)) throw error;
+    await showIslandProcessFailure(error, operation);
+  }
+}
+
 function enqueueSync(task: () => Promise<void>): Promise<void> {
   syncQueue = syncQueue.then(task, task);
   return syncQueue;
 }
 
 async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefined): Promise<void> {
-  if (!isIslandApplyPlatformSupported()) {
+  if (!readIslandApplyPlatformSupport().supported) {
     const status = await readCurrentIslandStatus();
 
-    if (status.registered || status.managed || status.active) {
+    if (status.registration.kind !== 'absent' || status.managed || status.active) {
       await restoreCurrentIslandUi();
     }
 
@@ -135,16 +201,16 @@ async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefin
 
   if (legacyMigration !== undefined) {
     const desiredThemeId = getCssFileForTheme(legacyMigration.theme);
-    const result = await runIslandCli<{
-      kind: 'seeded' | 'existing';
-      desiredThemeId: string | null;
-    }>([
-      'seed-desired-supervised',
-      '--app-root',
-      vscode.env.appRoot,
-      '--desired-theme-id',
-      desiredThemeId,
-    ]);
+    const result = await runIslandCli(
+      [
+        'seed-desired-supervised',
+        '--app-root',
+        vscode.env.appRoot,
+        '--desired-theme-id',
+        desiredThemeId,
+      ],
+      validateDesiredSeedResult
+    );
 
     if (result.kind === 'seeded' || result.kind === 'existing') {
       for (const key of legacyMigration.keys) {
@@ -155,32 +221,33 @@ async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefin
 
   const status = await readCurrentIslandStatus();
 
-  if (status.registrationState === 'corrupt') {
+  if (status.registration.kind === 'corrupt') {
     throw new Error(
       'Island UI desired-state record is corrupt. Run Doctor before changing app files.'
     );
   }
 
-  if (status.registrationState === 'legacy') {
+  if (status.registration.kind === 'legacy') {
     await restoreCurrentIslandUi();
     return;
   }
 
-  if (status.registrationState === 'absent') {
+  if (status.registration.kind === 'absent') {
     if (status.managed || status.active) {
       await restoreCurrentIslandUi();
     }
     return;
   }
 
-  if (status.desiredThemeId === null) {
+  const desiredThemeId = status.registration.desiredThemeId;
+  if (desiredThemeId === null) {
     if (status.managed || status.active) {
       await restoreCurrentIslandUi();
     }
     return;
   }
 
-  const desiredCssFile = resolveDesiredCssFile(status.desiredThemeId);
+  const desiredCssFile = resolveDesiredCssFile(desiredThemeId);
 
   if (desiredCssFile !== undefined) {
     const result = await applyIslandCssFile(desiredCssFile, {
@@ -194,13 +261,9 @@ async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefin
     return;
   }
 
-  if (status.desiredThemeId !== undefined) {
-    throw new Error(
-      `Island UI desires unavailable style '${status.desiredThemeId}'. Install a matching Tyrian Night version or restore Classic UI.`
-    );
-  }
-
-  throw new Error('Island UI has no valid desired state. Run Doctor before changing app files.');
+  throw new Error(
+    `Island UI desires unavailable style '${desiredThemeId}'. Install a matching Tyrian Night version or restore Classic UI.`
+  );
 }
 
 async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promise<boolean> {
@@ -230,6 +293,8 @@ async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promis
 }
 
 async function applyIslandUiCommand(): Promise<void> {
+  if (!(await admitIslandApplyCommand())) return;
+
   if (!isTyrianTheme(getActiveTheme())) {
     const action = await vscode.window.showInformationMessage(
       'Tyrian Night: Apply Island UI with a Tyrian theme?',
@@ -263,14 +328,18 @@ async function applyIslandUiCommand(): Promise<void> {
 }
 
 async function repairIslandUi(): Promise<void> {
+  if (!(await admitIslandApplyCommand())) return;
+
   const status = await readCurrentIslandStatus();
-  const configuredCssFile = resolveDesiredCssFile(status.desiredThemeId);
+  const desiredThemeId =
+    status.registration.kind === 'valid' ? status.registration.desiredThemeId : undefined;
+  const configuredCssFile = resolveDesiredCssFile(desiredThemeId);
   const activeTheme = getActiveTheme();
   const theme = isTyrianTheme(activeTheme) ? activeTheme : undefined;
 
-  if (typeof status.desiredThemeId === 'string' && configuredCssFile === undefined) {
+  if (typeof desiredThemeId === 'string' && configuredCssFile === undefined) {
     vscode.window.showErrorMessage(
-      `Tyrian Night: Island UI desires unavailable style '${status.desiredThemeId}'. Install a matching Tyrian Night version or restore Classic UI; repair left the shared desired style unchanged.`
+      `Tyrian Night: Island UI desires unavailable style '${desiredThemeId}'. Install a matching Tyrian Night version or restore Classic UI; repair left the shared desired style unchanged.`
     );
     return;
   }
@@ -297,6 +366,13 @@ async function repairIslandUi(): Promise<void> {
   }
 }
 
+async function admitIslandApplyCommand(): Promise<boolean> {
+  const support = readIslandApplyPlatformSupport();
+  if (support.supported) return true;
+  await vscode.window.showWarningMessage(`Tyrian Night: ${support.reason}`);
+  return false;
+}
+
 async function applyIslandUi(
   options: {
     interactive: boolean;
@@ -317,15 +393,18 @@ async function applyIslandCssFile(
     reloadMessage: string;
   }
 ): Promise<IslandApplyResult> {
-  const result = await runIslandCli<IslandApplyResult>([
-    'apply-supervised',
-    '--app-root',
-    vscode.env.appRoot,
-    '--css-source',
-    path.join(extContext.extensionPath, 'island', cssFile),
-    '--theme-version',
-    String(extContext.extension.packageJSON.version ?? 'unknown'),
-  ]);
+  const result = await runIslandCli(
+    [
+      'apply-supervised',
+      '--app-root',
+      vscode.env.appRoot,
+      '--css-source',
+      path.join(extContext.extensionPath, 'island', cssFile),
+      '--theme-version',
+      String(extContext.extension.packageJSON.version ?? 'unknown'),
+    ],
+    validateApplyResult
+  );
 
   switch (result.kind) {
     case 'applied':
@@ -407,19 +486,20 @@ async function showIslandPermissionRequired(
 }
 
 async function restoreClassicUi(): Promise<void> {
-  await restoreIslandUi({
-    interactive: true,
-    notifyWhenUnchanged: true,
-    reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
-  });
+  await runIslandCommand(async () => {
+    await restoreIslandUi({
+      interactive: true,
+      notifyWhenUnchanged: true,
+      reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
+    });
+  }, 'Classic UI restore');
 }
 
 async function doctorIslandUi(): Promise<void> {
-  const inventory = await runIslandCli<IslandUiSupervisorInventory>([
-    'status-all-supervised',
-    '--app-root',
-    vscode.env.appRoot,
-  ]);
+  const inventory = await runIslandCli(
+    ['status-all-supervised', '--app-root', vscode.env.appRoot],
+    decodeIslandSupervisorInventory
+  );
   const { statuses, registryDiagnostics } = inventory;
   const currentStatus = statuses[0];
   const desiredState = typeof currentStatus?.desiredThemeId === 'string' ? 'enabled' : 'disabled';
@@ -470,12 +550,14 @@ async function doctorIslandUi(): Promise<void> {
         detailLines.push(`  Receipt CSS hash: ${status.receipt.cssChecksum}`);
       }
 
-      if (status.writeAccess) {
-        detailLines.push(`  Writable: ${status.writeAccess.writable ? 'yes' : 'no'}`);
+      if (status.accessInspection.kind === 'available') {
+        detailLines.push(`  Writable: ${status.accessInspection.writable ? 'yes' : 'no'}`);
 
-        for (const blockedPath of status.writeAccess.blockedPaths) {
+        for (const blockedPath of status.accessInspection.blockedPaths) {
           detailLines.push(`  Blocked path: ${blockedPath.path}`);
         }
+      } else {
+        detailLines.push(`  Write-access inspection failed: ${status.accessInspection.reason}`);
       }
 
       for (const issue of status.issues) {
@@ -519,11 +601,10 @@ async function restoreIslandUi(options: {
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
 }): Promise<IslandRestoreResult> {
-  const result = await runIslandCli<IslandRestoreResult>([
-    'restore-supervised',
-    '--app-root',
-    vscode.env.appRoot,
-  ]);
+  const result = await runIslandCli(
+    ['restore-supervised', '--app-root', vscode.env.appRoot],
+    validateRestoreResult
+  );
 
   if (result.kind === 'permission-required') {
     if (options.interactive) {
@@ -586,7 +667,7 @@ async function openIslandUiTrustDocs(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse(ISLAND_UI_TRUST_DOCS_URL));
 }
 
-function runIslandCli<T>(argumentsList: string[]): Promise<T> {
+function runIslandCli<T>(argumentsList: string[], validate: (value: unknown) => T): Promise<T> {
   const cliPath = path.join(extContext.extensionPath, 'out', 'islandCli.js');
 
   return runIslandJsonProcess<T>([process.execPath, cliPath, ...argumentsList], {
@@ -599,25 +680,190 @@ function runIslandCli<T>(argumentsList: string[]): Promise<T> {
       `Tyrian Night CLI returned invalid output: ${
         error instanceof Error ? error.message : String(error)
       }`,
+    validate,
   });
 }
 
-async function readCurrentIslandStatus(): Promise<IslandShellStatus> {
-  return runIslandCli<IslandShellStatus>(['status', '--app-root', vscode.env.appRoot]);
+async function readCurrentIslandStatus(): Promise<IslandReconciliationStatus> {
+  return runIslandCli(
+    ['status', '--app-root', vscode.env.appRoot],
+    decodeIslandReconciliationStatus
+  );
 }
 
 async function restoreCurrentIslandUi(): Promise<void> {
-  const result = await runIslandCli<{
-    physicalChanged: boolean;
-    incompleteRecovery: boolean;
-    active: false;
-  }>(['restore', '--app-root', vscode.env.appRoot]);
+  const result = await runIslandCli(
+    ['restore', '--app-root', vscode.env.appRoot],
+    validateDirectRestoreResult
+  );
 
   if (result.physicalChanged) {
     await promptForReload(
       'Tyrian Night: Incomplete legacy Island UI state was restored. Reload VS Code to finish reverting.'
     );
   }
+}
+
+function validateDesiredSeedResult(
+  value: unknown
+): Pick<IslandDesiredSeedResult, 'kind' | 'desiredThemeId'> {
+  const record = requireProtocolRecord(value, 'desired-state seed result');
+  const kind = requireProtocolDiscriminant(
+    record.kind,
+    DESIRED_SEED_RESULT_KINDS,
+    'desired-state seed result.kind'
+  );
+  if (record.desiredThemeId !== null && typeof record.desiredThemeId !== 'string') {
+    throw invalidProtocolField('desired-state seed result.desiredThemeId');
+  }
+  return { kind, desiredThemeId: record.desiredThemeId };
+}
+
+function validateApplyResult(value: unknown): IslandApplyResult {
+  const record = requireProtocolRecord(value, 'apply result');
+  const kind = requireProtocolDiscriminant(record.kind, APPLY_RESULT_KINDS, 'apply result.kind');
+  const physicalChanged = requireProtocolBoolean(
+    record.physicalChanged,
+    'apply result.physicalChanged'
+  );
+
+  if (kind === 'applied' || kind === 'already-current') {
+    return { kind, physicalChanged };
+  }
+  if (kind === 'permission-required') {
+    const writeAccess = requireProtocolRecord(record.writeAccess, 'apply result.writeAccess');
+    return {
+      kind,
+      physicalChanged,
+      reason: requireProtocolString(record.reason, 'apply result.reason'),
+      writeAccess: {
+        blockedPaths: validateBlockedPaths(
+          writeAccess.blockedPaths,
+          'apply result.writeAccess.blockedPaths'
+        ),
+      },
+    };
+  }
+  if (kind === 'unsupported' || kind === 'blocked') {
+    return {
+      kind,
+      physicalChanged,
+      reason: requireProtocolString(record.reason, 'apply result.reason'),
+    };
+  }
+  return assertNever(kind);
+}
+
+function validateRestoreResult(value: unknown): IslandRestoreResult {
+  const record = requireProtocolRecord(value, 'restore result');
+  const kind = requireProtocolDiscriminant(
+    record.kind,
+    RESTORE_RESULT_KINDS,
+    'restore result.kind'
+  );
+  const physicalChanged = requireProtocolBoolean(
+    record.physicalChanged,
+    'restore result.physicalChanged'
+  );
+  if (kind === 'restored' || kind === 'already-classic') {
+    return { kind, physicalChanged };
+  }
+  if (kind === 'permission-required' || kind === 'blocked') {
+    return {
+      kind,
+      physicalChanged,
+      reason: requireProtocolString(record.reason, 'restore result.reason'),
+      failedAppRoots: validateFailedAppRoots(record.failedAppRoots),
+    };
+  }
+  return assertNever(kind);
+}
+
+function validateDirectRestoreResult(value: unknown): {
+  physicalChanged: IslandShellResult['physicalChanged'];
+  incompleteRecovery: IslandShellResult['incompleteRecovery'];
+  active: false;
+} {
+  const record = requireProtocolRecord(value, 'direct restore result');
+  if (record.active !== false) throw invalidProtocolField('direct restore result.active');
+  return {
+    physicalChanged: requireProtocolBoolean(
+      record.physicalChanged,
+      'direct restore result.physicalChanged'
+    ),
+    incompleteRecovery: requireProtocolBoolean(
+      record.incompleteRecovery,
+      'direct restore result.incompleteRecovery'
+    ),
+    active: false,
+  };
+}
+
+function validateBlockedPaths(
+  value: unknown,
+  field: string
+): Array<{ path: string; reason: string }> {
+  if (!Array.isArray(value)) throw invalidProtocolField(field);
+  return value.map((entry, index) => {
+    const record = requireProtocolRecord(entry, `${field}[${index}]`);
+    return {
+      path: requireProtocolString(record.path, `${field}[${index}].path`),
+      reason: requireProtocolString(record.reason, `${field}[${index}].reason`),
+    };
+  });
+}
+
+function validateFailedAppRoots(value: unknown): Array<{ appRoot: string; reason: string }> {
+  if (!Array.isArray(value)) throw invalidProtocolField('restore result.failedAppRoots');
+  return value.map((entry, index) => {
+    const record = requireProtocolRecord(entry, `restore result.failedAppRoots[${index}]`);
+    return {
+      appRoot: requireProtocolString(
+        record.appRoot,
+        `restore result.failedAppRoots[${index}].appRoot`
+      ),
+      reason: requireProtocolString(
+        record.reason,
+        `restore result.failedAppRoots[${index}].reason`
+      ),
+    };
+  });
+}
+
+function requireProtocolRecord(value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw invalidProtocolField(field);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireProtocolString(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw invalidProtocolField(field);
+  return value;
+}
+
+function requireProtocolBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') throw invalidProtocolField(field);
+  return value;
+}
+
+function requireProtocolDiscriminant<Kind extends string>(
+  value: unknown,
+  kinds: { readonly [Candidate in Kind]: Candidate },
+  field: string
+): Kind {
+  if (typeof value !== 'string' || !Object.hasOwn(kinds, value)) {
+    throw invalidProtocolField(field);
+  }
+  return value as Kind;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unreachable Island protocol variant: ${String(value)}`);
+}
+
+function invalidProtocolField(field: string): Error {
+  return new Error(`Invalid ${field}.`);
 }
 
 function resolveDesiredCssFile(desiredThemeId: string | null | undefined): string | undefined {
@@ -686,7 +932,7 @@ function formatRecommendedAction(action: IslandUiRecommendedAction): string {
   }
 }
 
-function formatRestoreProof(proof: IslandShellStatus['restoreProof']): string {
+function formatRestoreProof(proof: IslandDoctorStatus['restoreProof']): string {
   switch (proof) {
     case 'none':
       return 'None';
@@ -694,6 +940,36 @@ function formatRestoreProof(proof: IslandShellStatus['restoreProof']): string {
       return 'Manifest v3 backup pair';
     case 'strip-tyrian-block':
       return 'Strip Tyrian block only';
+  }
+}
+
+async function showIslandProcessFailure(
+  failure: IslandProcessFailure,
+  operation: string
+): Promise<void> {
+  const causeReasons = failure.causes
+    .map(({ reason }) => reason)
+    .filter((reason) => reason !== failure.message);
+  const causeDetail = causeReasons.length > 0 ? ` Causes: ${causeReasons.join(' | ')}` : '';
+  await vscode.window.showErrorMessage(
+    `Tyrian Night: ${operation} failed (${failure.code}). ${failure.message}${causeDetail}`
+  );
+
+  if (failure.incompleteRecovery) {
+    const action = await vscode.window.showWarningMessage(
+      'Tyrian Night: Island UI recovery is incomplete and requires explicit inspection or manual recovery. Open Doctor before retrying.',
+      OPEN_DOCTOR_ACTION,
+      LATER_ACTION
+    );
+    if (action === OPEN_DOCTOR_ACTION) {
+      await doctorIslandUi();
+    }
+  }
+
+  if (failure.physicalChanged) {
+    await promptForReload(
+      'Tyrian Night: Island UI changed app files before the operation failed. Reload after reviewing the recovery guidance.'
+    );
   }
 }
 
@@ -736,8 +1012,4 @@ async function ensureUninstallWarningAcknowledged(options: {
 
 function legacyIslandUiConfigKey(appRoot: string): string {
   return `${LEGACY_ISLAND_UI_CONFIG_KEY_PREFIX}${appRoot}`;
-}
-
-export function deactivate(): void {
-  // No-op.
 }

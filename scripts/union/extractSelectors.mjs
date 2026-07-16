@@ -62,18 +62,10 @@ export function selectorElementNames(selector) {
  * @param {string} selector
  * @returns {string[]}
  */
-export function selectorStates(selector) {
-  return [...selector.matchAll(/:([a-z-]+)/gu)].map((match) => match[1]);
-}
-
 /**
  * @param {string} selector
  * @returns {string[]}
  */
-export function selectorHints(selector) {
-  return [...selector.matchAll(/\.([a-z][a-z0-9-]*)/gu)].map((match) => match[1]);
-}
-
 /**
  * @param {string} text
  * @param {number} index

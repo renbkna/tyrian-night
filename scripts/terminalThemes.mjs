@@ -757,7 +757,7 @@ function footColor(color) {
  * @returns {string}
  */
 function fishEscape(value) {
-  return value.replace(/(["\\])/gu, '\\$1');
+  return value.replace(/([$"\\])/gu, '\\$1');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

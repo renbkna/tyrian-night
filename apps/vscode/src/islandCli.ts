@@ -14,6 +14,10 @@ import {
   restoreIslandUiSupervised,
   seedIslandDesiredThemeSupervised,
 } from './islandSupervisor.js';
+import {
+  projectIslandReconciliationStatus,
+  projectIslandSupervisorInventory,
+} from './islandWire.js';
 
 type IslandCliArgs = {
   'app-root'?: string;
@@ -79,9 +83,11 @@ async function main(): Promise<void> {
       return;
     case 'status':
       writeJson(
-        await readIslandShellStatus({
-          appRoot: requireArg(args, 'app-root'),
-        })
+        projectIslandReconciliationStatus(
+          await readIslandShellStatus({
+            appRoot: requireArg(args, 'app-root'),
+          })
+        )
       );
       return;
     case 'status-all':
@@ -93,9 +99,11 @@ async function main(): Promise<void> {
       return;
     case 'status-all-supervised':
       writeJson(
-        await readIslandUiSupervisorStatuses({
-          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-        })
+        projectIslandSupervisorInventory(
+          await readIslandUiSupervisorStatuses({
+            preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
+          })
+        )
       );
       return;
     default:

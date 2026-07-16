@@ -17,6 +17,9 @@ import {
 } from './islandShell.js';
 import { isIslandLockLifecycleFailure } from './islandProcessLock.js';
 import { islandMutationFacts } from './islandSupervisorCore.js';
+import type { IslandUiRecommendedAction, IslandUiWriteAccessInspection } from './islandWire.js';
+
+export type { IslandUiRecommendedAction } from './islandWire.js';
 
 export type IslandUiApplySupervisionResult =
   | (IslandMutationResult & {
@@ -58,18 +61,9 @@ export type IslandUiRestoreSupervisionResult =
     });
 
 export type IslandUiSupervisorStatus = IslandShellStatus & {
-  writeAccess: IslandShellWriteAccess | undefined;
+  accessInspection: IslandUiWriteAccessInspection;
   recommendedAction: IslandUiRecommendedAction;
 };
-
-export type IslandUiRecommendedAction =
-  | 'none'
-  | 'apply'
-  | 'repair'
-  | 'restore'
-  | 'prune-missing'
-  | 'fix-permissions'
-  | 'manual-recovery';
 
 export function seedIslandDesiredThemeSupervised(options: {
   appRoot: string;
@@ -209,25 +203,24 @@ export async function readIslandUiSupervisorStatuses(options?: {
   const supervisorStatuses: IslandUiSupervisorStatus[] = [];
 
   for (const status of inventory.statuses) {
-    let writeAccess: IslandShellWriteAccess | undefined;
+    let accessInspection: IslandUiWriteAccessInspection;
 
     try {
-      writeAccess = await readIslandShellWriteAccess({
-        appRoot: status.appRoot,
-        registryHome: options?.registryHome,
-      });
-    } catch {
-      writeAccess = undefined;
+      accessInspection = {
+        kind: 'available',
+        writeAccess: await readIslandShellWriteAccess({
+          appRoot: status.appRoot,
+          registryHome: options?.registryHome,
+        }),
+      };
+    } catch (error) {
+      accessInspection = {
+        kind: 'failed',
+        reason: describeInspectionFailure(error),
+      };
     }
 
-    const statusWithAccess = {
-      ...status,
-      writeAccess,
-    };
-    supervisorStatuses.push({
-      ...statusWithAccess,
-      recommendedAction: recommendIslandUiAction(statusWithAccess),
-    });
+    supervisorStatuses.push(superviseIslandUiStatus(status, accessInspection));
   }
 
   return {
@@ -239,8 +232,23 @@ export async function readIslandUiSupervisorStatuses(options?: {
   };
 }
 
+export function superviseIslandUiStatus(
+  status: IslandShellStatus,
+  accessInspection: IslandUiWriteAccessInspection
+): IslandUiSupervisorStatus {
+  return {
+    ...status,
+    accessInspection,
+    recommendedAction:
+      accessInspection.kind === 'failed'
+        ? 'manual-recovery'
+        : recommendIslandUiAction(status, accessInspection.writeAccess),
+  };
+}
+
 function recommendIslandUiAction(
-  status: IslandShellStatus & { writeAccess: IslandShellWriteAccess | undefined }
+  status: IslandShellStatus,
+  writeAccess: IslandShellWriteAccess
 ): IslandUiRecommendedAction {
   if (status.transaction.kind === 'unsupported') return 'manual-recovery';
   if (
@@ -253,9 +261,10 @@ function recommendIslandUiAction(
 
   if (status.classification === 'missing') return status.registered ? 'prune-missing' : 'none';
   if (status.registrationState === 'corrupt') return 'restore';
+  if (status.registrationState === 'legacy') return 'restore';
 
   const desired = typeof status.desiredThemeId === 'string';
-  if (status.classification === 'permission-denied' || status.writeAccess?.writable === false) {
+  if (status.classification === 'permission-denied' || !writeAccess.writable) {
     return desired || status.managed || status.active || status.registered
       ? 'fix-permissions'
       : 'none';
@@ -276,4 +285,9 @@ function recommendIslandUiAction(
   return status.managed || status.active || status.classification === 'transaction-pending'
     ? 'restore'
     : 'none';
+}
+
+function describeInspectionFailure(error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return reason.length > 0 ? reason : 'Unknown Island write-access inspection failure.';
 }

@@ -53,15 +53,31 @@ export const LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH =
 export const LIVE_INSTALL_MIGRATION_RETIREMENT_RELATIVE_PATH =
   '.local/state/tyrian-night/live-legacy-migration-retired.json';
 const PLASMA_LIFECYCLE_RELATIVE_PATH = '.local/state/tyrian-night/plasma-lifecycle.json';
-// One-time migration inventory for installs predating owned-path state. The
-// separate retirement marker prevents a lost manifest from reviving deletion.
-const RELEASED_THEME_SLUGS = [
-  'tyrian-night',
-  'tyrian-nocturne',
-  'tyrian-night-old',
-  'tyrian-abyss',
-  'tyrian-dawn',
-];
+// Versioned from the final installer that predated owned-path state (7c16989^).
+// This is migration authority, not a projection of the current theme catalog.
+const PRE_OWNED_REGISTRY_INSTALL = Object.freeze({
+  version: 1,
+  themeSlugs: [
+    'tyrian-night',
+    'tyrian-nocturne',
+    'tyrian-night-old',
+    'tyrian-abyss',
+    'tyrian-dawn',
+  ],
+});
+// Versioned from the first owned-path registry generation (7c16989). Foot and
+// XDG Fish were introduced with that registry, so they are valid persisted v1
+// ownership but are not evidence for a no-manifest migration.
+const V1_OWNED_REGISTRY_FIXED_ROOT_INSTALL = Object.freeze({
+  version: 1,
+  themeSlugs: [
+    'tyrian-night',
+    'tyrian-nocturne',
+    'tyrian-night-old',
+    'tyrian-abyss',
+    'tyrian-dawn',
+  ],
+});
 const LIVE_INSTALL_TARGETS = new Set(['plasma', 'caelestia']);
 const HYPRLAND_MODES = new Set(['lua', 'legacy']);
 /** @type {Map<string, { depth: number; owner: 'live' | 'rice' | 'layout'; targetPaths: string[] }>} */
@@ -701,8 +717,8 @@ function installLiveTyrianOwned(plan, options) {
     resolveLiveInstallTransactionScope(plan);
 
   if (!plan.apply) {
-    materializeSourceRoot(plan);
     cleanupStaleOwnedPaths(plan, staleOwnedPaths);
+    materializeSourceRoot(plan);
     installTerminalLayer(plan, prepared.common);
     installTargetLayer(plan, prepared.desktop);
     publishLiveOwnedPaths(plan, desiredOwnedRegistry);
@@ -723,13 +739,13 @@ function installLiveTyrianOwned(plan, options) {
       testFailCommit: options.testFailCommit,
     },
     () => {
+      cleanupStaleOwnedPaths(plan, staleOwnedPaths);
       materializeSourceRoot(plan);
 
       if (options.testInterruptAfterMutation) {
         throw new SimulatedLiveInstallInterruption();
       }
 
-      cleanupStaleOwnedPaths(plan, staleOwnedPaths);
       installTerminalLayer(plan, prepared.common);
       installTargetLayer(plan, prepared.desktop);
       publishLiveOwnedPaths(plan, desiredOwnedRegistry);
@@ -778,11 +794,7 @@ function resolveLiveInstallTransactionScope(plan) {
   ];
   const desiredActivePaths = [...desiredOwnedRegistry.common, ...desiredOwnedRegistry[plan.target]];
   const staleOwnedPaths = previousActivePaths.filter(
-    (ownedPath) =>
-      !desiredActivePaths.some(
-        (desiredPath) =>
-          isSameOrDescendant(ownedPath, desiredPath) || isSameOrDescendant(desiredPath, ownedPath)
-      )
+    (ownedPath) => !desiredActivePaths.includes(ownedPath)
   );
 
   const targetPaths = [
@@ -820,16 +832,23 @@ function readLiveOwnedRegistry(plan) {
       return { common: [], plasma: [], caelestia: [] };
     }
 
-    return {
+    const fixedRootInventory = buildPreOwnedRegistryInstallInventory(plan.home);
+    const transitionalInventory = {
       common: [
-        ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.ghosttyThemes, slug)),
-        ...RELEASED_THEME_SLUGS.map((slug) => path.join(plan.livePaths.footThemes, `${slug}.ini`)),
+        ...PRE_OWNED_REGISTRY_INSTALL.themeSlugs.map((slug) =>
+          path.join(plan.livePaths.ghosttyThemes, slug)
+        ),
+        ...PRE_OWNED_REGISTRY_INSTALL.themeSlugs.map((slug) =>
+          path.join(plan.livePaths.footThemes, `${slug}.ini`)
+        ),
         path.join(plan.configRoot, 'ghostty/ghostty.css'),
         ...plan.legacyPaths.common,
-      ].filter(exists),
-      plasma: plan.legacyPaths.plasma.filter(exists),
-      caelestia: plan.legacyPaths.caelestia.filter(exists),
+      ],
+      plasma: plan.legacyPaths.plasma,
+      caelestia: plan.legacyPaths.caelestia,
     };
+
+    return mergeExistingLiveOwnedRegistries(fixedRootInventory, transitionalInventory);
   }
 
   const stats = fs.lstatSync(plan.ownershipManifestPath);
@@ -971,6 +990,20 @@ function isLiveMigrationRetired(plan) {
  * @returns {keyof LiveOwnedRegistry | undefined}
  */
 function classifyLiveOwnedPath(plan, ownedPath) {
+  const fixedRootInventories = [
+    buildPreOwnedRegistryInstallInventory(plan.home),
+    buildV1OwnedRegistryFixedRootInventory(plan.home),
+  ];
+  for (const fixedRootInventory of fixedRootInventories) {
+    for (const profile of /** @type {(keyof LiveOwnedRegistry)[]} */ ([
+      'common',
+      'plasma',
+      'caelestia',
+    ])) {
+      if (fixedRootInventory[profile].includes(ownedPath)) return profile;
+    }
+  }
+
   if (isSameOrDescendant(plan.installRoot, ownedPath)) return 'common';
   if (plan.commonOwnedPaths.includes(ownedPath)) return 'common';
   if (plan.legacyPaths.common.includes(ownedPath)) return 'common';
@@ -1436,6 +1469,80 @@ function buildLegacyPaths(userHome, xdgRoots) {
 }
 
 /**
+ * Every fixed-root path written by the last installer generation before the
+ * ownership registry existed. Profile assignment follows the later split:
+ * terminal state is common, KDE state is Plasma, and Caelestia state remains
+ * dormant until that target is selected.
+ *
+ * @param {string} userHome
+ * @returns {LiveOwnedRegistry}
+ */
+function buildPreOwnedRegistryInstallInventory(userHome) {
+  return {
+    common: [
+      path.join(userHome, TYRIAN_INSTALL_HOME),
+      path.join(userHome, '.config/ghostty/config'),
+      path.join(userHome, '.config/ghostty/ghostty.css'),
+      ...PRE_OWNED_REGISTRY_INSTALL.themeSlugs.map((slug) =>
+        path.join(userHome, `.config/ghostty/themes/${slug}`)
+      ),
+    ],
+    plasma: [
+      path.join(userHome, '.config/kdeglobals'),
+      path.join(userHome, '.config/plasmarc'),
+      path.join(userHome, '.config/kscreenlockerrc'),
+      path.join(userHome, '.local/share/color-schemes/TyrianNight.colors'),
+      path.join(userHome, '.local/share/plasma/desktoptheme/TyrianNight'),
+      path.join(userHome, '.local/share/plasma/look-and-feel/TyrianNight'),
+    ],
+    caelestia: [
+      path.join(userHome, '.local/share/caelestia/fish/config.fish'),
+      path.join(userHome, '.local/share/caelestia/fish/functions/fish_greeting.fish'),
+      path.join(userHome, '.local/share/caelestia/fastfetch/config.jsonc'),
+      path.join(userHome, '.local/share/caelestia/starship.toml'),
+      path.join(userHome, '.local/state/caelestia/scheme.json'),
+      path.join(userHome, '.local/state/caelestia/sequences.txt'),
+      path.join(userHome, '.config/hypr/scheme/current.conf'),
+    ],
+  };
+}
+
+/**
+ * Fixed-root paths added by the v1 owned-path registry. This inventory is used
+ * only to decode persisted ownership after XDG roots move; no-manifest
+ * inference remains limited to the preceding installer generation.
+ *
+ * @param {string} userHome
+ * @returns {LiveOwnedRegistry}
+ */
+function buildV1OwnedRegistryFixedRootInventory(userHome) {
+  return {
+    common: [
+      path.join(userHome, '.config/foot/foot.ini'),
+      ...V1_OWNED_REGISTRY_FIXED_ROOT_INSTALL.themeSlugs.map((slug) =>
+        path.join(userHome, `.config/foot/themes/${slug}.ini`)
+      ),
+      path.join(userHome, '.config/fish/conf.d/tyrian-night.fish'),
+      path.join(userHome, '.config/fish/functions/fish_greeting.fish'),
+    ],
+    plasma: [],
+    caelestia: [],
+  };
+}
+
+/**
+ * @param {...LiveOwnedRegistry} registries
+ * @returns {LiveOwnedRegistry}
+ */
+function mergeExistingLiveOwnedRegistries(...registries) {
+  return {
+    common: [...new Set(registries.flatMap(({ common }) => common))].filter(exists),
+    plasma: [...new Set(registries.flatMap(({ plasma }) => plasma))].filter(exists),
+    caelestia: [...new Set(registries.flatMap(({ caelestia }) => caelestia))].filter(exists),
+  };
+}
+
+/**
  * @param {string} sourceRoot
  * @param {HyprlandMode | undefined} hyprlandMode
  * @returns {Record<string, string>}
@@ -1802,8 +1909,16 @@ function materializeSourceRoot(plan) {
     return;
   }
 
-  for (const root of plan.materializedRoots) {
-    installManagedPath(plan, root.source, root.target);
+  try {
+    for (const root of plan.materializedRoots) {
+      installManagedPath(plan, root.source, root.target);
+    }
+  } finally {
+    if (plan.apply) {
+      // A pre-registry copy install owned this entire root. Its migration
+      // snapshot therefore collapses link-mode descendants into this target.
+      recordOwnedPathGeneration(plan.home, plan.installRoot);
+    }
   }
 }
 

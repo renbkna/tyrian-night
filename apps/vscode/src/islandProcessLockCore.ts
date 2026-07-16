@@ -9,6 +9,7 @@ import { readIslandMutationFacts } from './islandSupervisorCore.js';
 const DEFAULT_LOCK_RETRY_MS = 20;
 const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_RELEASE_ATTEMPTS = 3;
+const DEFAULT_CLAIM_INSPECTION_ATTEMPTS = 8;
 const MAX_REAPER_CHAIN_LENGTH = 128;
 const heldLockContext = new AsyncLocalStorage<ReadonlySet<string>>();
 
@@ -52,7 +53,9 @@ export type IslandProcessLockCoreOptions = {
   retryMs?: number;
   onReleaseWarning?: (warning: IslandLockReleaseWarning) => void;
   onReaperValidated?: () => Promise<void>;
-  unlinkClaim?: (claimPath: string) => Promise<void>;
+  onClaimReadBeforeVerification?: (claimPath: string) => Promise<void>;
+  renameClaim?: (claimPath: string, retirementPath: string) => Promise<void>;
+  unlinkRetiredClaim?: (retirementPath: string) => Promise<void>;
 };
 
 export class IslandLockActionReleaseError extends AggregateError {
@@ -204,19 +207,25 @@ async function acquireClaim(
 
       try {
         await fs.link(candidatePath, claimPath);
-        const generation = await inspectClaim(claimPath);
+        const generation = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
 
         if (generation === undefined || generation.owner?.token !== owner.token) {
           throw new Error(`Tyrian lock publication could not be verified at '${claimPath}'.`);
         }
 
         if (!(await settleReaperBarriers(claimPath, options))) {
-          await releaseClaim(claimPath, generation, undefined);
+          await releaseClaim(
+            claimPath,
+            generation,
+            options.renameClaim,
+            options.unlinkRetiredClaim,
+            retryMs
+          );
           await delay(retryMs);
           continue;
         }
 
-        const published = await inspectClaim(claimPath);
+        const published = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
         if (published === undefined || !sameGeneration(published, generation)) {
           continue;
         }
@@ -228,7 +237,7 @@ async function acquireClaim(
         }
       }
 
-      const generation = await inspectClaim(claimPath);
+      const generation = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
       if (generation === undefined) continue;
 
       if (generation.owner === undefined) {
@@ -264,7 +273,7 @@ async function beginReaperElection(
   if (expected.owner === undefined || expected.contentHash === undefined) {
     throw new Error(`Tyrian lock claim '${claimPath}' cannot be identified for reaping.`);
   }
-  const current = await inspectClaim(claimPath);
+  const current = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
   if (current === undefined || !sameGeneration(current, expected)) return;
 
   const serialized = serializeClaimGeneration(expected);
@@ -336,13 +345,19 @@ async function finishReaperElection(
   options: IslandProcessLockCoreOptions
 ): Promise<void> {
   try {
-    let current = await inspectClaim(claimPath);
+    let current = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
     if (current === undefined || !matchesSerializedGeneration(current, election.expected)) return;
 
     await options.onReaperValidated?.();
-    current = await inspectClaim(claimPath);
+    current = await inspectClaim(claimPath, options.onClaimReadBeforeVerification);
     if (current === undefined || !matchesSerializedGeneration(current, election.expected)) return;
-    await fs.unlink(claimPath);
+    await retireClaimGeneration(
+      claimPath,
+      current,
+      options.renameClaim,
+      options.unlinkRetiredClaim,
+      options.retryMs ?? DEFAULT_LOCK_RETRY_MS
+    );
   } finally {
     await removeReaperElectionChain(claimPath, generationId);
   }
@@ -622,52 +637,113 @@ async function writeDurableCandidate(candidatePath: string, value: unknown): Pro
   }
 }
 
-async function inspectClaim(claimPath: string): Promise<ClaimGeneration | undefined> {
-  let before: Awaited<ReturnType<typeof fs.lstat>>;
+async function inspectClaim(
+  claimPath: string,
+  onReadBeforeVerification?: (claimPath: string) => Promise<void>
+): Promise<ClaimGeneration | undefined> {
+  for (let attempt = 1; attempt <= DEFAULT_CLAIM_INSPECTION_ATTEMPTS; attempt += 1) {
+    const before = await lstatIfExists(claimPath);
+    if (before === undefined) return undefined;
 
-  try {
-    before = await fs.lstat(claimPath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === 'ENOENT') return undefined;
-    throw error;
-  }
-
-  let content: string | undefined;
-  if (before.isFile() && !before.isSymbolicLink()) {
-    try {
-      content = await fs.readFile(claimPath, 'utf8');
-    } catch {
-      content = undefined;
+    let content: string | undefined;
+    if (before.isFile() && !before.isSymbolicLink()) {
+      try {
+        content = await fs.readFile(claimPath, 'utf8');
+      } catch {
+        content = undefined;
+      }
     }
+
+    await onReadBeforeVerification?.(claimPath);
+    const after = await lstatIfExists(claimPath);
+    if (after === undefined) return undefined;
+    if (before.dev !== after.dev || before.ino !== after.ino) continue;
+
+    return {
+      dev: after.dev,
+      ino: after.ino,
+      contentHash:
+        content === undefined
+          ? undefined
+          : crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
+      owner: content === undefined ? undefined : parseLockOwner(content),
+    };
   }
 
-  const after = await lstatIfExists(claimPath);
-  if (after === undefined || before.dev !== after.dev || before.ino !== after.ino) {
-    return inspectClaim(claimPath);
-  }
-
-  return {
-    dev: after.dev,
-    ino: after.ino,
-    contentHash:
-      content === undefined
-        ? undefined
-        : crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
-    owner: content === undefined ? undefined : parseLockOwner(content),
-  };
+  throw new Error(
+    `Tyrian lock claim '${claimPath}' changed continuously during bounded inspection.`
+  );
 }
 
 async function releaseClaim(
   claimPath: string,
   expected: ClaimGeneration,
-  unlinkClaim: ((claimPath: string) => Promise<void>) | undefined
+  renameClaim: ((claimPath: string, retirementPath: string) => Promise<void>) | undefined,
+  unlinkRetiredClaim: ((retirementPath: string) => Promise<void>) | undefined,
+  retryMs: number
 ): Promise<void> {
   const current = await inspectClaim(claimPath);
   if (current === undefined || !sameGeneration(current, expected)) {
     throw new Error(`Tyrian lock generation changed before release at '${claimPath}'.`);
   }
 
-  await (unlinkClaim ?? fs.unlink)(claimPath);
+  await retireClaimGeneration(claimPath, expected, renameClaim, unlinkRetiredClaim, retryMs);
+}
+
+async function retireClaimGeneration(
+  claimPath: string,
+  expected: ClaimGeneration,
+  renameClaim: ((claimPath: string, retirementPath: string) => Promise<void>) | undefined,
+  unlinkRetiredClaim: ((retirementPath: string) => Promise<void>) | undefined,
+  retryMs: number
+): Promise<void> {
+  const retirementPath = `${claimPath}.retired-${crypto.randomUUID()}`;
+  await (renameClaim ?? fs.rename)(claimPath, retirementPath);
+  const retired = await inspectClaim(retirementPath);
+
+  if (retired !== undefined && sameGeneration(retired, expected)) {
+    await removeRetiredClaimWithRetry(retirementPath, unlinkRetiredClaim, retryMs);
+    return;
+  }
+
+  if (retired === undefined) {
+    throw new Error(`Tyrian lock retirement lost its moved generation at '${retirementPath}'.`);
+  }
+
+  try {
+    await fs.link(retirementPath, claimPath);
+    await fs.unlink(retirementPath);
+  } catch (restoreError) {
+    throw new Error(
+      `Tyrian lock replacement was preserved at '${retirementPath}' but could not be restored to '${claimPath}'.`,
+      { cause: restoreError }
+    );
+  }
+
+  throw new Error(`Tyrian lock generation changed during retirement at '${claimPath}'.`);
+}
+
+async function removeRetiredClaimWithRetry(
+  retirementPath: string,
+  unlinkRetiredClaim: ((retirementPath: string) => Promise<void>) | undefined,
+  retryMs: number
+): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= DEFAULT_RELEASE_ATTEMPTS; attempt += 1) {
+    try {
+      await (unlinkRetiredClaim ?? fs.unlink)(retirementPath);
+      return;
+    } catch (error) {
+      if ((await lstatIfExists(retirementPath)) === undefined) return;
+      lastError = error;
+      if (attempt < DEFAULT_RELEASE_ATTEMPTS) await delay(retryMs);
+    }
+  }
+
+  throw new Error(`Tyrian lock retirement cleanup remains at '${retirementPath}'.`, {
+    cause: lastError,
+  });
 }
 
 async function releaseClaimWithRetry(
@@ -679,12 +755,18 @@ async function releaseClaimWithRetry(
 
   for (let attempt = 1; attempt <= DEFAULT_RELEASE_ATTEMPTS; attempt += 1) {
     try {
-      await releaseClaim(claimPath, generation, options.unlinkClaim);
+      await releaseClaim(
+        claimPath,
+        generation,
+        options.renameClaim,
+        options.unlinkRetiredClaim,
+        options.retryMs ?? DEFAULT_LOCK_RETRY_MS
+      );
       return;
     } catch (error) {
       lastError = error;
       const current = await inspectClaim(claimPath);
-      if (current === undefined) return;
+      if (current === undefined) break;
       if (!sameGeneration(current, generation)) break;
       if (attempt < DEFAULT_RELEASE_ATTEMPTS) {
         await delay(options.retryMs ?? DEFAULT_LOCK_RETRY_MS);

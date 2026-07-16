@@ -6,14 +6,6 @@ export type IslandMutationFacts = {
   incompleteRecovery: boolean;
 };
 
-export const NO_ISLAND_MUTATION: Readonly<IslandMutationFacts> = Object.freeze({
-  desiredStateChanged: false,
-  registryChanged: false,
-  physicalChanged: false,
-  externalDrift: false,
-  incompleteRecovery: false,
-});
-
 export function islandMutationFacts(
   facts: Partial<IslandMutationFacts> = {}
 ): IslandMutationFacts & { changed: boolean } {

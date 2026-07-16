@@ -17,6 +17,7 @@ import {
   applyIslandUiSupervised,
   readIslandUiSupervisorStatuses,
   restoreIslandUiSupervised,
+  superviseIslandUiStatus,
 } from '../apps/vscode/src/islandSupervisor';
 import {
   WORKBENCH_CHECKSUM_KEY,
@@ -122,7 +123,7 @@ test('supervised apply recovers a committing journal before deciding it is curre
   await expect(fs.stat(backupPath)).rejects.toThrow();
 });
 
-test('supervised apply reports publish-first physical failure as changed', async () => {
+test('supervised apply blocks a symlinked target before desired or physical mutation', async () => {
   const appRoot = await createAppRoot('partial-apply');
   const cssSource = await writeCssSource('partial-apply.css');
   const backupPath = buildIslandPatchPaths(appRoot).backupHtmlPath;
@@ -137,9 +138,41 @@ test('supervised apply reports publish-first physical failure as changed', async
     })
   ).resolves.toMatchObject({
     kind: 'blocked',
-    changed: true,
-    reason: expect.stringContaining('symbolic link'),
+    changed: false,
+    desiredStateChanged: false,
+    registryChanged: false,
+    physicalChanged: false,
+    reason: expect.stringContaining('not an owned regular file'),
   });
+  await expect(fs.lstat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
+  expect((await fs.lstat(backupPath)).isSymbolicLink()).toBe(true);
+});
+
+test('supervised apply normalizes a symlinked ancestor before desired or physical mutation', async () => {
+  const appRoot = await createAppRoot('blocked-ancestor-apply');
+  const cssSource = await writeCssSource('blocked-ancestor-apply.css');
+  const { workbenchDirPath } = buildIslandPatchPaths(appRoot);
+  const externalWorkbench = path.join(testRoot, 'blocked-ancestor-external');
+  await fs.rename(workbenchDirPath, externalWorkbench);
+  await fs.symlink(externalWorkbench, workbenchDirPath, 'dir');
+
+  await expect(
+    applyIslandUiSupervised({
+      appRoot,
+      cssSourcePath: cssSource,
+      themeVersion: 'test',
+      registryHome,
+    })
+  ).resolves.toMatchObject({
+    kind: 'blocked',
+    changed: false,
+    desiredStateChanged: false,
+    registryChanged: false,
+    physicalChanged: false,
+    reason: expect.stringContaining('patch ancestor'),
+  });
+  await expect(fs.lstat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
+  expect(await fs.readdir(externalWorkbench)).toEqual(['workbench.html']);
 });
 
 test('repair changes physical state while desired state is unchanged', async () => {
@@ -162,23 +195,30 @@ test('repair changes physical state while desired state is unchanged', async () 
   });
 });
 
-test('supervised restore reports publish-first physical failure as changed', async () => {
+test('supervised restore blocks a symlinked target before desired or physical mutation', async () => {
   const appRoot = await createAppRoot('partial-restore');
   const cssSource = await writeCssSource('partial-restore.css');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
   const islandCssPath = buildIslandPatchPaths(appRoot).islandCssPath;
   await fs.rm(islandCssPath);
   await fs.symlink(cssSource, islandCssPath);
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  const recordBefore = await fs.readFile(recordPath, 'utf8');
 
   await expect(
     restoreIslandUiSupervised({ preferredAppRoots: [appRoot], registryHome })
   ).resolves.toMatchObject({
     kind: 'blocked',
-    changed: true,
+    changed: false,
+    desiredStateChanged: false,
+    registryChanged: false,
+    physicalChanged: false,
     failedAppRoots: [
-      { appRoot, code: 'blocked', reason: expect.stringContaining('symbolic link') },
+      { appRoot, code: 'blocked', reason: expect.stringContaining('not an owned regular file') },
     ],
   });
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(recordBefore);
+  expect((await fs.lstat(islandCssPath)).isSymbolicLink()).toBe(true);
 });
 
 test('already-disabled restore changes physical state without rewriting desired state', async () => {
@@ -386,6 +426,38 @@ test('lock-held readiness revalidation precedes every registry initialization mu
   await expect(fs.stat(recordPath)).rejects.toThrow();
 });
 
+test('supervised restore preserves partial legacy migration mutation facts', async () => {
+  const firstRoot = path.join(testRoot, 'supervised-partial-migration-a-first');
+  const collidingRoot = path.join(testRoot, 'supervised-partial-migration-z-collision');
+  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
+  const collisionPath = buildManagedRootRecordPath(collidingRoot, registryHome);
+  await fs.mkdir(firstRoot);
+  await fs.mkdir(collidingRoot);
+  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+  await fs.writeFile(
+    legacyPath,
+    JSON.stringify({ version: 1, appRoots: [firstRoot, collidingRoot] }, null, 2).concat('\n'),
+    'utf8'
+  );
+  await fs.mkdir(path.dirname(collisionPath), { recursive: true });
+  await fs.writeFile(
+    collisionPath,
+    JSON.stringify({ version: 1, appRoot: firstRoot }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  await expect(restoreIslandUiSupervised({ registryHome })).resolves.toMatchObject({
+    kind: 'blocked',
+    changed: true,
+    registryChanged: true,
+    enumerationFailure: {
+      changed: true,
+      registryChanged: true,
+      reason: expect.stringContaining('hash collision'),
+    },
+  });
+});
+
 test('missing registered roots receive a typed prune recommendation before permission advice', async () => {
   const appRoot = path.join(testRoot, 'missing-recommendation');
   const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
@@ -402,7 +474,34 @@ test('missing registered roots receive a typed prune recommendation before permi
         appRoot,
         classification: 'missing',
         recommendedAction: 'prune-missing',
-        writeAccess: { writable: false },
+        accessInspection: {
+          kind: 'available',
+          writeAccess: { writable: false },
+        },
+      },
+    ],
+  });
+});
+
+test('legacy registrations receive the supervisor-owned restore remedy', async () => {
+  const appRoot = await createAppRoot('legacy-registration-remedy');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(
+    recordPath,
+    JSON.stringify({ version: 1, appRoot }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  await expect(
+    readIslandUiSupervisorStatuses({ preferredAppRoots: [appRoot], registryHome })
+  ).resolves.toMatchObject({
+    statuses: [
+      {
+        appRoot,
+        registrationState: 'legacy',
+        classification: 'broken-backup',
+        recommendedAction: 'restore',
       },
     ],
   });
@@ -427,8 +526,9 @@ test('supervisor reports physical write access without deciding desired-state po
       statuses: [
         {
           classification: 'clean',
-          writeAccess: {
-            writable: false,
+          accessInspection: {
+            kind: 'available',
+            writeAccess: { writable: false },
           },
         },
       ],
@@ -454,14 +554,39 @@ test('write access follows atomic replacement directories instead of target writ
       registryHome,
     });
 
-    expect(inventory.statuses[0]?.writeAccess).toMatchObject({
-      writable: true,
-      blockedPaths: [],
+    expect(inventory.statuses[0]?.accessInspection).toMatchObject({
+      kind: 'available',
+      writeAccess: {
+        writable: true,
+        blockedPaths: [],
+      },
     });
   } finally {
     await fs.chmod(workbenchHtmlPath, 0o644);
     await fs.chmod(productJsonPath, 0o644);
   }
+});
+
+test('failed write-access inspection is explicit and forces manual recovery', async () => {
+  const appRoot = await createAppRoot('failed-access-inspection');
+  const inventory = await readIslandUiSupervisorStatuses({
+    preferredAppRoots: [appRoot],
+    registryHome,
+  });
+  const status = inventory.statuses[0]!;
+
+  expect(
+    superviseIslandUiStatus(status, {
+      kind: 'failed',
+      reason: 'app root changed generation during access inspection',
+    })
+  ).toMatchObject({
+    accessInspection: {
+      kind: 'failed',
+      reason: 'app root changed generation during access inspection',
+    },
+    recommendedAction: 'manual-recovery',
+  });
 });
 
 test('supervised restore maps write failures to permission-required', async () => {

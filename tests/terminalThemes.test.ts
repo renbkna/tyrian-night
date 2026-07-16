@@ -9,7 +9,11 @@ import {
   FASTFETCH_IMAGE_ASSET_PATH,
   FASTFETCH_IMAGE_CONFIG_PATH,
 } from '../scripts/portableAssets.mjs';
-import { buildTerminalThemeAssets, writeTerminalThemeAssets } from '../scripts/terminalThemes.mjs';
+import {
+  buildFishStartupConfig,
+  buildTerminalThemeAssets,
+  writeTerminalThemeAssets,
+} from '../scripts/terminalThemes.mjs';
 import { themeColor } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
@@ -55,6 +59,15 @@ test('terminal generation resolves validated default roles from the injected cat
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('Fish startup generation preserves arbitrary checkout roots as literal paths', () => {
+  const tyrianRoot = String.raw`/tmp/$PROJECT/it's\a literal root`;
+  const startup = buildFishStartupConfig({ tyrianRoot });
+
+  expect(startup.split('\n')[0]).toBe(
+    String.raw`set -gx TYRIAN_NIGHT_ROOT "/tmp/\$PROJECT/it's\\a literal root"`
+  );
 });
 
 test('terminal generation preserves unrelated files in mixed output directories', () => {

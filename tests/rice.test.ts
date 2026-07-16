@@ -13,6 +13,7 @@ import {
   recoverRice,
   RICE_LAYOUT_FILES,
   RICE_LAYOUT_REQUIRED_COMMANDS,
+  RICE_MANIFEST_OWNER,
   RICE_MANIFEST_PATH,
   RICE_REQUIREMENTS_PATH,
   RICE_WALLPAPER_PATH,
@@ -36,6 +37,7 @@ test('rice snapshot is complete and portable', () => {
   const shellLayout = fs.readFileSync(path.join(root, RICE_LAYOUT_FILES[1].snapshotPath), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, RICE_MANIFEST_PATH), 'utf8')) as {
     layoutFiles: typeof RICE_LAYOUT_FILES;
+    owner: string;
     requirements: string;
     wallpaperAsset: string;
   };
@@ -61,6 +63,7 @@ test('rice snapshot is complete and portable', () => {
     /^\[PlasmaViews\]\[Panel \d+\]\[Defaults\]\n(?:[^[\n].*\n?)*^(?:length|maxLength|minLength)=/mu
   );
   expect(fs.existsSync(path.join(root, RICE_WALLPAPER_PATH))).toBe(true);
+  expect(manifest.owner).toBe(RICE_MANIFEST_OWNER);
   expect(manifest.requirements).toBe(RICE_REQUIREMENTS_PATH);
   expect(requirements).toContain('com.axzoros.yorhahud');
   expect(requirements).toContain('luisbocanegra.panel.colorizer');
@@ -198,6 +201,111 @@ test('rice check rejects non-portable wallpaper preview fields', () => {
     fs.appendFileSync(desktopSnapshotPath, '\nPreviewImage=file:///mnt/wallpaper.png\n');
 
     expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('file URI wallpaper path');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice check rejects incomplete or invalid owned panel state', () => {
+  const cases = [
+    [/^hiding=.*\n/mu, ''],
+    [/^tyrianPanelAlignment=.*$/mu, 'tyrianPanelAlignment=diagonal'],
+    [/^tyrianPanelHeight=.*\n/mu, ''],
+    [/^tyrianPanelLengthRatio=.*$/mu, 'tyrianPanelLengthRatio=0'],
+    [/^location=.*\n/mu, ''],
+  ] as const;
+
+  for (const [pattern, replacement] of cases) {
+    const root = makeTempRiceRepo();
+    const desktopSnapshotPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
+
+    try {
+      const snapshot = fs.readFileSync(desktopSnapshotPath, 'utf8');
+      fs.writeFileSync(desktopSnapshotPath, snapshot.replace(pattern, replacement));
+
+      expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow(
+        'incomplete or invalid owned runtime state'
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('rice check rejects duplicate persisted panel identities', () => {
+  const root = makeTempRiceRepo();
+  const desktopSnapshotPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
+
+  try {
+    fs.appendFileSync(
+      desktopSnapshotPath,
+      [
+        '',
+        '[Containments][149]',
+        'location=4',
+        'plugin=org.kde.panel',
+        'hiding=dodgewindows',
+        'tyrianPanelAlignment=center',
+        'tyrianPanelHeight=42',
+        'tyrianPanelLengthRatio=1',
+        '',
+      ].join('\n')
+    );
+
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('duplicate panel identity 149');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice capture rejects duplicate snapshot panel identities before shell mutation', () => {
+  const root = makeTempRiceRepo();
+  const userHome = path.join(root, 'live-home');
+  const desktopPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const lifecycle: string[] = [];
+
+  try {
+    fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
+    fs.writeFileSync(
+      desktopPath,
+      [
+        '[Containments][149]',
+        'plugin=org.kde.panel',
+        '',
+        '[Containments][149]',
+        'plugin=org.kde.panel',
+        '',
+      ].join('\n')
+    );
+
+    expect(() =>
+      captureRiceLayout({
+        repoRoot: root,
+        home: userHome,
+        runCommand: (command, args) => {
+          if (command === 'systemctl') lifecycle.push(String(args[1]));
+          return mockRiceRuntimeCommand(command, args);
+        },
+      })
+    ).toThrow('duplicate panel identity 149');
+    expect(lifecycle).toEqual(['is-active']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rice check rejects a manifest from another owner', () => {
+  const root = makeTempRiceRepo();
+  const manifestPath = path.join(root, RICE_MANIFEST_PATH);
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { owner: string };
+    manifest.owner = 'Another rice owner';
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow(
+      `Rice layout manifest owner must be ${RICE_MANIFEST_OWNER}`
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -982,8 +1090,10 @@ test('Plasma layout restore has its own runtime command contract', () => {
 test('Plasma layout restore maps captured panels to the current primary screen', () => {
   const root = makeTempRiceRepo();
   const home = path.join(root, 'home');
+  const runtimeWallpaperPath = path.join(home, '.local/share/tyrian-night', RICE_WALLPAPER_PATH);
   const desktopSnapshotPath = path.join(root, RICE_LAYOUT_FILES[0].snapshotPath);
   const commandCalls: Array<{ command: string; args: string[] }> = [];
+  let wallpaperExistedBeforePublication = false;
 
   try {
     fs.writeFileSync(
@@ -1010,18 +1120,6 @@ test('Plasma layout restore maps captured panels to the current primary screen',
         '',
         'plugin=org.kde.plasma.folder',
         '',
-        '',
-        '[Containments][149]',
-        'formfactor=2',
-        'hiding=dodgewindows',
-        'immutability=1',
-        '',
-        'location=4',
-        'plugin=org.kde.panel',
-        'tyrianPanelAlignment=center',
-        'tyrianPanelHeight=42',
-        'tyrianPanelLengthRatio=1',
-        '',
       ].join('\n')
     );
 
@@ -1031,6 +1129,9 @@ test('Plasma layout restore maps captured panels to the current primary screen',
       apply: true,
       runCommand: (command, args) => {
         commandCalls.push({ command, args });
+        if (String(args.at(-1)).includes('var wallpaperImage')) {
+          wallpaperExistedBeforePublication = fs.existsSync(runtimeWallpaperPath);
+        }
         return mockRiceRuntimeCommand(command, args);
       },
     });
@@ -1052,6 +1153,8 @@ test('Plasma layout restore maps captured panels to the current primary screen',
     expect(installedDesktop).toContain('ItemGeometries-2560x1440=Applet-1:1280,720,400,200,0;');
     expect(installedDesktop).toContain('ItemGeometriesHorizontal=Applet-2:256,144,512,288,0;');
     expect(installedDesktop).toContain('lastResolution=2560x1440');
+    expect(wallpaperExistedBeforePublication).toBe(true);
+    expect(fs.readFileSync(runtimeWallpaperPath, 'utf8')).toBe('wallpaper');
     expect(panelStateScript).toContain('"149"');
     expect(panelStateScript).toContain('"hiding":"dodgewindows"');
     expect(panelStateScript).toContain('"location":"bottom"');
@@ -2756,7 +2859,7 @@ function makeTempRiceRepo() {
     `${JSON.stringify(
       {
         version: 1,
-        owner: 'Tyrian Night rice',
+        owner: RICE_MANIFEST_OWNER,
         requirements: RICE_REQUIREMENTS_PATH,
         wallpaperAsset: RICE_WALLPAPER_PATH,
         layoutFiles: RICE_LAYOUT_FILES,

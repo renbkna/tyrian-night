@@ -173,6 +173,29 @@ test('distinct lock paths remain isolated without bounded-key collisions', async
   }
 });
 
+test('claim inspection fails closed after bounded continuous replacement', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-inspection-bound-test-'));
+  const lockKey = path.join(testRoot, 'continuous-replacement.lock');
+  let replacements = 0;
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, {
+        onClaimReadBeforeVerification: async (claimPath) => {
+          if (claimPath !== lockKey) return;
+          const replacementPath = `${lockKey}.replacement-${replacements}`;
+          replacements += 1;
+          await fs.writeFile(replacementPath, `replacement ${replacements}\n`, 'utf8');
+          await fs.rename(replacementPath, lockKey);
+        },
+      })
+    ).rejects.toThrow('changed continuously during bounded inspection');
+    expect(replacements).toBe(8);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
 test('concurrent dead-owner reapers elect once and never unlink a replacement generation', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-reaper-test-'));
   const lockKey = path.join(testRoot, 'shared.lock');
@@ -444,6 +467,134 @@ test('a live reaper barrier blocks publication and entry until validated cleanup
   }
 });
 
+test('release restores a replacement moved across the final generation boundary', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-release-race-test-'));
+  const lockKey = path.join(testRoot, 'release-race.lock');
+  const replacement = 'external replacement generation\n';
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => 'completed', {
+        renameClaim: async (claimPath, retirementPath) => {
+          await fs.rm(claimPath);
+          await fs.writeFile(claimPath, replacement, 'utf8');
+          await fs.rename(claimPath, retirementPath);
+        },
+      })
+    ).rejects.toMatchObject({
+      name: IslandLockReleaseError.name,
+      releaseError: expect.objectContaining({
+        message: expect.stringContaining('generation changed during retirement'),
+      }),
+    });
+    expect(await fs.readFile(lockKey, 'utf8')).toBe(replacement);
+    expect((await fs.readdir(testRoot)).filter((entry) => entry.includes('.retired-'))).toEqual([]);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('reaper restores a replacement moved across the final generation boundary', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-reaper-race-test-'));
+  const lockKey = path.join(testRoot, 'reaper-race.lock');
+  const replacement = 'external replacement generation\n';
+  await fs.writeFile(
+    lockKey,
+    JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      token: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    }).concat('\n'),
+    'utf8'
+  );
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, {
+        timeoutMs: 40,
+        retryMs: 5,
+        renameClaim: async (claimPath, retirementPath) => {
+          await fs.rm(claimPath);
+          await fs.writeFile(claimPath, replacement, 'utf8');
+          await fs.rename(claimPath, retirementPath);
+        },
+      })
+    ).rejects.toThrow('generation changed during retirement');
+    expect(await fs.readFile(lockKey, 'utf8')).toBe(replacement);
+    expect((await fs.readdir(testRoot)).filter((entry) => entry.includes('.retired-'))).toEqual([]);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('release cannot report success while retirement cleanup remains', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-retirement-cleanup-test-'));
+  const lockKey = path.join(testRoot, 'release-cleanup.lock');
+  let retirementPath: string | undefined;
+  let cleanupCalls = 0;
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => 'completed', {
+        retryMs: 1,
+        unlinkRetiredClaim: async (candidatePath) => {
+          retirementPath = candidatePath;
+          cleanupCalls += 1;
+          throw Object.assign(new Error('injected retirement cleanup failure'), { code: 'EACCES' });
+        },
+      })
+    ).rejects.toMatchObject({
+      name: IslandLockReleaseError.name,
+      releaseError: expect.objectContaining({
+        message: expect.stringContaining('retirement cleanup remains'),
+      }),
+    });
+    expect(cleanupCalls).toBe(3);
+    await expect(fs.stat(lockKey)).rejects.toThrow();
+    expect(retirementPath).toBeDefined();
+    expect(await fs.readFile(retirementPath!, 'utf8')).toContain('"token"');
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('reaper exposes a retirement cleanup artifact instead of hiding it', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-reaper-retirement-test-'));
+  const lockKey = path.join(testRoot, 'reaper-cleanup.lock');
+  let retirementPath: string | undefined;
+  let cleanupCalls = 0;
+  await fs.writeFile(
+    lockKey,
+    JSON.stringify({
+      version: 1,
+      pid: 2_147_483_647,
+      token: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    }).concat('\n'),
+    'utf8'
+  );
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, {
+        retryMs: 1,
+        unlinkRetiredClaim: async (candidatePath) => {
+          retirementPath = candidatePath;
+          cleanupCalls += 1;
+          throw Object.assign(new Error('injected retirement cleanup failure'), { code: 'EACCES' });
+        },
+      })
+    ).rejects.toThrow('retirement cleanup remains');
+    expect(cleanupCalls).toBe(3);
+    await expect(fs.stat(lockKey)).rejects.toThrow();
+    expect(retirementPath).toBeDefined();
+    expect(await fs.readFile(retirementPath!, 'utf8')).toContain('"token"');
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
 test('a transient release failure is retried synchronously before success is reported', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-release-test-'));
   const lockKey = path.join(testRoot, 'release.lock');
@@ -452,10 +603,10 @@ test('a transient release failure is retried synchronously before success is rep
 
   try {
     const result = await withIslandProcessLockCore(lockKey, async () => ({ changed: true }), {
-      unlinkClaim: async (claimPath) => {
+      renameClaim: async (claimPath, retirementPath) => {
         releaseCalls += 1;
         if (releaseCalls === 1) throw new Error('injected release loss');
-        await fs.unlink(claimPath);
+        await fs.rename(claimPath, retirementPath);
       },
       onReleaseWarning: () => {
         warningCalls += 1;
@@ -487,7 +638,7 @@ test('persistent release failure after success is observable with a bounded fail
         }),
         {
           retryMs: 1,
-          unlinkClaim: async () => {
+          renameClaim: async () => {
             releaseCalls += 1;
             throw new Error('persistent release failure');
           },
@@ -519,7 +670,7 @@ test('action and release failure are reported as one typed aggregate', async () 
         async () => {
           throw actionError;
         },
-        { unlinkClaim: async () => Promise.reject(new Error('release failed')) }
+        { renameClaim: async () => Promise.reject(new Error('release failed')) }
       );
       throw new Error('Expected the action and release to fail.');
     } catch (error) {

@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "deny",
+    "suspicious": "allow",
+    "pedantic": "allow",
+    "perf": "allow",
+    "style": "allow",
+    "restriction": "allow",
+    "nursery": "allow"
+  }
+}

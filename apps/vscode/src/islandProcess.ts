@@ -42,6 +42,13 @@ export class IslandProcessFailure extends Error {
   }
 }
 
+export class IslandProcessInvalidOutputError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = 'IslandProcessInvalidOutputError';
+  }
+}
+
 export async function runIslandProcess(
   command: string[],
   options: {
@@ -151,13 +158,14 @@ export async function runIslandJsonProcess<T>(
     env?: NodeJS.ProcessEnv;
     fallbackMessage: string;
     invalidOutputMessage: (error: unknown) => string;
+    validate: (value: unknown) => T;
   }
 ): Promise<T> {
   const { stdout } = await runIslandProcess(command, options);
 
   try {
-    return JSON.parse(stdout) as T;
+    return options.validate(JSON.parse(stdout));
   } catch (error) {
-    throw new Error(options.invalidOutputMessage(error));
+    throw new IslandProcessInvalidOutputError(options.invalidOutputMessage(error), error);
   }
 }

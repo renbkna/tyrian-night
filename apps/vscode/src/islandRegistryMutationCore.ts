@@ -23,9 +23,11 @@ export async function moveRegistryRecordToQuarantineCore(options: {
   quarantinePath: string;
   quarantineDirectory: string;
   rename: (sourcePath: string, targetPath: string) => Promise<void>;
+  verifyMovedGeneration: () => Promise<void>;
   syncDirectories: (directoryPaths: string[]) => Promise<void>;
 }): Promise<void> {
   await options.rename(options.recordPath, options.quarantinePath);
+  await options.verifyMovedGeneration();
   try {
     await options.syncDirectories([options.recordDirectory, options.quarantineDirectory]);
   } catch (error) {

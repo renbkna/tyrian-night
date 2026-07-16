@@ -168,7 +168,7 @@ test('rollback refuses external drift and retains its recovery evidence', () => 
   }
 });
 
-test('persisted recovery restores exact absence including transaction-created parents', () => {
+test('persisted recovery restores declared target absence without claiming parent directories', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-absence-'));
   const targetPath = path.join(root, '.config/tyrian/nested/owned.conf');
   const absentParent = path.join(root, '.config');
@@ -187,10 +187,89 @@ test('persisted recovery restores exact absence including transaction-created pa
     });
 
     expect(fs.existsSync(targetPath)).toBe(false);
-    expect(fs.existsSync(absentParent)).toBe(false);
+    expect(fs.existsSync(absentParent)).toBe(true);
     expect(fs.existsSync(receipt.backupRoot)).toBe(true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('persisted recovery accepts v4 parent metadata without granting deletion authority', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-v4-parent-'));
+  const targetPath = path.join(root, 'owned.conf');
+  const unrelatedParent = path.join(root, 'external-empty-parent');
+
+  try {
+    fs.writeFileSync(targetPath, 'snapshot generation\n');
+    const receipt = snapshotOwnedPaths([targetPath], path.join(root, 'backups/recovery'), {
+      ownerRoot: root,
+    });
+    writeTextFileRaw(targetPath, 'interrupted generation\n', { ownerRoot: root });
+    receipt.seal();
+
+    const manifestPath = path.join(receipt.backupRoot, 'snapshot.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = 4;
+    manifest.missingOwnedParents = [unrelatedParent];
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.mkdirSync(unrelatedParent);
+
+    restoreOwnedPathSnapshot(receipt.backupRoot, {
+      allowedRoots: [root],
+      expectedTargetPaths: receipt.targetPaths,
+      snapshotId: receipt.snapshotId,
+    });
+
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('snapshot generation\n');
+    expect(fs.existsSync(unrelatedParent)).toBe(true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release-failed token locks reject later same-process acquisition', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-token-lock-release-failed-'));
+  const lockPath = path.join(root, 'owner.lock');
+  const originalRmSync = fs.rmSync;
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  let secondActionEntered = false;
+
+  try {
+    console.warn = (message) => warnings.push(String(message));
+    fs.rmSync = ((filePath, options) => {
+      if (path.basename(String(filePath)) === path.basename(lockPath)) {
+        throw new Error('injected persistent release failure');
+      }
+
+      return originalRmSync(filePath, options);
+    }) as typeof fs.rmSync;
+
+    expect(
+      withTokenFileLock(lockPath, () => 42, {
+        ownerRoot: root,
+      })
+    ).toBe(42);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    expect(warnings).toHaveLength(1);
+
+    fs.rmSync = originalRmSync;
+
+    expect(() =>
+      withTokenFileLock(
+        lockPath,
+        () => {
+          secondActionEntered = true;
+        },
+        { ownerRoot: root }
+      )
+    ).toThrow('release previously failed');
+    expect(secondActionEntered).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(true);
+  } finally {
+    fs.rmSync = originalRmSync;
+    console.warn = originalWarn;
+    originalRmSync(root, { recursive: true, force: true });
   }
 });
 

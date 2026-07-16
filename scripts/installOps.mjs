@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** @type {Map<string, { state: 'held'; depth: number; token: string } | { state: 'release-failed'; token: string }>} */
 const heldTokenLocks = new Map();
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 const DEFAULT_CORRUPT_LOCK_STALE_MS = 2_000;
@@ -197,6 +198,10 @@ export function withTokenFileLock(requestedLockPath, action, options) {
   const heldLock = heldTokenLocks.get(requestedAbsolutePath);
 
   if (heldLock) {
+    if (heldLock.state === 'release-failed') {
+      throw new Error(`Lock ${requestedAbsolutePath} release previously failed in this process`);
+    }
+
     heldLock.depth += 1;
 
     try {
@@ -274,7 +279,7 @@ function withAnchoredTokenFileLock(lockIdentity, lockPath, action, options) {
       throw new Error(`Lock ${lockPath} did not retain its published owner inode`);
     }
 
-    heldTokenLocks.set(lockIdentity, { depth: 1, token });
+    heldTokenLocks.set(lockIdentity, { state: 'held', depth: 1, token });
     /** @type {T | undefined} */
     let result;
     /** @type {unknown} */
@@ -299,7 +304,7 @@ function withAnchoredTokenFileLock(lockIdentity, lockPath, action, options) {
 
       try {
         if (readLockGeneration(lockPath).owner?.token === token) {
-          heldTokenLocks.set(lockIdentity, { depth: 0, token });
+          heldTokenLocks.set(lockIdentity, { state: 'release-failed', token });
         } else {
           heldTokenLocks.delete(lockIdentity);
 
@@ -628,7 +633,6 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
   const uniquePaths = [...new Set(targetPaths.map((targetPath) => path.resolve(targetPath)))];
   admitOwnedPaths(ownerRoot, uniquePaths, 'Owned filesystem snapshot');
   const snapshotId = options.snapshotId ?? randomUUID();
-  const missingOwnedParents = collectMissingParentDirectories(uniquePaths);
   /** @type {string[]} */
   const missingBackupParents = [];
   let backupParent = path.dirname(backupRoot);
@@ -667,7 +671,6 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
     backupRoot: path.resolve(backupRoot),
     entries,
     missingBackupParents,
-    missingOwnedParents,
     ownerRoot,
     snapshotId,
   };
@@ -775,19 +778,11 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
         throw new AggregateError(failures, 'Could not restore the owned filesystem snapshot');
       }
 
-      try {
-        removeInitiallyAbsentDirectories(missingOwnedParents, [ownerRoot]);
-        syncPathsDurably(entries.map(({ targetPath }) => targetPath));
-        activeOwnedSnapshots.delete(snapshotState);
-        removeOwnedPathRaw(ownerRoot, backupRoot);
-        removeOwnedEmptyDirectoriesRaw(ownerRoot, missingBackupParents);
-        syncPathsDurably([path.dirname(backupRoot)]);
-      } catch (error) {
-        throw new AggregateError(
-          [error],
-          'Owned paths were restored but their initially absent parent directories were not'
-        );
-      }
+      syncPathsDurably(entries.map(({ targetPath }) => targetPath));
+      activeOwnedSnapshots.delete(snapshotState);
+      removeOwnedPathRaw(ownerRoot, backupRoot);
+      removeOwnedEmptyDirectoriesRaw(ownerRoot, missingBackupParents);
+      syncPathsDurably([path.dirname(backupRoot)]);
 
       closed = true;
     },
@@ -840,7 +835,6 @@ export function restoreOwnedPathSnapshot(requestedBackupRoot, options) {
     throw new AggregateError(failures, 'Could not restore the persisted owned filesystem snapshot');
   }
 
-  removeInitiallyAbsentDirectories(manifest.missingOwnedParents, options.allowedRoots);
   syncPathsDurably(manifest.entries.map(({ targetPath }) => targetPath));
 }
 
@@ -905,7 +899,7 @@ function snapshotPathType(filePath) {
 /**
  * @param {string} backupRoot
  * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string }} options
- * @returns {{ entries: Array<{ targetPath: string; backupPath: string; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; mutationGeneration: string }>; missingOwnedParents: string[]; missingBackupParents: string[] }}
+ * @returns {{ entries: Array<{ targetPath: string; backupPath: string; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; mutationGeneration: string }>; missingBackupParents: string[] }}
  */
 function readValidatedSnapshotManifest(backupRoot, options) {
   const allowedRoots = options.allowedRoots.map(resolvePathIdentity);
@@ -931,11 +925,12 @@ function readValidatedSnapshotManifest(backupRoot, options) {
     );
 
   if (
-    candidate?.version !== 4 ||
+    (candidate?.version !== 4 && candidate?.version !== 5) ||
     candidate.snapshotId !== options.snapshotId ||
     !Array.isArray(candidate.entries) ||
     candidate.entries.length !== expectedTargetPaths.length ||
-    !Array.isArray(candidate.missingOwnedParents) ||
+    (candidate.version === 4 && !Array.isArray(candidate.missingOwnedParents)) ||
+    (candidate.version === 5 && candidate.missingOwnedParents !== undefined) ||
     !Array.isArray(candidate.missingBackupParents)
   ) {
     throw new Error('Owned filesystem snapshot manifest is corrupt');
@@ -1026,7 +1021,7 @@ function readValidatedSnapshotManifest(backupRoot, options) {
    * @param {unknown[]} parents
    * @returns {string[]}
    */
-  const validateParents = (parents) =>
+  const validateBackupParents = (parents) =>
     parents.map((parent) => {
       if (typeof parent !== 'string') {
         throw new Error('Owned filesystem snapshot manifest is corrupt');
@@ -1047,8 +1042,7 @@ function readValidatedSnapshotManifest(backupRoot, options) {
 
   return {
     entries,
-    missingOwnedParents: validateParents(candidate.missingOwnedParents),
-    missingBackupParents: validateParents(candidate.missingBackupParents),
+    missingBackupParents: validateBackupParents(candidate.missingBackupParents),
   };
 }
 
@@ -1596,14 +1590,14 @@ function recordOwnedMutationIntent(targetPath, desiredGeneration) {
 }
 
 /**
- * @param {{ backupRoot: string; entries: Array<{ backupPath: string; existed: boolean; mutationGeneration: string; originalGeneration: string; targetPath: string; type?: 'file' | 'directory' | 'symlink' }>; missingBackupParents: string[]; missingOwnedParents: string[]; ownerRoot: string; snapshotId: string }} snapshot
+ * @param {{ backupRoot: string; entries: Array<{ backupPath: string; existed: boolean; mutationGeneration: string; originalGeneration: string; targetPath: string; type?: 'file' | 'directory' | 'symlink' }>; missingBackupParents: string[]; ownerRoot: string; snapshotId: string }} snapshot
  * @returns {void}
  */
 function writeSnapshotManifest(snapshot) {
   const manifestPath = path.join(snapshot.backupRoot, 'snapshot.json');
   const content = `${JSON.stringify(
     {
-      version: 4,
+      version: 5,
       snapshotId: snapshot.snapshotId,
       entries: snapshot.entries.map(
         ({ backupPath, existed, mutationGeneration, originalGeneration, targetPath, type }) => ({
@@ -1615,7 +1609,6 @@ function writeSnapshotManifest(snapshot) {
           ...(type !== undefined ? { type } : {}),
         })
       ),
-      missingOwnedParents: snapshot.missingOwnedParents,
       missingBackupParents: snapshot.missingBackupParents,
     },
     null,
@@ -1640,46 +1633,6 @@ function writeSnapshotManifest(snapshot) {
       preserveTargetMode: true,
     }
   );
-}
-
-/**
- * @param {string[]} directories
- * @param {string[]} allowedRoots
- * @returns {void}
- */
-function removeInitiallyAbsentDirectories(directories, allowedRoots) {
-  const roots = allowedRoots.map(resolvePathIdentity);
-
-  for (const directory of [...new Set(directories)].toSorted(
-    (left, right) => right.length - left.length
-  )) {
-    const ownerRoot = roots.find((root) => isSameOrDescendant(root, directory));
-
-    if (!ownerRoot) {
-      throw new Error(`Owned filesystem snapshot parent escapes its owner: ${directory}`);
-    }
-
-    try {
-      withAnchoredParent(ownerRoot, directory, false, ({ anchoredPath, descriptor }) => {
-        if (!exists(anchoredPath)) return;
-        const stats = fs.lstatSync(anchoredPath);
-
-        if (stats.isSymbolicLink() || !stats.isDirectory()) {
-          throw new Error(`Owned filesystem snapshot parent changed type: ${directory}`);
-        }
-
-        if (fs.readdirSync(anchoredPath).length > 0) {
-          throw new Error(`Owned filesystem snapshot found external drift in ${directory}`);
-        }
-
-        fs.rmdirSync(anchoredPath);
-        fsyncDirectoryDescriptor(descriptor);
-      });
-    } catch (error) {
-      if (error instanceof MissingOwnedParentError) continue;
-      throw error;
-    }
-  }
 }
 
 /**

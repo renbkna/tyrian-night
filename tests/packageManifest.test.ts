@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,13 +6,13 @@ import path from 'node:path';
 import { expect, test } from 'bun:test';
 
 import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog';
-import { ThemePreviewController } from '../assets/preview';
+import { THEME_MODES, ThemePreviewController, buildThemePreviewContract } from '../assets/preview';
 import {
   buildVscodeThemeContributions,
   syncGeneratedContracts,
 } from '../scripts/generatedContracts.mjs';
 import { terminalColor } from '../scripts/themeDefinition.mjs';
-import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import { SOURCE_THEMES, getDefaultThemeSource, readSourceTheme } from '../scripts/themeSources.mjs';
 import { syncVscodePackageAssets } from '../scripts/vscodePackageAssets.mjs';
 
 type ExtensionPackage = {
@@ -20,6 +21,7 @@ type ExtensionPackage = {
     commands: Array<{ command: string }>;
     themes: Array<{ label: string; path: string; uiTheme: string }>;
   };
+  description: string;
   devDependencies: Record<string, string | undefined>;
   engines: {
     node: string;
@@ -263,27 +265,54 @@ test('VS Code companion settings example is parseable and aligned with Tyrian de
 });
 
 test('preview output derives palette and identity entirely from the selected mode', async () => {
-  const previewSource = fs.readFileSync('assets/preview.ts', 'utf8');
   const controller = new ThemePreviewController(process.cwd());
 
-  expect(previewSource).toContain("defaultMode: ThemeMode = 'night'");
-  expect(previewSource).not.toContain("defaultMode: ThemeMode = 'nocturne'");
+  expect(THEME_MODES).toEqual(SOURCE_THEMES.map(({ slug }) => slug.replace(/^tyrian-/u, '')));
+  expect(ThemePreviewController.defaultMode).toBe(
+    getDefaultThemeSource().slug.replace(/^tyrian-/u, '')
+  );
 
-  await controller.readThemeManifest('night');
-  const nightSummary = controller.summarize('night');
-  expect(nightSummary).toContain('mode=night');
-  expect(nightSummary).toContain(previewAnsiPrefix('tyrian-night'));
-  expect(nightSummary).toContain('"dark": "Tyrian Night"');
-  expect(nightSummary).toContain('# Tyrian Night');
-  expect(nightSummary).not.toContain('Tyrian Dawn');
+  for (const [index, mode] of THEME_MODES.entries()) {
+    const source = SOURCE_THEMES[index]!;
+    await controller.readThemeManifest(mode);
+    const summary = controller.summarize(mode);
 
-  await controller.readThemeManifest('dawn');
-  const dawnSummary = controller.summarize('dawn');
-  expect(dawnSummary).toContain('mode=dawn');
-  expect(dawnSummary).toContain(previewAnsiPrefix('tyrian-dawn'));
-  expect(dawnSummary).toContain('"light": "Tyrian Dawn"');
-  expect(dawnSummary).toContain('# Tyrian Dawn');
-  expect(dawnSummary).not.toContain('Tyrian Night');
+    expect(summary).toContain(`mode=${mode}`);
+    expect(summary).toContain(previewAnsiPrefix(source.slug));
+    expect(summary).toContain(`"${source.appearance}": "${source.label}"`);
+    expect(summary).toContain(`# ${source.label}`);
+  }
+});
+
+test('preview membership, order, and default project the supplied source catalog', () => {
+  const sourceThemes = SOURCE_THEMES.toReversed().map((source) => ({
+    ...source,
+    isDefault: source.slug === 'tyrian-dawn',
+  }));
+
+  expect(buildThemePreviewContract(sourceThemes)).toEqual({
+    modes: sourceThemes.map(({ slug }) => slug.replace(/^tyrian-/u, '')),
+    defaultMode: 'dawn',
+  });
+});
+
+test('public family copy projects every catalog member', () => {
+  const rootReadme = fs.readFileSync('README.md', 'utf8');
+  const vscodeReadme = fs.readFileSync('apps/vscode/README.md', 'utf8');
+  const vscodeDescription = readJson<ExtensionPackage>(VSCODE_PACKAGE_PATH).description;
+  const zedManifest = fs.readFileSync('apps/zed/extension.toml', 'utf8');
+  const countWord = numberWord(SOURCE_THEMES.length);
+
+  expect(rootReadme).toContain(`The ${countWord} variants`);
+  expect(vscodeReadme).toContain(`provides ${countWord} generated VS Code color themes`);
+
+  for (const { label } of SOURCE_THEMES) {
+    const shortLabel = label.replace(/^Tyrian /u, '');
+    expect(rootReadme).toContain(`**${label}**`);
+    expect(vscodeReadme).toContain(`**${shortLabel}**`);
+    expect(vscodeDescription).toContain(shortLabel);
+    expect(zedManifest).toContain(shortLabel);
+  }
 });
 
 test('repo does not keep stale packaged VSIX artifacts as proof surfaces', () => {
@@ -335,11 +364,23 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.scripts['check:tracked-generated']).toBe(
     'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme'
   );
-  expect(workspace.scripts['precommit:tracked-generated']).toContain(
-    'git ls-files --error-unmatch source/themeRoleContract.json source/themeColorBindings.json source/themeAppearanceContract.json source/themeForgeContract.json source/themeSpecimens.json scripts/themeDefinition.mjs scripts/themeAppearance.mjs scripts/themeForge.mjs scripts/themeForgeContract.mjs scripts/themeSpecimens.mjs scripts/colorScience.mjs scripts/themeColorAudit.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs'
-  );
-  expect(workspace.scripts['precommit:tracked-generated']).toContain(
-    'git diff --quiet -- source/themeCatalog.json source/themeRoleContract.json source/themeColorBindings.json source/themeAppearanceContract.json source/themeForgeContract.json source/themeSpecimens.json source/themes scripts/themeDefinition.mjs scripts/themeAppearance.mjs scripts/themeForge.mjs scripts/themeForgeContract.mjs scripts/themeSpecimens.mjs scripts/colorScience.mjs scripts/themeColorAudit.mjs scripts/projections/vscodeColors.json scripts/vscodeThemes.mjs apps/vscode/package.json'
+  const trackedGeneratedGate = workspace.scripts['precommit:tracked-generated'];
+  expect(trackedGeneratedGate).toStartWith('bun run check:tracked-generated && ');
+  for (const pathspec of [
+    '.oxlintrc.json',
+    'source/themeCatalog.json',
+    'source/themes/*.json',
+    'apps/vscode/src/generated/*.ts',
+    'apps/vscode/themes/*.json',
+    'apps/zed/themes/*.json',
+  ]) {
+    expect(trackedGeneratedGate).toContain(pathspec);
+  }
+  for (const { slug } of SOURCE_THEMES) {
+    expect(trackedGeneratedGate).not.toContain(`apps/vscode/themes/${slug}.json`);
+  }
+  expect(trackedGeneratedGate).toContain(
+    'git diff --quiet -- source/themeCatalog.json source/themeRoleContract.json'
   );
   expect(workspace).not.toHaveProperty('simple-git-hooks');
   expect(workspace.devDependencies).not.toHaveProperty('simple-git-hooks');
@@ -383,7 +424,7 @@ test('workspace and product manifests have non-competing release ownership', () 
 
   expect(extension.scripts['vscode:prepublish']).toBeUndefined();
   expect(extension.scripts.check).toBe('tsc --noEmit --project tsconfig.json');
-  expect(extension.scripts.lint).toBe('oxlint src/ tsup.config.ts');
+  expect(extension.scripts.lint).toBe('oxlint -c ../../.oxlintrc.json src/ tsup.config.ts');
   expect(extension.scripts.build).toContain('tsup');
   expect(extension.scripts.package).toContain('bun run check');
   expect(extension.scripts.package).toContain("mkdirSync('../../dist', { recursive: true })");
@@ -429,6 +470,49 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(ciWorkflow).toContain('macos-latest');
 });
 
+test('lint policy enforces correctness without documentation or preference rules', () => {
+  const workspace = readJson<WorkspacePackage>('package.json');
+  const extension = readJson<ExtensionPackage>(VSCODE_PACKAGE_PATH);
+  const lintConfig = readJson<{
+    categories: Record<string, 'allow' | 'warn' | 'deny'>;
+    plugins?: string[];
+  }>('.oxlintrc.json');
+
+  expect(workspace.scripts.lint).toContain('-c .oxlintrc.json');
+  expect(workspace.scripts['lint:fix']).toContain('-c .oxlintrc.json');
+  expect(extension.scripts.lint).toContain('-c ../../.oxlintrc.json');
+  expect(lintConfig.categories).toEqual({
+    correctness: 'deny',
+    suspicious: 'allow',
+    pedantic: 'allow',
+    perf: 'allow',
+    style: 'allow',
+    restriction: 'allow',
+    nursery: 'allow',
+  });
+  expect(lintConfig.plugins ?? []).not.toContain('jsdoc');
+});
+
+test('git tracking assertion rejects an untracked member of an expanded theme path set', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-tracked-themes-'));
+
+  try {
+    fs.mkdirSync(path.join(root, 'source/themes'), { recursive: true });
+    const tracked = 'source/themes/tyrian-night.json';
+    const untracked = 'source/themes/tyrian-new-member.json';
+    fs.writeFileSync(path.join(root, tracked), '{}\n');
+    fs.writeFileSync(path.join(root, untracked), '{}\n');
+    expect(runGit(root, ['init', '--quiet']).status).toBe(0);
+    expect(runGit(root, ['add', tracked]).status).toBe(0);
+
+    expect(runGit(root, ['ls-files', '--error-unmatch', tracked, untracked]).status).not.toBe(0);
+    expect(runGit(root, ['add', untracked]).status).toBe(0);
+    expect(runGit(root, ['ls-files', '--error-unmatch', tracked, untracked]).status).toBe(0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function previewAnsiPrefix(slug: string): string {
   const source = SOURCE_THEMES.find((candidate) => candidate.slug === slug);
   expect(source).toBeDefined();
@@ -448,4 +532,15 @@ function resolveVscodePackagePath(filePath: string): string {
 
 function pathBasename(filePath: string, extension: string): string {
   return filePath.replace(/^\.\//, '').split('/').at(-1)!.slice(0, -extension.length);
+}
+
+function numberWord(value: number): string {
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six'];
+  const word = words[value];
+  if (!word) throw new Error(`No number word for family size ${value}.`);
+  return word;
+}
+
+function runGit(root: string, args: string[]) {
+  return spawnSync('git', args, { cwd: root, encoding: 'utf8' });
 }

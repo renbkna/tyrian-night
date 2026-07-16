@@ -6,6 +6,8 @@ import { isExecutable } from '../scripts/commandChecks.mjs';
 import {
   buildLiveInstallPlan,
   installLiveTyrian,
+  LIVE_INSTALL_MIGRATION_RETIREMENT_RELATIVE_PATH,
+  LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH,
   patchIniSection,
   prepareLiveInstallRepository,
   recoverHomeFilesystemTransaction,
@@ -348,6 +350,119 @@ test('Caelestia target follows the active Hyprland provider and honors XDG roots
   }
 });
 
+test('no-manifest migration reconciles the complete fixed-root install before retirement', () => {
+  const repositoryRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'tyrian-live-fixed-root-migration-repo-')
+  );
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-fixed-root-migration-'));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg/state'),
+  };
+  const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
+  const staleInstallFile = path.join(installRoot, 'terminal/pre-registry-only.txt');
+  const staleDesktopFile = path.join(installRoot, 'desktop/pre-registry-only.txt');
+  const preRegistryThemeSlugs = [
+    'tyrian-night',
+    'tyrian-nocturne',
+    'tyrian-night-old',
+    'tyrian-abyss',
+    'tyrian-dawn',
+  ];
+  const fixedCommonPaths = [
+    path.join(home, '.config/ghostty/config'),
+    path.join(home, '.config/ghostty/ghostty.css'),
+    ...preRegistryThemeSlugs.map((slug) => path.join(home, `.config/ghostty/themes/${slug}`)),
+  ];
+  const fixedPlasmaPaths = [
+    path.join(home, '.config/kdeglobals'),
+    path.join(home, '.config/plasmarc'),
+    path.join(home, '.config/kscreenlockerrc'),
+    path.join(home, '.local/share/color-schemes/TyrianNight.colors'),
+    path.join(home, '.local/share/plasma/desktoptheme/TyrianNight'),
+    path.join(home, '.local/share/plasma/look-and-feel/TyrianNight'),
+  ];
+  const fixedCaelestiaPaths = [
+    path.join(home, '.local/share/caelestia/fish/config.fish'),
+    path.join(home, '.local/share/caelestia/fish/functions/fish_greeting.fish'),
+    path.join(home, '.local/share/caelestia/fastfetch/config.jsonc'),
+    path.join(home, '.local/share/caelestia/starship.toml'),
+    path.join(home, '.local/state/caelestia/scheme.json'),
+    path.join(home, '.local/state/caelestia/sequences.txt'),
+    path.join(home, '.config/hypr/scheme/current.conf'),
+  ];
+  const transitionalCaelestiaPaths = [
+    path.join(environment.XDG_DATA_HOME, 'caelestia/fastfetch/config.jsonc'),
+    path.join(environment.XDG_DATA_HOME, 'caelestia/starship.toml'),
+  ];
+  const transitionalGhosttyCss = path.join(environment.XDG_CONFIG_HOME, 'ghostty/ghostty.css');
+
+  try {
+    copyLiveInstallRepoFixture(repositoryRoot);
+
+    for (const filePath of [
+      staleInstallFile,
+      staleDesktopFile,
+      ...fixedCommonPaths,
+      ...fixedPlasmaPaths,
+      ...fixedCaelestiaPaths,
+      ...transitionalCaelestiaPaths,
+      transitionalGhosttyCss,
+    ]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `pre-registry:${path.relative(home, filePath)}\n`);
+    }
+
+    installLiveTyrian({
+      repoRoot: repositoryRoot,
+      home,
+      environment,
+      apply: true,
+      link: true,
+      target: 'plasma',
+    });
+
+    expect(fs.existsSync(staleInstallFile)).toBe(false);
+    expect(fs.existsSync(staleDesktopFile)).toBe(false);
+    for (const materializedRoot of buildLiveInstallPlan({
+      repoRoot: repositoryRoot,
+      home,
+      environment,
+      link: true,
+      target: 'plasma',
+    }).materializedRoots) {
+      expect(fs.lstatSync(materializedRoot.target).isSymbolicLink()).toBe(true);
+      expect(fs.realpathSync(materializedRoot.target)).toBe(
+        fs.realpathSync(materializedRoot.source)
+      );
+    }
+    for (const historicalPath of [...fixedCommonPaths, ...fixedPlasmaPaths]) {
+      expect(fs.existsSync(historicalPath)).toBe(false);
+    }
+    for (const historicalPath of [...fixedCaelestiaPaths, ...transitionalCaelestiaPaths]) {
+      expect(fs.readFileSync(historicalPath, 'utf8')).toContain('pre-registry:');
+    }
+    expect(fs.existsSync(transitionalGhosttyCss)).toBe(false);
+
+    const ownershipManifest = JSON.parse(
+      fs.readFileSync(path.join(home, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH), 'utf8')
+    );
+    const migratedCaelestiaPaths = [...fixedCaelestiaPaths, ...transitionalCaelestiaPaths].map(
+      (filePath) => path.relative(home, filePath)
+    );
+    expect(ownershipManifest.profiles.caelestia).toEqual(
+      expect.arrayContaining(migratedCaelestiaPaths)
+    );
+    expect(fs.existsSync(path.join(home, LIVE_INSTALL_MIGRATION_RETIREMENT_RELATIVE_PATH))).toBe(
+      true
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
 test('live installer link mode is explicit and repo-dependent', () => {
   const repoRoot = process.cwd();
   const plan = buildLiveInstallPlan({
@@ -582,6 +697,87 @@ test('v1 mixed ownership migrates without deleting the unselected desktop profil
       '.local/state/caelestia/scheme.json',
     ]);
     expect(migrated.profiles.plasma).toContain('.config/kdeglobals');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('v1 fixed Foot and Fish ownership follows a later custom XDG root', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-v1-xdg-migration-'));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg/state'),
+  };
+  const ownershipManifest = path.join(home, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH);
+  const v1ThemeSlugs = [
+    'tyrian-night',
+    'tyrian-nocturne',
+    'tyrian-night-old',
+    'tyrian-abyss',
+    'tyrian-dawn',
+  ];
+  const fixedFootConfig = path.join(home, '.config/foot/foot.ini');
+  const fixedFootThemes = v1ThemeSlugs.map((slug) =>
+    path.join(home, `.config/foot/themes/${slug}.ini`)
+  );
+  const fixedFishStartup = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
+  const fixedFishGreeting = path.join(home, '.config/fish/functions/fish_greeting.fish');
+  const fixedPaths = [fixedFootConfig, ...fixedFootThemes, fixedFishStartup, fixedFishGreeting];
+
+  try {
+    for (const filePath of fixedPaths) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `v1:${path.relative(home, filePath)}\n`);
+    }
+    fs.mkdirSync(path.dirname(ownershipManifest), { recursive: true });
+    fs.writeFileSync(
+      ownershipManifest,
+      `${JSON.stringify({
+        version: 1,
+        owner: 'Tyrian Night live install',
+        paths: fixedPaths.map((filePath) => path.relative(home, filePath)),
+      })}\n`
+    );
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      environment,
+      apply: true,
+      target: 'plasma',
+    });
+
+    for (const fixedPath of fixedPaths) {
+      expect(fs.existsSync(fixedPath)).toBe(false);
+    }
+
+    const currentPlan = buildLiveInstallPlan({
+      repoRoot: process.cwd(),
+      home,
+      environment,
+      target: 'plasma',
+    });
+    expect(fs.existsSync(currentPlan.livePaths.footConfig)).toBe(true);
+    for (const slug of v1ThemeSlugs) {
+      expect(fs.existsSync(path.join(currentPlan.livePaths.footThemes, `${slug}.ini`))).toBe(true);
+    }
+    expect(fs.existsSync(currentPlan.livePaths.fishStartupConfig)).toBe(true);
+    expect(fs.existsSync(currentPlan.livePaths.fishGreeting)).toBe(true);
+
+    const migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
+    expect(migrated.version).toBe(2);
+    for (const fixedPath of fixedPaths) {
+      expect(migrated.profiles.common).not.toContain(path.relative(home, fixedPath));
+    }
+    for (const currentPath of [
+      currentPlan.livePaths.footConfig,
+      ...v1ThemeSlugs.map((slug) => path.join(currentPlan.livePaths.footThemes, `${slug}.ini`)),
+      currentPlan.livePaths.fishStartupConfig,
+      currentPlan.livePaths.fishGreeting,
+    ]) {
+      expect(migrated.profiles.common).toContain(path.relative(home, currentPath));
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1050,13 +1246,29 @@ test('link transaction restores materialized assets when a later target write fa
   }
 });
 
-test('live installer rollback removes config trees that were initially absent', () => {
+test('live installer rollback restores owned leaves without claiming their parent directories', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-absence-home-'));
-  const blockingStatePath = path.join(home, '.local/state/caelestia');
+  const lateTarget = path.join(home, '.local/state/caelestia/scheme.json');
+  const ownedLeaves = [
+    path.join(home, '.config/ghostty/config'),
+    path.join(home, '.config/foot/foot.ini'),
+    path.join(home, '.config/fish/conf.d/tyrian-night.fish'),
+  ];
+  const originalRename = fs.renameSync;
+  let lateFailureInjected = false;
 
   try {
-    fs.mkdirSync(path.dirname(blockingStatePath), { recursive: true });
-    fs.writeFileSync(blockingStatePath, 'block late write\n');
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      if (!lateFailureInjected && resolveMutationPath(newPath) === lateTarget) {
+        lateFailureInjected = true;
+        for (const ownedLeaf of ownedLeaves) {
+          expect(fs.existsSync(ownedLeaf)).toBe(true);
+        }
+        throw new Error('injected late Caelestia failure');
+      }
+
+      return originalRename(oldPath, newPath);
+    }) as typeof fs.renameSync;
 
     expect(() =>
       installLiveTyrian({
@@ -1066,12 +1278,16 @@ test('live installer rollback removes config trees that were initially absent', 
         target: 'caelestia',
         hyprlandMode: 'legacy',
       })
-    ).toThrow();
+    ).toThrow('injected late Caelestia failure');
 
-    expect(fs.existsSync(path.join(home, '.config'))).toBe(false);
+    expect(lateFailureInjected).toBe(true);
+    expect(fs.existsSync(path.join(home, '.config'))).toBe(true);
+    for (const ownedLeaf of ownedLeaves) {
+      expect(fs.existsSync(ownedLeaf)).toBe(false);
+    }
     expect(fs.existsSync(path.join(home, TYRIAN_INSTALL_HOME))).toBe(false);
-    expect(fs.readFileSync(blockingStatePath, 'utf8')).toBe('block late write\n');
   } finally {
+    fs.renameSync = originalRename;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

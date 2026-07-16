@@ -9,12 +9,33 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadThemeRepository, readSourceTheme } from '../scripts/themeSources.mjs';
+import {
+  SOURCE_THEMES,
+  getDefaultThemeSource,
+  loadThemeRepository,
+  readSourceTheme,
+} from '../scripts/themeSources.mjs';
 
 // TODO(theme): check comments, notes, and AI ghost text against Monaspace Radon.
 // NOTE: JSON property names should read like attributes, not function calls.
 
-export type ThemeMode = 'abyss' | 'night' | 'nocturne' | 'night-old' | 'dawn';
+declare const THEME_MODE: unique symbol;
+
+export type ThemeMode = string & { readonly [THEME_MODE]: true };
+
+export function buildThemePreviewContract(sourceThemes = SOURCE_THEMES): {
+  readonly defaultMode: ThemeMode;
+  readonly modes: ReadonlyArray<ThemeMode>;
+} {
+  return Object.freeze({
+    defaultMode: previewModeForSource(getDefaultThemeSource(sourceThemes)),
+    modes: Object.freeze(sourceThemes.map(previewModeForSource)),
+  });
+}
+
+const DEFAULT_THEME_PREVIEW_CONTRACT = buildThemePreviewContract();
+
+export const THEME_MODES = DEFAULT_THEME_PREVIEW_CONTRACT.modes;
 
 export interface ThemeToken {
   readonly scope: string;
@@ -66,7 +87,7 @@ function traceable(label: string): ClassDecorator {
 
 @traceable('theme-preview')
 export class ThemePreviewController {
-  static readonly defaultMode: ThemeMode = 'night';
+  static readonly defaultMode = DEFAULT_THEME_PREVIEW_CONTRACT.defaultMode;
 
   #cache = new Map<ThemeMode, CachedThemePreview>();
 
@@ -118,6 +139,14 @@ export class ThemePreviewController {
       importantScopes || 'No cached scopes yet.',
     ].join('\n\n');
   }
+}
+
+function previewModeForSource(source: { slug: string }): ThemeMode {
+  const mode = source.slug.replace(/^tyrian-/u, '');
+  if (mode === source.slug || mode.length === 0) {
+    throw new Error(`Theme source has no preview mode: ${source.slug}`);
+  }
+  return mode as ThemeMode;
 }
 
 function buildZedSettingsPreview(preview: CachedThemePreview) {
