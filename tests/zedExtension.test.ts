@@ -7,7 +7,12 @@ import { contrastRatio } from '../scripts/colorScience.mjs';
 import { parseHexColor } from '../scripts/colorUtils.mjs';
 import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
 import { REQUIRED_THEME_ROLES, bracketColor } from '../scripts/themeDefinition.mjs';
-import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import {
+  SOURCE_THEMES,
+  getDefaultThemeSource,
+  getTerminalDefaultThemeSource,
+  readSourceTheme,
+} from '../scripts/themeSources.mjs';
 
 type ThemeDefinition = {
   appearance: 'dark' | 'light';
@@ -314,7 +319,7 @@ test('every generated Zed color uses a supported hex representation', () => {
   }
 
   const dawn = generated.themes.find((theme) => theme.name === 'Tyrian Dawn');
-  expect(dawn?.style['border.transparent']).toBe('#00000000');
+  expect(dawn?.style['border.transparent']).toBe('#C7BFD800');
 });
 
 test('Zed generation resolves theme membership and identity from the injected root', () => {
@@ -411,7 +416,9 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.parameter.color).toBe(source.syntax.data);
     expect(theme.style.syntax.boolean.color).toBe(source.syntax.constantLanguage);
-    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.constantLanguage);
+    expect(theme.style.syntax['constant.builtin']?.color).toBe(
+      theme.name === 'Tyrian Night Old' ? source.syntax.constantLanguage : source.syntax.null
+    );
     expect(theme.style.syntax.constant.color).toBe(source.syntax.data);
     expect(theme.style.syntax.number.color).toBe(source.syntax.data);
     expect(theme.style.syntax['variable.special']?.color).toBe(source.syntax.data);
@@ -462,8 +469,8 @@ test('Zed example settings match the repo companion settings contract', () => {
 
   expect(settings.theme).toEqual({
     mode: 'dark',
-    dark: 'Tyrian Nocturne',
-    light: 'Tyrian Dawn',
+    dark: getDefaultThemeSource().label,
+    light: getTerminalDefaultThemeSource('light').label,
   });
   expect(settings.icon_theme).toEqual({
     mode: 'light',

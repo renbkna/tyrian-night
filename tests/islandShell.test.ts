@@ -1243,26 +1243,26 @@ test('restore removes malformed Island blocks without deleting proof before veri
   }
 });
 
-test('restore owns every link targeting the Tyrian stylesheet filename', async () => {
-  for (const [name, replacement] of [
-    [
-      'query-and-extra-attributes',
-      '<link data-owner="external" href="./tyrian-night.island.css?cache=2#fragment" media="all">',
-    ],
-    ['plain-href', '<link href="tyrian-night.island.css" rel="preload">'],
-    [
-      'absolute-href',
-      '<link crossorigin href="file:///tmp/tyrian-night.island.css?cache=3" data-extra="yes">',
-    ],
-    [
-      'inline-link',
-      '<span>foreign prefix</span><link href="./tyrian-night.island.css#inline" data-extra="yes">',
-    ],
-    [
-      'unquoted-href',
-      '<link data-extra=yes href=./tyrian-night.island.css?cache=4#fragment media=all>',
-    ],
-  ] as const) {
+for (const [name, replacement] of [
+  [
+    'query-and-extra-attributes',
+    '<link data-owner="external" href="./tyrian-night.island.css?cache=2#fragment" media="all">',
+  ],
+  ['plain-href', '<link href="tyrian-night.island.css" rel="preload">'],
+  [
+    'absolute-href',
+    '<link crossorigin href="file:///tmp/tyrian-night.island.css?cache=3" data-extra="yes">',
+  ],
+  [
+    'inline-link',
+    '<span>foreign prefix</span><link href="./tyrian-night.island.css#inline" data-extra="yes">',
+  ],
+  [
+    'unquoted-href',
+    '<link data-extra=yes href=./tyrian-night.island.css?cache=4#fragment media=all>',
+  ],
+] as const) {
+  test(`restore owns a ${name} link targeting the Tyrian stylesheet filename`, async () => {
     const appRoot = await createAppRoot(name);
     const cssSource = path.join(testRoot, `${name}.css`);
     await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
@@ -1290,8 +1290,8 @@ test('restore owns every link targeting the Tyrian stylesheet filename', async (
     expect(restoredHtml).not.toContain(ISLAND_CSS_FILE_NAME);
     expect(restoredHtml).not.toContain(TYRIAN_MARKER_START);
     expect(restoredHtml).not.toContain(TYRIAN_MARKER_END);
-  }
-});
+  });
+}
 
 test('restore repairs checksum when broken sidecars mask the mismatch classification', async () => {
   const appRoot = await createAppRoot('broken-sidecar-checksum', {

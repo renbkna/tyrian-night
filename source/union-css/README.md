@@ -14,6 +14,6 @@ Use the three shape tokens by component scale: `--tyrian-radius-small` for indic
 
 `scripts/desktopThemes.mjs` injects Tyrian palette tokens into `/* TYRIAN_GENERATED_TOKENS */` for each theme and writes generated styles under `desktop/kde/union/css/styles/*/style.css`.
 
-Keep generated color values out of this template. Use `--tyrian-*` variables so palette values continue to come from `source/themes/`; role membership is owned by `source/themeRoleContract.json`.
+Keep generated color values out of this template. Use `--tyrian-*` variables so pigments continue to come from `source/themes/`, aliases from `source/themeColorBindings.json`, and derived alpha from `source/themeOpacityContract.json`; role membership is owned by `source/themeRoleContract.json`.
 
 Source CSS may use local `@import` rules. Generated KDE output is flattened and must not import Breeze, `kcolorscheme`, external paths, or runtime CSS files.

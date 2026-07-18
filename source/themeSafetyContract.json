@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "background": "ui:surface.canvas",
+  "exemptions": [
+    {
+      "theme": "tyrian-night-old",
+      "constraint": "readable-supporting-ui",
+      "kind": "wcag-minimum-contrast",
+      "role": "ui:text.muted",
+      "reason": "Frozen legacy palette compatibility; current themes are not exempt."
+    },
+    {
+      "theme": "tyrian-night-old",
+      "constraint": "readable-syntax",
+      "kind": "wcag-minimum-contrast",
+      "role": "syntax:null",
+      "reason": "Frozen legacy null alias compatibility; current themes are not exempt."
+    }
+  ],
+  "contrast": [
+    {
+      "id": "readable-primary",
+      "minimum": 4.5,
+      "roles": ["ui:text.primary", "syntax:variable", "terminal:foreground"]
+    },
+    {
+      "id": "readable-supporting-ui",
+      "minimum": 4.5,
+      "roles": [
+        "ui:text.secondary",
+        "ui:text.muted",
+        "ui:text.chrome",
+        "ui:text.sidebar",
+        "ui:text.status"
+      ]
+    },
+    {
+      "id": "readable-syntax",
+      "minimum": 4.5,
+      "roles": [
+        "syntax:comment",
+        "syntax:constantLanguage",
+        "syntax:data",
+        "syntax:documentation",
+        "syntax:emphasis",
+        "syntax:file",
+        "syntax:function",
+        "syntax:keyword",
+        "syntax:null",
+        "syntax:punctuation",
+        "syntax:regexp",
+        "syntax:string",
+        "syntax:type",
+        "syntax:variable"
+      ]
+    },
+    {
+      "id": "readable-independent-state-labels",
+      "minimum": 4.5,
+      "roles": [
+        "ui:status.error",
+        "ui:status.warning",
+        "ui:status.info",
+        "ui:status.success",
+        "terminal:ansi.red",
+        "terminal:ansi.green",
+        "terminal:ansi.yellow",
+        "terminal:ansi.blue",
+        "terminal:ansi.magenta",
+        "terminal:ansi.cyan",
+        "terminal:ansi.brightRed",
+        "terminal:ansi.brightGreen",
+        "terminal:ansi.brightYellow",
+        "terminal:ansi.brightBlue",
+        "terminal:ansi.brightMagenta",
+        "terminal:ansi.brightCyan"
+      ]
+    }
+  ],
+  "contrastPairs": [
+    {
+      "id": "button-label",
+      "foreground": "ui:buttons.foreground",
+      "background": "ui:buttons.background",
+      "minimum": 4.5
+    },
+    {
+      "id": "button-hover-label",
+      "foreground": "ui:buttons.foreground",
+      "background": "ui:buttons.hover.background",
+      "minimum": 4.5
+    },
+    {
+      "id": "badge-label",
+      "foreground": "ui:badges.foreground",
+      "background": "ui:badges.background",
+      "minimum": 4.5
+    },
+    {
+      "id": "focus-on-canvas",
+      "foreground": "ui:accent.primary",
+      "background": "ui:surface.canvas",
+      "minimum": 3
+    },
+    {
+      "id": "focus-on-field",
+      "foreground": "ui:accent.primary",
+      "background": "ui:surface.field",
+      "minimum": 3
+    },
+    {
+      "id": "focus-on-raised",
+      "foreground": "ui:accent.primary",
+      "background": "ui:surface.raised",
+      "minimum": 3
+    }
+  ],
+  "stateComparisons": [
+    {
+      "id": "status-states",
+      "roles": ["ui:status.error", "ui:status.warning", "ui:status.success", "ui:status.info"],
+      "pairing": "all"
+    },
+    {
+      "id": "bracket-depths",
+      "roles": [
+        "brackets:depth1",
+        "brackets:depth2",
+        "brackets:depth3",
+        "brackets:depth4",
+        "brackets:depth5",
+        "brackets:depth6"
+      ],
+      "pairing": "adjacent-cycle"
+    },
+    {
+      "id": "ansi-warm-states",
+      "roles": ["terminal:ansi.red", "terminal:ansi.yellow", "terminal:ansi.green"],
+      "pairing": "adjacent"
+    },
+    {
+      "id": "ansi-cool-states",
+      "roles": ["terminal:ansi.blue", "terminal:ansi.magenta", "terminal:ansi.cyan"],
+      "pairing": "adjacent"
+    },
+    {
+      "id": "ansi-bright-warm-states",
+      "roles": [
+        "terminal:ansi.brightRed",
+        "terminal:ansi.brightYellow",
+        "terminal:ansi.brightGreen"
+      ],
+      "pairing": "adjacent"
+    },
+    {
+      "id": "ansi-bright-cool-states",
+      "roles": [
+        "terminal:ansi.brightBlue",
+        "terminal:ansi.brightMagenta",
+        "terminal:ansi.brightCyan"
+      ],
+      "pairing": "adjacent"
+    }
+  ]
+}

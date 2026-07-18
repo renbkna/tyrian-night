@@ -9,6 +9,25 @@ import path from 'node:path';
  */
 
 /**
+ * Reads a mixed-authority file that will be projected back through this
+ * generator without allowing its target path to escape repository ownership.
+ *
+ * @param {string} repoRoot
+ * @param {string} filePath
+ * @returns {Buffer}
+ */
+export function readOwnedGeneratedFile(repoRoot, filePath) {
+  const relativePath = requireRelativePath(filePath);
+  assertNoGeneratedPathSymlink(repoRoot, relativePath);
+  const absolutePath = path.join(repoRoot, relativePath);
+  const stats = fs.lstatSync(absolutePath);
+  if (!stats.isFile()) {
+    throw new Error(`Generated path must be a regular file: '${relativePath}'`);
+  }
+  return fs.readFileSync(absolutePath);
+}
+
+/**
  * Synchronizes generated files and enforces exact ownership inside declared output areas.
  *
  * @param {GeneratedAsset[]} assets
@@ -29,6 +48,13 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
     }
 
     expected.set(relativePath, asset.content);
+  }
+
+  // Reject a statically invalid generation before deleting stale outputs or
+  // publishing any member of the new set. The write-side check remains below
+  // so a later path replacement still cannot redirect an individual write.
+  for (const filePath of expected.keys()) {
+    assertNoGeneratedPathSymlink(repoRoot, filePath);
   }
 
   const actualOwnedPaths = listOwnedFiles(repoRoot, ownership);

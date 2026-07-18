@@ -294,8 +294,8 @@ test('legacy enabled state migrates once into the shared shell record', async ()
   globalStateStore.set(LEGACY_ISLAND_UI_ENABLED_KEY, true);
   globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   queuedSpawnResponses.push(
-    { kind: 'seeded', desiredThemeId: 'tyrian-night.css' },
-    fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-night.css' }, true)
+    { kind: 'seeded', desiredThemeId: 'tyrian-nocturne.css' },
+    fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-nocturne.css' }, true)
   );
 
   const { activate } = await import('../apps/vscode/src/extension');
@@ -309,7 +309,7 @@ test('legacy enabled state migrates once into the shared shell record', async ()
     'apply-supervised',
   ]);
   const desiredIndex = spawnCalls[0]!.args.indexOf('--desired-theme-id');
-  expect(spawnCalls[0]!.args[desiredIndex + 1]).toBe('tyrian-night.css');
+  expect(spawnCalls[0]!.args[desiredIndex + 1]).toBe('tyrian-nocturne.css');
 });
 
 test('legacy per-root state migrates into shell authority and is deleted', async () => {

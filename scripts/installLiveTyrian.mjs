@@ -124,6 +124,9 @@ const activeHomeTransactions = new Map();
  * @typedef {{ target: 'caelestia'; caelestiaSequences: string }} PreparedCaelestiaInstall
  * @typedef {{ common: PreparedCommonInstall; desktop: PreparedPlasmaInstall | PreparedCaelestiaInstall }} PreparedLiveInstall
  * @typedef {{ common: string[]; plasma: string[]; caelestia: string[] }} LiveOwnedRegistry
+ * @typedef {{ configRoot: string; dataRoot: string; stateRoot: string }} XdgRoots
+ * @typedef {{ common: XdgRoots; plasma: XdgRoots; caelestia: XdgRoots }} LiveOwnedRoots
+ * @typedef {{ paths: LiveOwnedRegistry; roots: LiveOwnedRoots }} LiveOwnedState
  * @typedef {{ backupRoot: string; rollback: () => void }} LiveInstallReceipt
  */
 
@@ -713,7 +716,7 @@ function canonicalizeOwnedHomePaths(userHome, targetPaths) {
  */
 function installLiveTyrianOwned(plan, options) {
   const prepared = plan.apply ? prepareLiveInstall(plan) : prepareLiveInstallPreview(plan);
-  const { desiredOwnedRegistry, staleOwnedPaths, targetPaths } =
+  const { desiredOwnedRegistry, desiredOwnedRoots, staleOwnedPaths, targetPaths } =
     resolveLiveInstallTransactionScope(plan);
 
   if (!plan.apply) {
@@ -721,7 +724,7 @@ function installLiveTyrianOwned(plan, options) {
     materializeSourceRoot(plan);
     installTerminalLayer(plan, prepared.common);
     installTargetLayer(plan, prepared.desktop);
-    publishLiveOwnedPaths(plan, desiredOwnedRegistry);
+    publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots);
     publishLiveMigrationRetirement(plan);
     console.log(
       `Dry run complete for ${plan.target}. Re-run with --apply --target=${plan.target} to ${plan.mode === 'link' ? 'link live config to the repo' : `copy Tyrian into ${plan.installRoot}`}.`
@@ -748,7 +751,7 @@ function installLiveTyrianOwned(plan, options) {
 
       installTerminalLayer(plan, prepared.common);
       installTargetLayer(plan, prepared.desktop);
-      publishLiveOwnedPaths(plan, desiredOwnedRegistry);
+      publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots);
       publishLiveMigrationRetirement(plan);
     }
   );
@@ -773,10 +776,11 @@ export function readLiveInstallTransactionTargets(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @returns {{ desiredOwnedRegistry: LiveOwnedRegistry; staleOwnedPaths: string[]; targetPaths: string[] }}
+ * @returns {{ desiredOwnedRegistry: LiveOwnedRegistry; desiredOwnedRoots: LiveOwnedRoots; staleOwnedPaths: string[]; targetPaths: string[] }}
  */
 function resolveLiveInstallTransactionScope(plan) {
-  const previousOwnedRegistry = readLiveOwnedRegistry(plan);
+  const previousOwnedState = readLiveOwnedRegistry(plan);
+  const previousOwnedRegistry = previousOwnedState.paths;
   const desiredOwnedRegistry = {
     common: [...new Set(plan.commonOwnedPaths)],
     plasma:
@@ -786,7 +790,13 @@ function resolveLiveInstallTransactionScope(plan) {
         ? [...new Set(plan.targetOwnedPaths)]
         : previousOwnedRegistry.caelestia,
   };
-  assertLiveOwnedRegistry(plan, desiredOwnedRegistry);
+  const currentRoots = planXdgRoots(plan);
+  const desiredOwnedRoots = {
+    ...previousOwnedState.roots,
+    common: currentRoots,
+    [plan.target]: currentRoots,
+  };
+  assertLiveOwnedRegistry(plan, desiredOwnedRegistry, desiredOwnedRoots);
 
   const previousActivePaths = [
     ...previousOwnedRegistry.common,
@@ -817,6 +827,7 @@ function resolveLiveInstallTransactionScope(plan) {
 
   return {
     desiredOwnedRegistry,
+    desiredOwnedRoots,
     staleOwnedPaths,
     targetPaths,
   };
@@ -824,12 +835,17 @@ function resolveLiveInstallTransactionScope(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @returns {LiveOwnedRegistry}
+ * @returns {LiveOwnedState}
  */
 function readLiveOwnedRegistry(plan) {
+  const currentRoots = planXdgRoots(plan);
+  const currentProfileRoots = repeatProfileRoots(currentRoots);
   if (!exists(plan.ownershipManifestPath)) {
     if (isLiveMigrationRetired(plan)) {
-      return { common: [], plasma: [], caelestia: [] };
+      return {
+        paths: { common: [], plasma: [], caelestia: [] },
+        roots: currentProfileRoots,
+      };
     }
 
     const fixedRootInventory = buildPreOwnedRegistryInstallInventory(plan.home);
@@ -848,7 +864,10 @@ function readLiveOwnedRegistry(plan) {
       caelestia: plan.legacyPaths.caelestia,
     };
 
-    return mergeExistingLiveOwnedRegistries(fixedRootInventory, transitionalInventory);
+    return {
+      paths: mergeExistingLiveOwnedRegistries(fixedRootInventory, transitionalInventory),
+      roots: currentProfileRoots,
+    };
   }
 
   const stats = fs.lstatSync(plan.ownershipManifestPath);
@@ -863,10 +882,13 @@ function readLiveOwnedRegistry(plan) {
 
   /** @type {LiveOwnedRegistry} */
   let registry;
+  /** @type {LiveOwnedRoots} */
+  let roots;
   if (candidate.version === 1 && Array.isArray(candidate.paths)) {
     registry = { common: [], plasma: [], caelestia: [] };
-    for (const ownedPath of decodeLiveOwnedPaths(plan, candidate.paths)) {
-      const profile = classifyLiveOwnedPath(plan, ownedPath);
+    roots = repeatProfileRoots(defaultXdgRoots(plan.home));
+    for (const ownedPath of decodeRelativeOwnedPaths(plan, candidate.paths)) {
+      const profile = classifyLiveOwnedPath(plan, ownedPath, roots.common);
       if (profile === undefined) {
         throw new Error(
           `Live install ownership manifest contains an unowned path: ${path.relative(plan.home, ownedPath)}`
@@ -884,25 +906,53 @@ function readLiveOwnedRegistry(plan) {
     Array.isArray(candidate.profiles.caelestia)
   ) {
     registry = {
-      common: decodeLiveOwnedPaths(plan, candidate.profiles.common, 'common'),
-      plasma: decodeLiveOwnedPaths(plan, candidate.profiles.plasma, 'plasma'),
-      caelestia: decodeLiveOwnedPaths(plan, candidate.profiles.caelestia, 'caelestia'),
+      common: decodeRelativeOwnedPaths(plan, candidate.profiles.common),
+      plasma: decodeRelativeOwnedPaths(plan, candidate.profiles.plasma),
+      caelestia: decodeRelativeOwnedPaths(plan, candidate.profiles.caelestia),
+    };
+    roots = inferVersion2OwnedRoots(plan, registry);
+  } else if (
+    candidate.version === 3 &&
+    candidate.profiles !== null &&
+    typeof candidate.profiles === 'object' &&
+    Object.keys(candidate.profiles).toSorted().join(',') === 'caelestia,common,plasma'
+  ) {
+    const profiles = /** @type {Record<string, any>} */ (candidate.profiles);
+    for (const profile of ['common', 'plasma', 'caelestia']) {
+      if (
+        profiles[profile] === null ||
+        typeof profiles[profile] !== 'object' ||
+        Array.isArray(profiles[profile]) ||
+        Object.keys(profiles[profile]).toSorted().join(',') !== 'paths,roots' ||
+        !Array.isArray(profiles[profile].paths)
+      ) {
+        throw new Error('Live install ownership manifest is corrupt');
+      }
+    }
+    registry = {
+      common: decodeRelativeOwnedPaths(plan, profiles.common.paths),
+      plasma: decodeRelativeOwnedPaths(plan, profiles.plasma.paths),
+      caelestia: decodeRelativeOwnedPaths(plan, profiles.caelestia.paths),
+    };
+    roots = {
+      common: decodePersistedXdgRoots(plan, profiles.common.roots, 'common'),
+      plasma: decodePersistedXdgRoots(plan, profiles.plasma.roots, 'plasma'),
+      caelestia: decodePersistedXdgRoots(plan, profiles.caelestia.roots, 'caelestia'),
     };
   } else {
     throw new Error('Live install ownership manifest is corrupt');
   }
 
-  assertLiveOwnedRegistry(plan, registry);
-  return registry;
+  assertLiveOwnedRegistry(plan, registry, roots);
+  return { paths: registry, roots };
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @param {unknown[]} relativePaths
- * @param {keyof LiveOwnedRegistry} [expectedProfile]
  * @returns {string[]}
  */
-function decodeLiveOwnedPaths(plan, relativePaths, expectedProfile) {
+function decodeRelativeOwnedPaths(plan, relativePaths) {
   return relativePaths.map((relativePath) => {
     if (
       typeof relativePath !== 'string' ||
@@ -913,26 +963,156 @@ function decodeLiveOwnedPaths(plan, relativePaths, expectedProfile) {
     }
 
     const ownedPath = path.resolve(plan.home, relativePath);
-    const profile = classifyLiveOwnedPath(plan, ownedPath);
-    if (relativePath !== path.relative(plan.home, ownedPath) || profile === undefined) {
+    if (relativePath !== path.relative(plan.home, ownedPath)) {
       throw new Error(`Live install ownership manifest contains an unowned path: ${relativePath}`);
-    }
-    if (expectedProfile !== undefined && profile !== expectedProfile) {
-      throw new Error(
-        `Live install ownership manifest assigns ${relativePath} to ${expectedProfile}, not ${profile}`
-      );
     }
 
     return ownedPath;
   });
 }
 
+/** @param {LiveInstallPlan} plan @returns {XdgRoots} */
+function planXdgRoots(plan) {
+  return {
+    configRoot: plan.configRoot,
+    dataRoot: plan.dataRoot,
+    stateRoot: plan.stateRoot,
+  };
+}
+
+/** @param {string} userHome @returns {XdgRoots} */
+function defaultXdgRoots(userHome) {
+  return {
+    configRoot: path.join(userHome, '.config'),
+    dataRoot: path.join(userHome, '.local/share'),
+    stateRoot: path.join(userHome, '.local/state'),
+  };
+}
+
+/** @param {XdgRoots} roots @returns {LiveOwnedRoots} */
+function repeatProfileRoots(roots) {
+  return {
+    common: { ...roots },
+    plasma: { ...roots },
+    caelestia: { ...roots },
+  };
+}
+
+/** @param {LiveInstallPlan} plan @param {unknown} value @param {string} profile @returns {XdgRoots} */
+function decodePersistedXdgRoots(plan, value, profile) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Live install ownership manifest is corrupt');
+  }
+  const candidate = /** @type {Record<string, unknown>} */ (value);
+  if (Object.keys(candidate).toSorted().join(',') !== 'configRoot,dataRoot,stateRoot') {
+    throw new Error('Live install ownership manifest is corrupt');
+  }
+  /** @param {'configRoot' | 'dataRoot' | 'stateRoot'} field */
+  const decodeRoot = (field) => {
+    const relativeRoot = candidate[field];
+    if (typeof relativeRoot !== 'string' || path.isAbsolute(relativeRoot)) {
+      throw new Error('Live install ownership manifest is corrupt');
+    }
+    const root = resolvePathIdentity(path.resolve(plan.home, relativeRoot));
+    if (relativeRoot !== path.relative(plan.home, root) || !isSameOrDescendant(plan.home, root)) {
+      throw new Error(
+        `Live install ownership manifest ${profile} ${field} escapes the destination home`
+      );
+    }
+    return root;
+  };
+  return {
+    configRoot: decodeRoot('configRoot'),
+    dataRoot: decodeRoot('dataRoot'),
+    stateRoot: decodeRoot('stateRoot'),
+  };
+}
+
+/** @param {LiveInstallPlan} plan @param {LiveOwnedRegistry} registry @returns {LiveOwnedRoots} */
+function inferVersion2OwnedRoots(plan, registry) {
+  const currentRoots = planXdgRoots(plan);
+  return {
+    common: inferVersion2ProfileRoots(plan, registry.common, 'common', currentRoots),
+    plasma: inferVersion2ProfileRoots(plan, registry.plasma, 'plasma', currentRoots),
+    caelestia: inferVersion2ProfileRoots(plan, registry.caelestia, 'caelestia', currentRoots),
+  };
+}
+
+/** @param {LiveInstallPlan} plan @param {string[]} ownedPaths @param {keyof LiveOwnedRegistry} profile @param {XdgRoots} fallback @returns {XdgRoots} */
+function inferVersion2ProfileRoots(plan, ownedPaths, profile, fallback) {
+  const suffixes = {
+    common: {
+      configRoot: [
+        'ghostty/config',
+        'ghostty/ghostty.css',
+        'foot/foot.ini',
+        'fish/conf.d/tyrian-night.fish',
+        'fish/functions/fish_greeting.fish',
+      ],
+      dataRoot: [],
+      stateRoot: [],
+    },
+    plasma: {
+      configRoot: ['kdeglobals', 'plasmarc', 'kscreenlockerrc'],
+      dataRoot: [
+        'color-schemes/TyrianNight.colors',
+        'plasma/desktoptheme/TyrianNight',
+        'plasma/look-and-feel/TyrianNight',
+      ],
+      stateRoot: [],
+    },
+    caelestia: {
+      configRoot: ['hypr/scheme/current.conf', 'hypr/scheme/current.lua'],
+      dataRoot: ['caelestia/fastfetch/config.jsonc', 'caelestia/starship.toml'],
+      stateRoot: ['caelestia/scheme.json', 'caelestia/sequences.txt'],
+    },
+  };
+  /** @type {XdgRoots} */
+  const roots = { ...fallback };
+  for (const field of /** @type {const} */ (['configRoot', 'dataRoot', 'stateRoot'])) {
+    const inferred = new Set();
+    for (const ownedPath of ownedPaths) {
+      if (
+        isSameOrDescendant(plan.installRoot, ownedPath) ||
+        classifyHistoricalLiveOwnedPath(plan, ownedPath) !== undefined
+      ) {
+        continue;
+      }
+      for (const suffix of suffixes[profile][field]) {
+        const root = rootBeforeSuffix(ownedPath, suffix);
+        if (root !== undefined) inferred.add(root);
+      }
+    }
+    if (inferred.size > 1) {
+      throw new Error(`Live install version-2 ${profile} ownership spans multiple ${field}s`);
+    }
+    if (inferred.size === 1) roots[field] = /** @type {string} */ ([...inferred][0]);
+  }
+  return roots;
+}
+
+/** @param {string} ownedPath @param {string} suffix */
+function rootBeforeSuffix(ownedPath, suffix) {
+  const suffixParts = suffix.split('/');
+  const pathParts = path.resolve(ownedPath).split(path.sep);
+  if (
+    suffixParts.length > pathParts.length ||
+    !suffixParts.every(
+      (part, index) => part === pathParts[pathParts.length - suffixParts.length + index]
+    )
+  ) {
+    return undefined;
+  }
+  return pathParts.slice(0, -suffixParts.length).join(path.sep) || path.parse(ownedPath).root;
+}
+
 /**
  * @param {LiveInstallPlan} plan
  * @param {LiveOwnedRegistry} registry
+ * @param {LiveOwnedRoots} roots
  * @returns {void}
  */
-function assertLiveOwnedRegistry(plan, registry) {
+function assertLiveOwnedRegistry(plan, registry, roots) {
   const entries = /** @type {Array<[keyof LiveOwnedRegistry, string]>} */ (
     Object.entries(registry).flatMap(([profile, ownedPaths]) =>
       ownedPaths.map((ownedPath) => [profile, ownedPath])
@@ -945,7 +1125,7 @@ function assertLiveOwnedRegistry(plan, registry) {
 
   for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
     const [leftProfile, leftPath] = entries[leftIndex];
-    if (classifyLiveOwnedPath(plan, leftPath) !== leftProfile) {
+    if (classifyLiveOwnedPath(plan, leftPath, roots[leftProfile]) !== leftProfile) {
       throw new Error(`Live install ownership registry contains an invalid ${leftProfile} path`);
     }
 
@@ -987,12 +1167,65 @@ function isLiveMigrationRetired(plan) {
 /**
  * @param {LiveInstallPlan} plan
  * @param {string} ownedPath
+ * @param {XdgRoots} roots
  * @returns {keyof LiveOwnedRegistry | undefined}
  */
-function classifyLiveOwnedPath(plan, ownedPath) {
+function classifyLiveOwnedPath(plan, ownedPath, roots) {
+  const historicalProfile = classifyHistoricalLiveOwnedPath(plan, ownedPath);
+  if (historicalProfile !== undefined) return historicalProfile;
+  const livePaths = buildLivePaths(roots, undefined);
+  const legacyPaths = buildLegacyPaths(plan.home, roots);
+
+  if (isSameOrDescendant(plan.installRoot, ownedPath)) return 'common';
+  if (
+    [
+      livePaths.ghosttyConfig,
+      livePaths.footConfig,
+      livePaths.fishStartupConfig,
+      livePaths.fishGreeting,
+      path.join(roots.configRoot, 'ghostty/ghostty.css'),
+      ...legacyPaths.common,
+    ].includes(ownedPath)
+  ) {
+    return 'common';
+  }
+  const ghosttyRelative = path.relative(livePaths.ghosttyThemes, ownedPath);
+  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(ghosttyRelative)) return 'common';
+
+  const footRelative = path.relative(livePaths.footThemes, ownedPath);
+  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*\.ini$/u.test(footRelative)) return 'common';
+
+  if (
+    buildTargetOwnedPaths('plasma', livePaths, undefined).includes(ownedPath) ||
+    legacyPaths.plasma.includes(ownedPath)
+  ) {
+    return 'plasma';
+  }
+  if (
+    [
+      livePaths.caelestiaSchemeState,
+      livePaths.caelestiaSequences,
+      livePaths.hyprCurrentLua,
+      livePaths.hyprCurrentLegacy,
+      ...legacyPaths.caelestia,
+    ].includes(ownedPath)
+  ) {
+    return 'caelestia';
+  }
+
+  return undefined;
+}
+
+/**
+ * @param {LiveInstallPlan} plan
+ * @param {string} ownedPath
+ * @returns {keyof LiveOwnedRegistry | undefined}
+ */
+function classifyHistoricalLiveOwnedPath(plan, ownedPath) {
   const fixedRootInventories = [
     buildPreOwnedRegistryInstallInventory(plan.home),
     buildV1OwnedRegistryFixedRootInventory(plan.home),
+    buildLegacyPaths(plan.home, defaultXdgRoots(plan.home)),
   ];
   for (const fixedRootInventory of fixedRootInventories) {
     for (const profile of /** @type {(keyof LiveOwnedRegistry)[]} */ ([
@@ -1003,33 +1236,6 @@ function classifyLiveOwnedPath(plan, ownedPath) {
       if (fixedRootInventory[profile].includes(ownedPath)) return profile;
     }
   }
-
-  if (isSameOrDescendant(plan.installRoot, ownedPath)) return 'common';
-  if (plan.commonOwnedPaths.includes(ownedPath)) return 'common';
-  if (plan.legacyPaths.common.includes(ownedPath)) return 'common';
-  if (plan.legacyPaths.plasma.includes(ownedPath)) return 'plasma';
-  if (plan.legacyPaths.caelestia.includes(ownedPath)) return 'caelestia';
-  if (ownedPath === path.join(plan.configRoot, 'ghostty/ghostty.css')) return 'common';
-  const ghosttyRelative = path.relative(plan.livePaths.ghosttyThemes, ownedPath);
-  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(ghosttyRelative)) return 'common';
-
-  const footRelative = path.relative(plan.livePaths.footThemes, ownedPath);
-  if (/^tyrian-[a-z0-9]+(?:-[a-z0-9]+)*\.ini$/u.test(footRelative)) return 'common';
-
-  if (buildTargetOwnedPaths('plasma', plan.livePaths, undefined).includes(ownedPath)) {
-    return 'plasma';
-  }
-  if (
-    [
-      plan.livePaths.caelestiaSchemeState,
-      plan.livePaths.caelestiaSequences,
-      plan.livePaths.hyprCurrentLua,
-      plan.livePaths.hyprCurrentLegacy,
-    ].includes(ownedPath)
-  ) {
-    return 'caelestia';
-  }
-
   return undefined;
 }
 
@@ -1049,19 +1255,31 @@ function cleanupStaleOwnedPaths(plan, staleOwnedPaths) {
 /**
  * @param {LiveInstallPlan} plan
  * @param {LiveOwnedRegistry} registry
+ * @param {LiveOwnedRoots} roots
  * @returns {void}
  */
-function publishLiveOwnedPaths(plan, registry) {
-  assertLiveOwnedRegistry(plan, registry);
+function publishLiveOwnedPaths(plan, registry, roots) {
+  assertLiveOwnedRegistry(plan, registry, roots);
   const relativeProfiles = Object.fromEntries(
-    Object.entries(registry).map(([profile, ownedPaths]) => [
-      profile,
-      ownedPaths.map((ownedPath) => path.relative(plan.home, ownedPath)).toSorted(),
-    ])
+    Object.entries(registry).map(([profile, ownedPaths]) => {
+      const profileRoots = roots[/** @type {keyof LiveOwnedRegistry} */ (profile)];
+      return [
+        profile,
+        {
+          paths: ownedPaths.map((ownedPath) => path.relative(plan.home, ownedPath)).toSorted(),
+          roots: Object.fromEntries(
+            Object.entries(profileRoots).map(([field, root]) => [
+              field,
+              path.relative(plan.home, root),
+            ])
+          ),
+        },
+      ];
+    })
   );
   const content = `${JSON.stringify(
     {
-      version: 2,
+      version: 3,
       owner: 'Tyrian Night live install',
       profiles: relativeProfiles,
     },

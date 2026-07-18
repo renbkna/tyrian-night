@@ -165,7 +165,7 @@ test('source theme catalog owns ordered membership and explicit default roles on
 
   expect(defaultEntries).toEqual([
     expect.objectContaining({
-      slug: 'tyrian-night',
+      slug: 'tyrian-nocturne',
     }),
   ]);
   expect(terminalDefaultEntries.map(({ slug }) => slug)).toEqual([
@@ -191,7 +191,7 @@ test('source theme catalog owns ordered membership and explicit default roles on
 });
 
 test('generated theme catalog default does not depend on source catalog position', () => {
-  expect(TYRIAN_THEME_CATALOG.find((theme) => theme.isDefault)?.label).toBe('Tyrian Night');
+  expect(TYRIAN_THEME_CATALOG.find((theme) => theme.isDefault)?.label).toBe('Tyrian Nocturne');
   for (const theme of TYRIAN_THEME_CATALOG) {
     expect(theme).not.toHaveProperty('islandCssPath');
   }
@@ -212,9 +212,8 @@ test('VS Code contribution generation resolves the injected catalog root', () =>
     expect(buildVscodeThemeContributions(root)[0]?.label).toBe('Injected Tyrian Night');
     const packageBeforeCheck = fs.readFileSync(path.join(root, VSCODE_PACKAGE_PATH), 'utf8');
     expect(syncGeneratedContracts(root, { check: true })).toEqual([
+      'apps/vscode/package.json',
       'apps/vscode/src/generated/themeCatalog.ts',
-      'apps/vscode/package.json contributes.themes',
-      'apps/vscode/package.json files',
     ]);
     expect(fs.readFileSync(path.join(root, VSCODE_PACKAGE_PATH), 'utf8')).toBe(packageBeforeCheck);
     expect(fs.existsSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'))).toBe(false);
@@ -236,10 +235,31 @@ test('VS Code contribution generation resolves the injected catalog root', () =>
   }
 });
 
+test('generated contracts cannot redirect the mixed-authority package manifest', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-contract-symlink-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-contract-outside-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'apps/vscode'), { recursive: true });
+    const outsidePackage = path.join(outside, 'package.json');
+    const outsideContent = '{"name":"outside","contributes":{},"files":[]}\n';
+    fs.writeFileSync(outsidePackage, outsideContent);
+    fs.symlinkSync(outsidePackage, path.join(root, VSCODE_PACKAGE_PATH));
+
+    expect(() => syncGeneratedContracts(root)).toThrow('Generated path must not contain symlinks');
+    expect(fs.readFileSync(outsidePackage, 'utf8')).toBe(outsideContent);
+    expect(fs.existsSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('VS Code companion settings example is parseable and aligned with Tyrian defaults', () => {
   const settings = readJson<Record<string, unknown>>('apps/vscode/settings.example.json');
 
-  expect(settings['workbench.colorTheme']).toBe('Tyrian Night');
+  expect(settings['workbench.colorTheme']).toBe(getDefaultThemeSource().label);
   expect(settings['editor.fontFamily']).toBe(
     "'Monaspace Neon var', 'JetBrains Mono', 'IBM Plex Mono', monospace"
   );
@@ -364,18 +384,31 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.scripts['check:tracked-generated']).toBe(
     'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme'
   );
+  expect(workspace.scripts['test:isolated']).toBe('bun test --isolate');
+  for (const scriptName of ['test', 'verify:vscode', 'verify:vscode-portable', 'verify:desktop']) {
+    expect(workspace.scripts[scriptName]).toContain('bun run test:isolated');
+    expect(workspace.scripts[scriptName]).not.toContain('bun test ');
+  }
   const trackedGeneratedGate = workspace.scripts['precommit:tracked-generated'];
   expect(trackedGeneratedGate).toStartWith('bun run check:tracked-generated && ');
   for (const pathspec of [
     '.oxlintrc.json',
     'source/themeCatalog.json',
+    'source/themeOpacityContract.json',
+    'source/themePigmentPolicy.json',
+    'source/themeSafetyContract.json',
     'source/themes/*.json',
+    'scripts/colorScience.mjs',
+    'scripts/colorVision.mjs',
+    'scripts/zedTheme.mjs',
     'apps/vscode/src/generated/*.ts',
     'apps/vscode/themes/*.json',
     'apps/zed/themes/*.json',
+    'examples/theme-preview/*',
   ]) {
     expect(trackedGeneratedGate).toContain(pathspec);
   }
+  expect(trackedGeneratedGate.match(/scripts\/zedTheme\.mjs/gu)).toHaveLength(2);
   for (const { slug } of SOURCE_THEMES) {
     expect(trackedGeneratedGate).not.toContain(`apps/vscode/themes/${slug}.json`);
   }
@@ -436,6 +469,8 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(extension).not.toHaveProperty('simple-git-hooks');
   expect(lockfile).toMatch(/"":\s*\{\s*"name":\s*"tyrian-night-workspace"/u);
   expect(lockfile).toMatch(/"apps\/vscode":\s*\{\s*"name":\s*"tyrian-night"/u);
+  expect(lockfile).not.toContain('packages/umbra');
+  expect(lockfile).not.toContain('@tyrian-night/umbra');
   expect(lockfile).not.toContain('simple-git-hooks');
 
   expect(desktop.tyrianNight.supportedPlatforms).toEqual(['linux']);
@@ -458,6 +493,7 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(tsconfig.compilerOptions.checkJs).toBe(true);
   expect(tsconfig.include).toContain('apps/vscode/src');
   expect(tsconfig.include).toContain('scripts');
+  expect(tsconfig.include).not.toContain('packages/umbra/src');
   expect(tsupConfig).toContain("VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22'");
   expect(tsupConfig).toContain("entry: ['src/extension.ts', 'src/islandCli.ts']");
   expect(tsupConfig).not.toContain("target: 'esnext'");

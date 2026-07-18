@@ -451,7 +451,7 @@ test('no-manifest migration reconciles the complete fixed-root install before re
     const migratedCaelestiaPaths = [...fixedCaelestiaPaths, ...transitionalCaelestiaPaths].map(
       (filePath) => path.relative(home, filePath)
     );
-    expect(ownershipManifest.profiles.caelestia).toEqual(
+    expect(ownershipManifest.profiles.caelestia.paths).toEqual(
       expect.arrayContaining(migratedCaelestiaPaths)
     );
     expect(fs.existsSync(path.join(home, LIVE_INSTALL_MIGRATION_RETIREMENT_RELATIVE_PATH))).toBe(
@@ -644,13 +644,13 @@ test('desktop applies preserve the other target and Caelestia mode switches remo
     const manifest = JSON.parse(
       fs.readFileSync(path.join(home, '.local/state/tyrian-night/live-owned-paths.json'), 'utf8')
     );
-    expect(manifest.version).toBe(2);
+    expect(manifest.version).toBe(3);
     expect(manifest.owner).toBe('Tyrian Night live install');
     expect(Object.keys(manifest.profiles).toSorted()).toEqual(['caelestia', 'common', 'plasma']);
-    expect(Array.isArray(manifest.profiles.common)).toBe(true);
-    expect(manifest.profiles.plasma).toContain('.config/kdeglobals');
-    expect(manifest.profiles.caelestia).toContain('.config/hypr/scheme/current.lua');
-    expect(manifest.profiles.caelestia).not.toContain('.config/hypr/scheme/current.conf');
+    expect(Array.isArray(manifest.profiles.common.paths)).toBe(true);
+    expect(manifest.profiles.plasma.paths).toContain('.config/kdeglobals');
+    expect(manifest.profiles.caelestia.paths).toContain('.config/hypr/scheme/current.lua');
+    expect(manifest.profiles.caelestia.paths).not.toContain('.config/hypr/scheme/current.conf');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -691,12 +691,12 @@ test('v1 mixed ownership migrates without deleting the unselected desktop profil
     expect(fs.readFileSync(caelestiaState, 'utf8')).toBe('preserve:scheme.json\n');
     expect(fs.readFileSync(legacyProjection, 'utf8')).toBe('preserve:current.conf\n');
     const migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
-    expect(migrated.version).toBe(2);
-    expect(migrated.profiles.caelestia).toEqual([
+    expect(migrated.version).toBe(3);
+    expect(migrated.profiles.caelestia.paths).toEqual([
       '.config/hypr/scheme/current.conf',
       '.local/state/caelestia/scheme.json',
     ]);
-    expect(migrated.profiles.plasma).toContain('.config/kdeglobals');
+    expect(migrated.profiles.plasma.paths).toContain('.config/kdeglobals');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -766,9 +766,9 @@ test('v1 fixed Foot and Fish ownership follows a later custom XDG root', () => {
     expect(fs.existsSync(currentPlan.livePaths.fishGreeting)).toBe(true);
 
     const migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
-    expect(migrated.version).toBe(2);
+    expect(migrated.version).toBe(3);
     for (const fixedPath of fixedPaths) {
-      expect(migrated.profiles.common).not.toContain(path.relative(home, fixedPath));
+      expect(migrated.profiles.common.paths).not.toContain(path.relative(home, fixedPath));
     }
     for (const currentPath of [
       currentPlan.livePaths.footConfig,
@@ -776,8 +776,86 @@ test('v1 fixed Foot and Fish ownership follows a later custom XDG root', () => {
       currentPlan.livePaths.fishStartupConfig,
       currentPlan.livePaths.fishGreeting,
     ]) {
-      expect(migrated.profiles.common).toContain(path.relative(home, currentPath));
+      expect(migrated.profiles.common.paths).toContain(path.relative(home, currentPath));
     }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('v2 profile ownership migrates across XDG root changes without losing the unselected profile', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-v2-xdg-migration-'));
+  const ownershipManifest = path.join(home, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH);
+  const environmentA = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg-a/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg-a/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg-a/state'),
+  };
+  const environmentB = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg-b/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg-b/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg-b/state'),
+  };
+
+  try {
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      environment: environmentA,
+      apply: true,
+      target: 'plasma',
+    });
+    const version3 = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
+    fs.writeFileSync(
+      ownershipManifest,
+      `${JSON.stringify({
+        version: 2,
+        owner: version3.owner,
+        profiles: Object.fromEntries(
+          Object.entries(version3.profiles).map(([profile, state]: [string, any]) => [
+            profile,
+            state.paths,
+          ])
+        ),
+      })}\n`
+    );
+
+    const oldCommon = path.join(environmentA.XDG_CONFIG_HOME, 'ghostty/config');
+    const oldPlasma = path.join(environmentA.XDG_CONFIG_HOME, 'kdeglobals');
+    const newCommon = path.join(environmentB.XDG_CONFIG_HOME, 'ghostty/config');
+    const newPlasma = path.join(environmentB.XDG_CONFIG_HOME, 'kdeglobals');
+    const oldPlasmaContent = fs.readFileSync(oldPlasma, 'utf8');
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      environment: environmentB,
+      apply: true,
+      target: 'caelestia',
+      hyprlandMode: 'legacy',
+    });
+
+    expect(fs.existsSync(oldCommon)).toBe(false);
+    expect(fs.existsSync(newCommon)).toBe(true);
+    expect(fs.readFileSync(oldPlasma, 'utf8')).toBe(oldPlasmaContent);
+    let migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
+    expect(migrated.version).toBe(3);
+    expect(migrated.profiles.common.roots.configRoot).toBe('xdg-b/config');
+    expect(migrated.profiles.plasma.roots.configRoot).toBe('xdg-a/config');
+    expect(migrated.profiles.caelestia.roots.configRoot).toBe('xdg-b/config');
+
+    installLiveTyrian({
+      repoRoot: process.cwd(),
+      home,
+      environment: environmentB,
+      apply: true,
+      target: 'plasma',
+    });
+
+    expect(fs.existsSync(oldPlasma)).toBe(false);
+    expect(fs.existsSync(newPlasma)).toBe(true);
+    migrated = JSON.parse(fs.readFileSync(ownershipManifest, 'utf8'));
+    expect(migrated.profiles.plasma.roots.configRoot).toBe('xdg-b/config');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

@@ -1,10 +1,9 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { syncGeneratedAssets } from './generatedAssets.mjs';
+import { readOwnedGeneratedFile, syncGeneratedAssets } from './generatedAssets.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,15 +16,6 @@ const PACKAGE_RUNTIME_SUFFIX_FILES = ['assets/icon.png', 'out/extension.js', 'ou
 /**
  * @typedef {{ label: string; path: string; uiTheme: string }} VscodeThemeContribution
  */
-
-/**
- * @param {string} root
- * @param {string} filePath
- * @returns {unknown}
- */
-function readJson(root, filePath) {
-  return JSON.parse(fs.readFileSync(path.join(root, filePath), 'utf8'));
-}
 
 /**
  * @param {string} [root]
@@ -102,16 +92,14 @@ function formatTsString(value) {
 }
 
 /**
- * @param {string} root
- * @param {boolean} check
  * @param {ReadonlyArray<import('./themeSources.mjs').ThemeSource>} sourceThemes
- * @returns {string[]}
+ * @param {string} root
+ * @returns {{ content: string; path: string }}
  */
-function syncPackageThemeContracts(root, check, sourceThemes) {
-  const packagePath = path.join(root, vscodePackagePath);
+function buildPackageThemeContractAsset(sourceThemes, root) {
   const packageJson =
     /** @type {{ contributes?: { themes?: VscodeThemeContribution[] }; files?: string[] }} */ (
-      readJson(root, vscodePackagePath)
+      JSON.parse(readOwnedGeneratedFile(root, vscodePackagePath).toString('utf8'))
     );
   const expectedContributions = vscodeThemeContributions(sourceThemes);
   const expectedFiles = [
@@ -121,22 +109,13 @@ function syncPackageThemeContracts(root, check, sourceThemes) {
     ...sourceThemes.map(({ slug }) => `themes/${slug}.json`),
   ];
 
-  if (check) {
-    return [
-      ...(JSON.stringify(packageJson.contributes?.themes) === JSON.stringify(expectedContributions)
-        ? []
-        : [`${vscodePackagePath} contributes.themes`]),
-      ...(JSON.stringify(packageJson.files) === JSON.stringify(expectedFiles)
-        ? []
-        : [`${vscodePackagePath} files`]),
-    ];
-  }
-
   packageJson.contributes ??= {};
   packageJson.contributes.themes = expectedContributions;
   packageJson.files = expectedFiles;
-  fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
-  return [];
+  return {
+    path: vscodePackagePath,
+    content: `${JSON.stringify(packageJson, null, 2)}\n`,
+  };
 }
 
 /**
@@ -149,15 +128,13 @@ export function syncGeneratedContracts(root = defaultRepoRoot, options = {}) {
   const sourceThemes = readThemeSources(root);
   const generatedContracts = [
     { path: themeCatalogOutputPath, content: buildThemeCatalogTs(sourceThemes) },
+    buildPackageThemeContractAsset(sourceThemes, root),
   ];
 
-  return [
-    ...syncGeneratedAssets(generatedContracts, root, {
-      check,
-      ownership: GENERATED_CONTRACT_OWNERSHIP,
-    }),
-    ...syncPackageThemeContracts(root, check, sourceThemes),
-  ];
+  return syncGeneratedAssets(generatedContracts, root, {
+    check,
+    ownership: GENERATED_CONTRACT_OWNERSHIP,
+  });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

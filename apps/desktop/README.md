@@ -50,7 +50,7 @@ The default apply copies stable assets under `~/.local/share/tyrian-night/`; the
 node scripts/installLiveTyrian.mjs --target=plasma --apply --link
 ```
 
-Backups are stored under `~/.local/state/tyrian-night/backups/`. Failed non-interrupted operations roll back immediately. A deliberately simulated or real process interruption preserves recovery evidence; run the explicit recovery command before another preview if you want the prior generation restored. Ownership state is profile-scoped; version 1 mixed manifests migrate transactionally and retain the unselected profile.
+Backups are stored under `~/.local/state/tyrian-night/backups/`. Failed non-interrupted operations roll back immediately. A deliberately simulated or real process interruption preserves recovery evidence; run the explicit recovery command before another preview if you want the prior generation restored. Ownership state is profile-scoped and retains each profile's XDG roots, so moving XDG configuration does not orphan the previous generation. Version 1 mixed and version 2 path-only manifests migrate transactionally while retaining the unselected profile.
 
 ## Full Rice
 

@@ -1,6 +1,24 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "contrastPairs": [
+    {
+      "foreground": "editor.selectionForeground",
+      "background": "editor.selectionBackground",
+      "backdrop": "editor.background",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "editor.findMatchForeground",
+      "background": "editor.findMatchBackground",
+      "backdrop": "editor.background",
+      "minimum": 4.5
+    },
+    {
+      "foreground": "editor.findMatchHighlightForeground",
+      "background": "editor.findMatchHighlightBackground",
+      "backdrop": "editor.background",
+      "minimum": 4.5
+    },
     {
       "foreground": "checkbox.foreground",
       "background": "checkbox.background",
@@ -385,14 +403,11 @@
       "editorError.foreground",
       "errorForeground",
       "inputValidation.errorBorder",
-      "inputValidation.errorForeground",
       "list.errorForeground",
       "problemsErrorIcon.foreground",
       "testing.iconErrored",
       "testing.iconFailed",
-      "testing.message.error.badgeForeground",
       "testing.message.error.badgeBorder",
-      "gauge.errorForeground",
       "markdownAlert.caution.foreground",
       "charts.red",
       "debugTokenExpression.error",
@@ -415,11 +430,9 @@
       "debugConsole.warningForeground",
       "editorWarning.foreground",
       "inputValidation.warningBorder",
-      "inputValidation.warningForeground",
       "list.warningForeground",
       "problemsWarningIcon.foreground",
       "testing.iconQueued",
-      "gauge.warningForeground",
       "markdownAlert.warning.foreground",
       "markdownAlert.important.foreground",
       "charts.yellow",
@@ -504,7 +517,6 @@
       "debugConsole.infoForeground",
       "editorInfo.foreground",
       "inputValidation.infoBorder",
-      "inputValidation.infoForeground",
       "problemsInfoIcon.foreground",
       "testing.iconUnset",
       "testing.message.info.decorationForeground",
@@ -957,6 +969,10 @@
       "role": "string"
     },
     {
+      "scope": ["constant.language.null", "constant.language.nil", "constant.language.none"],
+      "roles": { "current": "null", "legacy": "constantLanguage" }
+    },
+    {
       "scope": ["constant.language"],
       "role": "constantLanguage"
     },
@@ -1029,7 +1045,7 @@
     },
     {
       "scope": ["markup.underline.link"],
-      "role": "type"
+      "roles": { "current": "file", "legacy": "type" }
     },
     {
       "scope": ["markup.quote"],
@@ -1112,6 +1128,16 @@
       "notifications.foreground"
     ],
     "hover.status.bar.background": ["editorHoverWidget.statusBarBackground"],
+    "input.validation.errorForeground": [
+      "inputValidation.errorForeground",
+      "testing.message.error.badgeForeground",
+      "gauge.errorForeground"
+    ],
+    "input.validation.infoForeground": ["inputValidation.infoForeground"],
+    "input.validation.warningForeground": [
+      "inputValidation.warningForeground",
+      "gauge.warningForeground"
+    ],
     "editor.info.border": ["editorInfo.border"],
     "editor.overviewRuler.addedForeground": [
       "editorOverviewRuler.addedForeground",

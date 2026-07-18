@@ -21,6 +21,7 @@ wcag_check.py
 target/
 Cargo.lock
 *.rs
+!examples/theme-preview/**/*.rs
 
 # General
 .DS_Store
@@ -29,6 +30,8 @@ dist/
 user.settings.json
 .codex-logs/
 .machine-backups/
+# Retired experiment profiles are inert user-owned data; no repository command reads this path.
+.umbra/
 
 # Build artifacts
 out/*.js

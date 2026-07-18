@@ -198,9 +198,12 @@ test('source recipes own pigments once and resolve declared alpha projections', 
   const theme = readSourceTheme(source!, repository.root, repository.definition);
 
   expect(recipe).not.toHaveProperty('ui');
-  expect(recipe.pigments['ui:status.success']).toBe('#9D769F');
-  expect(recipe.opacities['ui:status.successBackground']).toBe('1C');
-  expect(theme.ui['status.successBackground']).toBe('#9D769F1C');
+  expect(recipe).not.toHaveProperty('opacities');
+  expect(recipe.pigments['ui:status.success']).toBe('#548F68');
+  expect(repository.definition.opacityProfiles.current.dark['ui:status.successBackground']).toBe(
+    '1C'
+  );
+  expect(theme.ui['status.successBackground']).toBe('#548F681C');
   expect(themePigmentOwner(repository.definition, recipe.bindingProfile, 'syntax:function')).toBe(
     'syntax:function'
   );
@@ -211,6 +214,59 @@ test('source recipes own pigments once and resolve declared alpha projections', 
       'vscode:diff.editor.inserted.text.background'
     )
   ).toBe('ui:status.success');
+  expect(
+    themePigmentOwner(repository.definition, recipe.bindingProfile, 'terminal:ansi.green')
+  ).toBe('ui:status.success');
+  expect(
+    themePigmentOwner(repository.definition, recipe.bindingProfile, 'ui:badges.foreground')
+  ).toBe('ui:text.onAccent');
+  expect(themePigmentOwner(repository.definition, recipe.bindingProfile, 'ui:border.tab')).toBe(
+    'ui:border.default'
+  );
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:editor.overviewRuler.bracketMatchForeground'
+    )
+  ).toBe('ui:accent.glow');
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:editor.overviewRuler.deletedForeground'
+    )
+  ).toBe('ui:status.error');
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:editor.overviewRuler.infoForeground'
+    )
+  ).toBe('ui:status.info');
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:editor.overviewRuler.warningForeground'
+    )
+  ).toBe('ui:status.warning');
+  expect(
+    themePigmentOwner(
+      repository.definition,
+      recipe.bindingProfile,
+      'vscode:preview.result.file.foreground'
+    )
+  ).toBe('ui:text.sidebar');
+  for (const role of [
+    'vscode:input.validation.errorForeground',
+    'vscode:input.validation.infoForeground',
+    'vscode:input.validation.warningForeground',
+  ]) {
+    expect(themePigmentOwner(repository.definition, recipe.bindingProfile, role)).toBe(
+      'ui:text.primary'
+    );
+  }
 });
 
 test('color bindings contain only aliases and alpha-derived exceptions', () => {
@@ -237,6 +293,12 @@ test('theme recipe validation rejects split or incomplete color authority', () =
   split.ui = { 'surface.canvas': '#000000' };
   expect(() => validateThemeRecipe(split, source!.slug)).toThrow('unsupported fields: ui');
 
+  const splitOpacity = structuredClone(recipe) as any;
+  splitOpacity.opacities = { 'ui:selection.primary': 'FF' };
+  expect(() => validateThemeRecipe(splitOpacity, source!.slug)).toThrow(
+    'unsupported fields: opacities'
+  );
+
   const missing = structuredClone(recipe);
   delete missing.pigments['syntax:function'];
   expect(() => validateThemeRecipe(missing, source!.slug)).toThrow(
@@ -248,6 +310,29 @@ test('theme recipe validation rejects split or incomplete color authority', () =
   expect(() => validateThemeRecipe(unknownProfile, source!.slug)).toThrow(
     'unknown binding profile'
   );
+});
+
+test('opacity profiles own every derived alpha once and expose only appearance overrides', () => {
+  const definition = loadThemeDefinitionContext();
+  expect(definition.opacityProfiles.current.dark['ui:border.tab']).toBe('FF');
+  expect(definition.opacityProfiles.current.light['ui:border.tab']).toBe('00');
+  expect(definition.opacityProfiles.current.dark['ui:selection.primary']).toBe('47');
+  expect(definition.opacityProfiles.current.light['ui:selection.primary']).toBe('47');
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-opacity-contract-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const opacityPath = path.join(root, 'source/themeOpacityContract.json');
+    const opacity = readJson<any>(opacityPath);
+    delete opacity.profiles.current.opacities['ui:selection.primary'];
+    fs.writeFileSync(opacityPath, `${JSON.stringify(opacity)}\n`);
+
+    expect(() => loadThemeDefinitionContext(root)).toThrow(
+      "Theme opacity profile 'current' opacities is invalid; missing: ui:selection.primary"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('VS Code projection rejects invalid shapes and competing consumer ownership', () => {
@@ -267,7 +352,7 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
         (projection) => {
           projection.schemaVersion = 1;
         },
-        'schemaVersion 3',
+        'schemaVersion 4',
       ],
       [
         'top-level namespace',
@@ -337,7 +422,27 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
         (projection) => {
           projection.tokenColors[0].foreground = '#FFFFFF';
         },
-        'unsupported or missing fields',
+        'has unsupported fields: foreground',
+      ],
+      [
+        'grammar profile role coverage',
+        (projection) => {
+          const token = projection.tokenColors.find(
+            ({ roles }: { roles?: Record<string, string> }) => roles
+          )!;
+          delete token.roles.legacy;
+        },
+        'roles has unsupported or missing fields',
+      ],
+      [
+        'grammar split role authority',
+        (projection) => {
+          const token = projection.tokenColors.find(
+            ({ roles }: { roles?: Record<string, string> }) => roles
+          )!;
+          token.role = 'null';
+        },
+        'must define exactly one role or roles map',
       ],
     ];
 
@@ -371,7 +476,7 @@ test('VS Code generation consumes the projection from the injected repository ro
     const generated = JSON.parse(nightAsset!.content) as {
       colors: Record<string, string>;
     };
-    expect(generated.colors['injectedOwner.background']).toBe('#0F0E13');
+    expect(generated.colors['injectedOwner.background']).toBe('#070A0F');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -397,26 +502,20 @@ function definitionFor(identity: { appearance: 'dark' | 'light'; name: string })
       .toSorted()
       .map((pigment) => [pigment, '#123456'])
   );
-  const opacities = Object.fromEntries(
-    bindings
-      .filter(
-        (binding): binding is { opacity: string; pigment: string } => typeof binding === 'object'
-      )
-      .map((binding) => binding.opacity)
-      .toSorted()
-      .map((opacity) => [opacity, 'FF'])
-  );
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     ...identity,
     bindingProfile: 'current',
     pigments,
-    opacities,
   };
 }
 
 function copyThemeContracts(root: string) {
-  for (const fileName of ['themeRoleContract.json', 'themeColorBindings.json']) {
+  for (const fileName of [
+    'themeRoleContract.json',
+    'themeColorBindings.json',
+    'themeOpacityContract.json',
+  ]) {
     fs.copyFileSync(path.join('source', fileName), path.join(root, 'source', fileName));
   }
 }

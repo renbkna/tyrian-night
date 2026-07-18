@@ -1,10 +1,10 @@
 [
   {
-    "slug": "tyrian-night",
-    "default": true
+    "slug": "tyrian-night"
   },
   {
     "slug": "tyrian-nocturne",
+    "default": true,
     "terminalDefault": true
   },
   {

@@ -7,7 +7,7 @@ import { contrastRatio } from './colorScience.mjs';
 import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { bracketColor, syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
-import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
+import { loadThemeRepository, readSourceTheme, readSourceThemeRecipe } from './themeSources.mjs';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
@@ -32,7 +32,8 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
     themes: repository.sources.map((source) =>
       buildZedTheme(
         /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot, repository.definition)),
-        repository.definition.requiredThemeRoles.brackets
+        repository.definition.requiredThemeRoles.brackets,
+        readSourceThemeRecipe(source, repoRoot, repository.definition).bindingProfile
       )
     ),
   };
@@ -62,9 +63,10 @@ export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
 /**
  * @param {ThemeDefinition} theme
  * @param {readonly string[]} bracketRoles
+ * @param {string} [bindingProfile]
  * @returns {unknown}
  */
-function buildZedTheme(theme, bracketRoles) {
+export function buildZedTheme(theme, bracketRoles, bindingProfile = 'current') {
   /** @param {string} role */
   const ui = (role) => uiColor(theme, role);
   /** @param {string} role */
@@ -72,7 +74,7 @@ function buildZedTheme(theme, bracketRoles) {
   /** @param {string} role */
   const terminal = (role) => terminalColor(theme, role);
   const dimAnsi = buildDimAnsi(theme);
-  const syntax = buildSyntax(theme);
+  const syntax = buildSyntax(theme, bindingProfile);
   const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
   const editorBackground = ui('surface.canvas');
   const accents = bracketRoles.map((role) => bracketColor(theme, role));
@@ -244,9 +246,10 @@ function buildZedTheme(theme, bracketRoles) {
 /**
  * Zed owns capture names and font styling. Colors come only from neutral theme roles.
  * @param {ThemeDefinition} theme
+ * @param {string} bindingProfile
  * @returns {Record<string, unknown>}
  */
-function buildSyntax(theme) {
+function buildSyntax(theme, bindingProfile) {
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
   const syntax = (role, options = {}) => highlight({ color: syntaxColor(theme, role), ...options });
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
@@ -256,21 +259,29 @@ function buildSyntax(theme) {
     attribute: syntax('data'),
     boolean: syntax('constantLanguage'),
     class: syntax('type'),
-    comment: syntax('comment', { italic: true }),
-    'comment.doc': syntax('documentation', { italic: true }),
+    comment: syntax('comment', {
+      italic: true,
+    }),
+    'comment.doc': syntax('documentation', {
+      italic: true,
+    }),
     'comment.documentation': syntax('documentation', { italic: true }),
     constant: syntax('data'),
-    'constant.builtin': syntax('constantLanguage'),
+    'constant.builtin': syntax(bindingProfile === 'legacy' ? 'constantLanguage' : 'null'),
     constructor: syntax('type'),
     decorator: syntax('type'),
     embedded: syntax('string'),
-    emphasis: syntax('emphasis', { italic: true }),
+    emphasis: syntax('emphasis', {
+      italic: true,
+    }),
     'emphasis.strong': syntax('variable', { bold: true }),
     enum: syntax('type'),
     'enum.member': syntax('data'),
     enumMember: syntax('data'),
     error: ui('status.error'),
-    function: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    function: syntax('function', {
+      weight: ZED_FUNCTION_FONT_WEIGHT,
+    }),
     'function.builtin': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
     'function.method': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
     hint: ui('text.hint', { italic: true }),
@@ -278,7 +289,7 @@ function buildSyntax(theme) {
     keyword: syntax('keyword'),
     label: syntax('type'),
     link_text: syntax('type'),
-    link_uri: syntax('type'),
+    link_uri: syntax(bindingProfile === 'legacy' ? 'type' : 'file'),
     macro: syntax('type'),
     'markup.quote': syntax('string', { italic: true }),
     method: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),

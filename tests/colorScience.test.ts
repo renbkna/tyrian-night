@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 
 import {
-  argbToHex,
   colorMetrics,
   compareColors,
   contrastRatio,
-  hexToArgb,
+  gamutRelativeRichness,
   hexToOklab,
   hexToOklch,
   oklabDelta,
+  quantizeDiagnosticNumber,
 } from '../scripts/colorScience.mjs';
 import { opaqueHex } from '../scripts/colorUtils.mjs';
 
@@ -29,9 +29,8 @@ test('color science helpers expose stable policy-free observations', () => {
   expect(oklabDelta(hexToOklab('#000000'), hexToOklab('#FFFFFF'))).toBeCloseTo(100, 5);
 
   const metrics = colorMetrics('#A66CFF', '#0A0910');
-  expect(metrics.hct.chroma).toBeCloseTo(70.59, 2);
-  expect(metrics.hct.tone).toBeCloseTo(58.09, 2);
-  expect(metrics.cam16.m).toBeCloseTo(55.73, 2);
+  expect(metrics.oklch.L).toBeCloseTo(0.661, 3);
+  expect(metrics.contrast).toBeGreaterThan(4.5);
 
   const comparison = compareColors({
     background: '#0A0910',
@@ -40,7 +39,15 @@ test('color science helpers expose stable policy-free observations', () => {
   });
   expect(comparison.oklabDelta).toBeGreaterThan(10);
   expect(comparison.contrastLeft).toBeGreaterThan(4.5);
-  expect(argbToHex(hexToArgb('#A66CFF'))).toBe('#A66CFF');
+
+  expect(gamutRelativeRichness('#000000')).toBe(0);
+  expect(gamutRelativeRichness('#FF0000')).toBeCloseTo(1, 5);
+  expect(gamutRelativeRichness('#A66CFF')).toBeGreaterThan(0.7);
+  expect(gamutRelativeRichness('#A66CFF')).toBeLessThanOrEqual(1);
+  expect(quantizeDiagnosticNumber(0.1234567894)).toBe(0.123456789);
+  expect(quantizeDiagnosticNumber(0.06025065814868918)).toBe(
+    quantizeDiagnosticNumber(0.06025065814868934)
+  );
 });
 
 test('translucent observations require the owning backdrop', () => {

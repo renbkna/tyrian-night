@@ -11,7 +11,7 @@ import {
   terminalColor,
   uiColor,
 } from '../scripts/themeDefinition.mjs';
-import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import { SOURCE_THEMES, getDefaultThemeSource, readSourceTheme } from '../scripts/themeSources.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
 
 test('theme definitions expose one strict consumer-neutral role contract', () => {
@@ -84,12 +84,9 @@ test('shared color parser rejects malformed source hex colors', () => {
   }
 });
 
-test('README advertises the default Night palette from neutral roles', () => {
+test('README points to the catalog default authority without duplicating its palette', () => {
   const readme = fs.readFileSync('README.md', 'utf8');
-  const nightSource = SOURCE_THEMES.find((source) => source.slug === 'tyrian-night');
-  expect(nightSource).toBeDefined();
-
-  const theme = readSourceTheme(nightSource!);
+  const theme = readSourceTheme(getDefaultThemeSource());
   const advertisedPalette = [
     uiColor(theme, 'surface.canvas'),
     uiColor(theme, 'surface.hover'),
@@ -102,7 +99,10 @@ test('README advertises the default Night palette from neutral roles', () => {
   ];
 
   expect(readme).toContain('## Palette');
-  expect(readme).toContain('OKLab separation');
+  expect(readme).toContain('gamut-relative pigment richness');
+  expect(readme).toContain('source/themes/tyrian-nocturne.json');
+  expect(readme).toContain('examples/theme-preview');
+  expect(readme).not.toContain('Umbra');
   expect(readme).not.toContain('CIEDE2000');
-  for (const color of advertisedPalette) expect(readme).toContain(`\`${color}\``);
+  for (const color of advertisedPalette) expect(readme).not.toContain(`\`${color}\``);
 });

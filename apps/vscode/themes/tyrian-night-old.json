@@ -282,14 +282,11 @@
     "editorError.foreground": "#C06868",
     "errorForeground": "#C06868",
     "inputValidation.errorBorder": "#C06868",
-    "inputValidation.errorForeground": "#C06868",
     "list.errorForeground": "#C06868",
     "problemsErrorIcon.foreground": "#C06868",
     "testing.iconErrored": "#C06868",
     "testing.iconFailed": "#C06868",
-    "testing.message.error.badgeForeground": "#C06868",
     "testing.message.error.badgeBorder": "#C06868",
-    "gauge.errorForeground": "#C06868",
     "markdownAlert.caution.foreground": "#C06868",
     "charts.red": "#C06868",
     "debugTokenExpression.error": "#C06868",
@@ -310,11 +307,9 @@
     "debugConsole.warningForeground": "#C09040",
     "editorWarning.foreground": "#C09040",
     "inputValidation.warningBorder": "#C09040",
-    "inputValidation.warningForeground": "#C09040",
     "list.warningForeground": "#C09040",
     "problemsWarningIcon.foreground": "#C09040",
     "testing.iconQueued": "#C09040",
-    "gauge.warningForeground": "#C09040",
     "markdownAlert.warning.foreground": "#C09040",
     "markdownAlert.important.foreground": "#C09040",
     "charts.yellow": "#C09040",
@@ -387,7 +382,6 @@
     "debugConsole.infoForeground": "#5A78C0",
     "editorInfo.foreground": "#5A78C0",
     "inputValidation.infoBorder": "#5A78C0",
-    "inputValidation.infoForeground": "#5A78C0",
     "problemsInfoIcon.foreground": "#5A78C0",
     "testing.iconUnset": "#5A78C0",
     "testing.message.info.decorationForeground": "#5A78C0",
@@ -637,6 +631,12 @@
     "menu.foreground": "#A088C0",
     "notifications.foreground": "#A088C0",
     "editorHoverWidget.statusBarBackground": "#0F0F0F",
+    "inputValidation.errorForeground": "#C06868",
+    "testing.message.error.badgeForeground": "#C06868",
+    "gauge.errorForeground": "#C06868",
+    "inputValidation.infoForeground": "#5A78C0",
+    "inputValidation.warningForeground": "#C09040",
+    "gauge.warningForeground": "#C09040",
     "editorInfo.border": "#5A78C000",
     "editorOverviewRuler.addedForeground": "#48906088",
     "diffEditorOverview.insertedForeground": "#48906088",
@@ -889,6 +889,16 @@
       ],
       "settings": {
         "foreground": "#548C64"
+      }
+    },
+    {
+      "scope": [
+        "constant.language.null",
+        "constant.language.nil",
+        "constant.language.none"
+      ],
+      "settings": {
+        "foreground": "#9A94BC"
       }
     },
     {

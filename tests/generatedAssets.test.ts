@@ -45,7 +45,7 @@ test('generated asset sync owns an exact file set without deleting mixed-directo
   }
 });
 
-test('generated asset sync never follows owned paths through symlinks', () => {
+test('generated asset sync admits every expected path before publishing any file', () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-symlink-'));
   const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-outside-'));
 
@@ -53,13 +53,24 @@ test('generated asset sync never follows owned paths through symlinks', () => {
     const outsideFile = path.join(outsideRoot, 'outside.txt');
     fs.writeFileSync(outsideFile, 'outside\n');
     fs.mkdirSync(path.join(repoRoot, 'generated'));
+    fs.writeFileSync(path.join(repoRoot, 'generated/first.txt'), 'first generation\n');
     fs.symlinkSync(outsideFile, path.join(repoRoot, 'generated/current.txt'));
 
     expect(() =>
-      syncGeneratedAssets([{ path: 'generated/current.txt', content: 'generated\n' }], repoRoot, {
-        ownership: [{ directory: 'generated' }],
-      })
+      syncGeneratedAssets(
+        [
+          { path: 'generated/first.txt', content: 'replacement\n' },
+          { path: 'generated/current.txt', content: 'generated\n' },
+        ],
+        repoRoot,
+        {
+          ownership: [{ directory: 'generated' }],
+        }
+      )
     ).toThrow('Generated path must not contain symlinks');
+    expect(fs.readFileSync(path.join(repoRoot, 'generated/first.txt'), 'utf8')).toBe(
+      'first generation\n'
+    );
     expect(fs.readFileSync(outsideFile, 'utf8')).toBe('outside\n');
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });

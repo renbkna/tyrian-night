@@ -18,13 +18,15 @@
       "**",
       "!.machine-backups/**",
       "!.codex-logs/**",
+      "!.umbra/**",
       "!out/**",
       "!apps/vscode/out/**",
       "!node_modules/**",
       "!*.vsix",
       "!apps/vscode/island/tyrian-*.css",
       "!apps/vscode/themes/**",
-      "!apps/zed/themes/tyrian-night.json"
+      "!apps/zed/themes/tyrian-night.json",
+      "!examples/theme-preview/diagnostic-error.ts"
     ]
   }
 }

@@ -2,7 +2,7 @@ export const TYRIAN_THEME_CATALOG = [
   {
     label: 'Tyrian Night',
     slug: 'tyrian-night',
-    isDefault: true,
+    isDefault: false,
     vscodeUiTheme: 'vs-dark',
     islandCssFile: 'tyrian-night.css',
     paletteName: 'tyrian_night',
@@ -11,7 +11,7 @@ export const TYRIAN_THEME_CATALOG = [
   {
     label: 'Tyrian Nocturne',
     slug: 'tyrian-nocturne',
-    isDefault: false,
+    isDefault: true,
     vscodeUiTheme: 'vs-dark',
     islandCssFile: 'tyrian-nocturne.css',
     paletteName: 'tyrian_nocturne',
@@ -58,7 +58,7 @@ export const TYRIAN_THEME_CATALOG = [
 export type TyrianThemeCatalogEntry = (typeof TYRIAN_THEME_CATALOG)[number];
 export type TyrianThemeLabel = TyrianThemeCatalogEntry['label'];
 
-export const DEFAULT_TYRIAN_THEME_LABEL = 'Tyrian Night';
+export const DEFAULT_TYRIAN_THEME_LABEL = 'Tyrian Nocturne';
 
 export const TYRIAN_THEME_CSS: Record<string, string> = Object.fromEntries(
   TYRIAN_THEME_CATALOG.map((theme) => [theme.label, theme.islandCssFile])
