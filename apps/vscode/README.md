@@ -2,12 +2,12 @@
 
 Tyrian Night provides six generated VS Code color themes:
 
-- **Night** — neutral-black, quiet, and canonical;
-- **Nocturne** — cold-black, mineral, and dangerous;
-- **Pastel** — a complete soft dark-dream palette;
-- **Abyss** — OLED black with ultraviolet-electric accents;
-- **Dawn** — the light counterpart;
-- **Night Old** — an unchanged legacy comparison theme.
+- **Night** — the quiet, low-energy dark variant;
+- **Nocturne** — the canonical tempered-cosmic center;
+- **Pastel** — the independent soft-focus branch;
+- **Abyss** — the deeper, more chromatic dark variant;
+- **Dawn** — the related light counterpart;
+- **Night Old** — the historical reference translated onto the current theme contract.
 
 The projection covers a curated set of documented public VS Code colors for control states, selection and keyboard focus, chat and inline chat, notebooks, testing, terminal symbol icons, gauges, and agent-session indicators. High-contrast-only borders, shadows, and opacity controls intentionally keep VS Code defaults.
 
@@ -15,7 +15,7 @@ The projection covers a curated set of documented public VS Code colors for cont
 
 - Color themes and the packaged extension support VS Code 1.118 or newer on Linux, macOS, and Windows.
 - Island UI apply and repair support Linux only.
-- Doctor and Restore Classic UI remain available on every platform so an installation managed by an older Tyrian version can be inspected and removed.
+- Doctor and Restore Classic UI remain available on every platform for current managed installations.
 - Tyrian never requests administrator privileges or changes file ownership or permissions.
 
 The color themes use the normal VS Code extension contract. Merely installing or selecting a theme does not modify the VS Code application.

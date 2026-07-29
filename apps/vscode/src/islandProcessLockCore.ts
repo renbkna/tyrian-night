@@ -14,11 +14,11 @@ const MAX_REAPER_CHAIN_LENGTH = 128;
 const heldLockContext = new AsyncLocalStorage<ReadonlySet<string>>();
 
 type LockOwner = {
-  version: 1 | 2;
+  version: 3;
   pid: number;
   token: string;
   createdAt: string;
-  processIdentity?: string;
+  processIdentity: string | null;
 };
 
 type ClaimGeneration = {
@@ -36,7 +36,7 @@ type SerializedClaimGeneration = {
 };
 
 type ReaperElectionRecord = {
-  version: 1;
+  version: 2;
   expected: SerializedClaimGeneration;
   reaper: LockOwner;
   predecessorToken: string | null;
@@ -253,7 +253,7 @@ async function acquireClaim(
         const ownerState = classifyProcessOwner(generation.owner);
         throw new Error(
           ownerState === 'ambiguous'
-            ? `Tyrian lock claim '${claimPath}' has ambiguous PID-only process identity and cannot be proven safe to reclaim within ${timeoutMs}ms.`
+            ? `Tyrian lock claim '${claimPath}' has ambiguous process identity and cannot be proven safe to reclaim within ${timeoutMs}ms.`
             : `Timed out waiting for Tyrian lock '${claimPath}' owned by process ${generation.owner.pid}.`
         );
       }
@@ -280,7 +280,7 @@ async function beginReaperElection(
   const generationId = serializedGenerationId(serialized);
   const electionPath = `${claimPath}.reap-${generationId}`;
   const record: ReaperElectionRecord = {
-    version: 1,
+    version: 2,
     expected: serialized,
     reaper: createLockOwner(),
     predecessorToken: null,
@@ -323,7 +323,7 @@ async function settleReaperGeneration(
   if (reaperState !== 'dead') return false;
 
   const successor: ReaperElectionRecord = {
-    version: 1,
+    version: 2,
     expected: tip.record.expected,
     reaper: createLockOwner(),
     predecessorToken: tip.record.reaper.token,
@@ -484,7 +484,7 @@ async function readReaperElectionRecord(
   const reaper = parseLockOwnerValue(parsed.reaper);
   const expected = parsed.expected;
   if (
-    parsed.version !== 1 ||
+    parsed.version !== 2 ||
     reaper === undefined ||
     (parsed.predecessorToken !== null &&
       (typeof parsed.predecessorToken !== 'string' ||
@@ -502,7 +502,7 @@ async function readReaperElectionRecord(
   }
 
   return {
-    version: 1,
+    version: 2,
     expected,
     reaper,
     predecessorToken: parsed.predecessorToken,
@@ -557,14 +557,12 @@ function serializedGenerationId(generation: SerializedClaimGeneration): string {
 }
 
 function createLockOwner(): LockOwner {
-  const processIdentity = readLinuxProcessIdentity(process.pid);
-
   return {
-    version: processIdentity === undefined ? 1 : 2,
+    version: 3,
     pid: process.pid,
     token: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
-    ...(processIdentity !== undefined ? { processIdentity } : {}),
+    processIdentity: readLinuxProcessIdentity(process.pid) ?? null,
   };
 }
 
@@ -798,7 +796,7 @@ function parseLockOwnerValue(value: unknown): LockOwner | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const owner = value as Partial<LockOwner>;
   if (
-    (owner.version !== 1 && owner.version !== 2) ||
+    owner.version !== 3 ||
     typeof owner.pid !== 'number' ||
     !Number.isInteger(owner.pid) ||
     owner.pid <= 0 ||
@@ -806,7 +804,7 @@ function parseLockOwnerValue(value: unknown): LockOwner | undefined {
     !/^[0-9a-f-]{36}$/iu.test(owner.token) ||
     typeof owner.createdAt !== 'string' ||
     !Number.isFinite(Date.parse(owner.createdAt)) ||
-    (owner.version === 2 &&
+    (owner.processIdentity !== null &&
       (typeof owner.processIdentity !== 'string' || owner.processIdentity.length === 0))
   ) {
     return undefined;
@@ -845,7 +843,8 @@ function classifyProcessOwner(owner: LockOwner): 'alive' | 'dead' | 'ambiguous' 
     if (!isNodeError(error) || error.code !== 'EPERM') return 'dead';
   }
 
-  if (owner.processIdentity === undefined) return 'ambiguous';
+  if (owner.processIdentity === null) return 'ambiguous';
+
   const currentIdentity = readLinuxProcessIdentity(owner.pid);
   if (currentIdentity === undefined) return 'ambiguous';
   return currentIdentity === owner.processIdentity ? 'alive' : 'dead';

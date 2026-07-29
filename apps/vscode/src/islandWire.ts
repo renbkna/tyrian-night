@@ -1,6 +1,6 @@
 import type { IslandShellStatus, IslandShellWriteAccess } from './islandShell.js';
 
-export const ISLAND_WIRE_PROTOCOL_VERSION = 1 as const;
+export const ISLAND_WIRE_PROTOCOL_VERSION = 2 as const;
 
 export type IslandUiRecommendedAction =
   | 'none'
@@ -26,8 +26,8 @@ export type IslandReconciliationStatus = {
   registration:
     | { kind: 'absent' }
     | { kind: 'valid'; desiredThemeId: string | null }
-    | { kind: 'legacy' }
-    | { kind: 'corrupt' };
+    | { kind: 'corrupt' }
+    | { kind: 'unsupported' };
   managed: boolean;
   active: boolean;
 };
@@ -133,7 +133,6 @@ const TRANSACTION_KINDS: {
 } = {
   clean: 'clean',
   recoverable: 'recoverable',
-  unsupported: 'unsupported',
   corrupt: 'corrupt',
   'external-drift': 'external-drift',
   unavailable: 'unavailable',
@@ -151,7 +150,7 @@ const RECOVERABLE_TRANSACTION_PHASES: {
 export function projectIslandReconciliationStatus(
   status: IslandShellStatus
 ): IslandReconciliationStatus {
-  const registered = status.registrationState !== 'absent';
+  const registered = status.registrationState === 'valid' || status.registrationState === 'corrupt';
   if (status.registered !== registered) {
     throw new Error('Island status registration facts contradict their owner state.');
   }
@@ -184,7 +183,7 @@ export function decodeIslandReconciliationStatus(value: unknown): IslandReconcil
   const registrationRecord = requireProtocolRecord(record.registration, `${field}.registration`);
   const kind = requireProtocolDiscriminant(
     registrationRecord.kind,
-    { absent: 'absent', valid: 'valid', legacy: 'legacy', corrupt: 'corrupt' },
+    { absent: 'absent', valid: 'valid', corrupt: 'corrupt', unsupported: 'unsupported' },
     `${field}.registration.kind`
   );
   let registration: IslandReconciliationStatus['registration'];
@@ -368,7 +367,7 @@ function validateTransaction(value: unknown, field: string): IslandShellStatus['
     return { kind, recoverability: 'none' };
   }
   if (kind === 'recoverable') {
-    if (record.recoverability !== 'automatic' || (record.version !== 3 && record.version !== 4)) {
+    if (record.recoverability !== 'automatic' || record.version !== 4) {
       throw invalidProtocolField(field);
     }
     return {
@@ -381,18 +380,6 @@ function validateTransaction(value: unknown, field: string): IslandShellStatus['
         RECOVERABLE_TRANSACTION_PHASES,
         `${field}.phase`
       ),
-      reason: requireProtocolString(record.reason, `${field}.reason`),
-    };
-  }
-  if (kind === 'unsupported') {
-    if (record.recoverability !== 'manual' || (record.version !== 1 && record.version !== 2)) {
-      throw invalidProtocolField(`${field}.version`);
-    }
-    return {
-      kind,
-      recoverability: 'manual',
-      journalPath: requireProtocolString(record.journalPath, `${field}.journalPath`),
-      version: record.version,
       reason: requireProtocolString(record.reason, `${field}.reason`),
     };
   }
@@ -457,9 +444,11 @@ function validateOptionalString(value: unknown, field: string): string | undefin
 }
 
 function requireProtocolVersion(value: unknown, field: string): void {
-  if (value !== ISLAND_WIRE_PROTOCOL_VERSION) {
-    throw invalidProtocolField(`${field}.version`);
-  }
+  if (typeof value !== 'number') throw invalidProtocolField(`${field}.version`);
+  if (value === ISLAND_WIRE_PROTOCOL_VERSION) return;
+  throw new Error(
+    `Unsupported ${field} protocol version ${value}; expected current version ${ISLAND_WIRE_PROTOCOL_VERSION}.`
+  );
 }
 
 function requireProtocolRecord(value: unknown, field: string): Record<string, unknown> {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { loadThemeRepository, readSourceTheme, readSourceThemeRecipe } from './themeSources.mjs';
+import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import {
   loadVscodeProjectionContext,
   bracketColor,
@@ -20,9 +20,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  * @param {import('./themeDefinition.mjs').VscodeProjection} projection
- * @param {string} [bindingProfile]
  */
-export function buildVscodeTheme(theme, projection, bindingProfile = 'current') {
+export function buildVscodeTheme(theme, projection) {
   /** @type {Record<string, string>} */
   const colors = {};
   projectColors(colors, projection.brackets, (role) => bracketColor(theme, role));
@@ -45,7 +44,7 @@ export function buildVscodeTheme(theme, projection, bindingProfile = 'current') 
   const tokenColors = projection.tokenColors.map((token) => ({
     scope: token.scope,
     settings: {
-      foreground: grammarColor(theme, token.roles?.[bindingProfile] ?? token.role),
+      foreground: grammarColor(theme, token.role),
       ...(token.fontStyle ? { fontStyle: token.fontStyle } : {}),
     },
   }));
@@ -62,7 +61,7 @@ export function buildVscodeTheme(theme, projection, bindingProfile = 'current') 
 
 /** @param {import('./themeDefinition.mjs').ThemeDefinition} theme @param {string | undefined} role */
 function grammarColor(theme, role) {
-  if (!role) throw new Error('VS Code grammar projection has no role for its binding profile.');
+  if (!role) throw new Error('VS Code grammar projection has no role.');
   return role.startsWith('ui:') ? uiColor(theme, role.slice(3)) : syntaxColor(theme, role);
 }
 
@@ -93,11 +92,7 @@ export function collectVscodeThemeAssets(root = repoRoot) {
   return repository.sources.map((source) => ({
     path: source.vscodeThemePath,
     content: `${JSON.stringify(
-      buildVscodeTheme(
-        readSourceTheme(source, root, repository.definition),
-        projection,
-        readSourceThemeRecipe(source, root, repository.definition).bindingProfile
-      ),
+      buildVscodeTheme(readSourceTheme(source, root, repository.definition), projection),
       null,
       2
     )}\n`,

@@ -17,9 +17,12 @@ test('reconciliation projection makes registration relations structural', () => 
       registered: true,
     })
   );
+  const unsupported = projectIslandReconciliationStatus(
+    shellStatus({ registrationState: 'unsupported', registered: false })
+  );
 
   expect(absent).toEqual({
-    version: 1,
+    version: 2,
     registration: { kind: 'absent' },
     managed: false,
     active: false,
@@ -27,6 +30,8 @@ test('reconciliation projection makes registration relations structural', () => 
   expect(absent).not.toHaveProperty('registered');
   expect(valid.registration).toEqual({ kind: 'valid', desiredThemeId: null });
   expect(decodeIslandReconciliationStatus(valid)).toEqual(valid);
+  expect(unsupported.registration).toEqual({ kind: 'unsupported' });
+  expect(decodeIslandReconciliationStatus(unsupported)).toEqual(unsupported);
 });
 
 test('reconciliation projection rejects contradictory owner facts', () => {
@@ -42,12 +47,12 @@ test('reconciliation projection rejects contradictory owner facts', () => {
   ).toThrow('missing its desired theme state');
   expect(() =>
     projectIslandReconciliationStatus(
-      shellStatus({ registrationState: 'legacy', registered: true, desiredThemeId: 'theme.css' })
+      shellStatus({ registrationState: 'unsupported', registered: true })
     )
-  ).toThrow('impossible desired theme state');
+  ).toThrow('registration facts contradict');
 });
 
-test('reconciliation decoder rejects unversioned and contradictory payloads', () => {
+test('reconciliation decoder rejects unversioned, v1, and contradictory payloads', () => {
   expect(() =>
     decodeIslandReconciliationStatus({
       registration: { kind: 'absent' },
@@ -58,11 +63,29 @@ test('reconciliation decoder rejects unversioned and contradictory payloads', ()
   expect(() =>
     decodeIslandReconciliationStatus({
       version: 1,
+      registration: { kind: 'absent' },
+      managed: false,
+      active: false,
+    })
+  ).toThrow(
+    'Unsupported Island reconciliation status protocol version 1; expected current version 2.'
+  );
+  expect(() =>
+    decodeIslandReconciliationStatus({
+      version: 2,
       registration: { kind: 'absent', desiredThemeId: 'theme.css' },
       managed: false,
       active: false,
     })
   ).toThrow('Island reconciliation status.registration.desiredThemeId');
+  expect(() =>
+    decodeIslandReconciliationStatus({
+      version: 2,
+      registration: { kind: 'legacy' },
+      managed: true,
+      active: true,
+    })
+  ).toThrow('Island reconciliation status.registration.kind');
 });
 
 test('supervisor inventory wire preserves failed access evidence and owned recommendation', () => {
@@ -90,7 +113,7 @@ test('supervisor inventory wire preserves failed access evidence and owned recom
   });
 
   expect(inventory).toMatchObject({
-    version: 1,
+    version: 2,
     statuses: [
       {
         accessInspection: {
@@ -106,6 +129,9 @@ test('supervisor inventory wire preserves failed access evidence and owned recom
     ],
   });
   expect(decodeIslandSupervisorInventory(inventory)).toEqual(inventory);
+  expect(() => decodeIslandSupervisorInventory({ ...inventory, version: 1 })).toThrow(
+    'Unsupported Island supervisor inventory protocol version 1; expected current version 2.'
+  );
   expect(() =>
     decodeIslandSupervisorInventory({
       ...inventory,

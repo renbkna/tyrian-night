@@ -100,6 +100,18 @@ export function hexToOklch(color) {
   };
 }
 
+/** @param {Oklch} color @returns {string} */
+export function oklchToHex(color) {
+  const channels = oklchToLinearRgb(color);
+  if (channels.some((channel) => channel < -GAMUT_EPSILON || channel > 1 + GAMUT_EPSILON)) {
+    throw new Error(`OKLCH color ${JSON.stringify(color)} is outside the sRGB gamut.`);
+  }
+
+  return `#${channels
+    .map((channel) => toHexByte(encodeLinearChannel(Math.min(1, Math.max(0, channel))) * 255))
+    .join('')}`;
+}
+
 /**
  * Fraction of the available sRGB chroma occupied at the color's exact OKLCH
  * lightness and hue. This is an authoring observation, not a salience,
@@ -195,6 +207,16 @@ function hexToLinearRgb(color) {
 /** @param {number} value */
 function linearize(value) {
   return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+/** @param {number} value */
+function encodeLinearChannel(value) {
+  return value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+}
+
+/** @param {number} value */
+function toHexByte(value) {
+  return Math.round(value).toString(16).toUpperCase().padStart(2, '0');
 }
 
 /** @param {number} degrees */

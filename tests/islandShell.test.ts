@@ -25,8 +25,6 @@ import {
   WORKBENCH_CSS_LINK,
   buildIslandRootLockPath,
   buildIslandPatchPaths,
-  buildLegacyManagedRootsRegistryPath,
-  buildLegacyRetirementMarkerPath,
   buildManagedRootRecordPath,
   buildManagedRootsDirectoryPath,
 } from '../apps/vscode/src/islandPatchContract';
@@ -68,7 +66,6 @@ test('status-all reports explicit roots without initializing registry state', as
   expect(statuses.map((status) => status.appRoot)).toEqual([appRoot]);
   expect(statuses[0]?.classification).toBe('clean');
   await expect(fs.stat(buildManagedRootsDirectoryPath(registryHome))).rejects.toThrow();
-  await expect(fs.stat(buildLegacyRetirementMarkerPath(registryHome))).rejects.toThrow();
 });
 
 test('Doctor inventory reports corrupt registry entries without mutating them', async () => {
@@ -95,67 +92,9 @@ test('Doctor inventory reports corrupt registry entries without mutating them', 
     expect(await fs.readdir(directoryPath)).toEqual(entriesBefore);
     expect(await fs.readFile(corruptPath, 'utf8')).toBe('{ broken\n');
     expect((await fs.lstat(symlinkPath)).isSymbolicLink()).toBe(true);
-    await expect(fs.stat(buildLegacyRetirementMarkerPath(registryHome))).rejects.toThrow();
   } finally {
     await fs.chmod(unreadablePath, 0o644);
   }
-});
-
-test('legacy registry transaction journals are read-only manual recovery evidence', async () => {
-  const directoryPath = buildManagedRootsDirectoryPath(registryHome);
-  const journalPath = path.join(directoryPath, `.tyrian-night-journal-${'a'.repeat(64)}.json`);
-  await fs.mkdir(directoryPath, { recursive: true });
-  await fs.writeFile(journalPath, '{ preserved legacy registry transaction }\n', 'utf8');
-
-  const inventory = await readAllIslandShellStatusesWithDiagnostics({ registryHome });
-  expect(inventory.statuses).toEqual([]);
-  expect(inventory.registryDiagnostics).toEqual([
-    expect.stringContaining('unsupported legacy registry transaction journal'),
-  ]);
-  expect(await fs.readFile(journalPath, 'utf8')).toBe(
-    '{ preserved legacy registry transaction }\n'
-  );
-
-  const cleanup = await restoreAllIslandShells({ registryHome });
-  expect(cleanup).toMatchObject({
-    changed: true,
-    registryChanged: true,
-    incompleteRecovery: true,
-    enumerationFailure: {
-      code: 'unsupported',
-      reason: expect.stringContaining('manual recovery'),
-    },
-  });
-  expect(await fs.readFile(journalPath, 'utf8')).toBe(
-    '{ preserved legacy registry transaction }\n'
-  );
-});
-
-test('raw restore-all exits nonzero while preserving its incomplete machine-readable summary', async () => {
-  await writeLegacyManagedRootsRegistryContent('{ invalid legacy registry\n');
-  const child = Bun.spawn(
-    [process.execPath, path.resolve('apps/vscode/src/islandCli.ts'), 'restore-all'],
-    {
-      env: { ...process.env, HOME: registryHome },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    }
-  );
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-
-  expect(exitCode).toBe(2);
-  expect(stderr).toBe('');
-  expect(JSON.parse(stdout)).toMatchObject({
-    failedAppRoots: [],
-    enumerationFailure: {
-      reason: expect.stringContaining('invalid JSON'),
-    },
-  });
 });
 
 test('supervised CLI commands exit nonzero for typed root-lock release failure', async () => {
@@ -219,7 +158,7 @@ test('supervised CLI commands exit nonzero for typed root-lock release failure',
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(failure).toMatchObject({
-      version: 1,
+      version: 2,
       code: 'blocked',
       physicalChanged: true,
       incompleteRecovery: true,
@@ -250,244 +189,118 @@ test('status-all reports registered missing roots without mutating the registry'
   expect(await fs.readFile(recordPath, 'utf8')).toBe(before);
 });
 
-test('status-all fails loudly when the managed root registry is corrupt', async () => {
-  await writeLegacyManagedRootsRegistryContent('{ broken registry\n');
-
-  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
-    'Tyrian managed app roots registry is invalid JSON'
-  );
-});
-
-test('status-all fails loudly when the managed root registry contains empty roots', async () => {
-  await writeLegacyManagedRootsRegistry(['']);
-
-  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
-    'every app root must be an absolute non-empty string'
-  );
-});
-
-test('status-all fails loudly when the managed root registry file is empty', async () => {
-  await writeLegacyManagedRootsRegistryContent('');
-
-  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
-    'Tyrian managed app roots registry is invalid JSON'
-  );
-});
-
-test('status-all fails loudly when the managed root registry contains no roots', async () => {
-  await writeLegacyManagedRootsRegistryContent(
-    JSON.stringify({ version: 1, appRoots: [] }, null, 2).concat('\n')
-  );
-
-  await expect(readAllIslandShellStatuses({ registryHome })).rejects.toThrow(
-    'expected at least one app root or no registry file'
-  );
-});
-
-test('status-all projects the legacy root list without migrating it', async () => {
-  const firstRoot = path.join(testRoot, 'legacy-first');
-  const secondRoot = path.join(testRoot, 'legacy-second');
-  const legacyPath = await writeLegacyManagedRootsRegistry([firstRoot, secondRoot, firstRoot]);
-
-  const statusSets = await Promise.all(
-    Array.from({ length: 8 }, () => readAllIslandShellStatuses({ registryHome }))
-  );
-
-  for (const statuses of statusSets) {
-    expect(statuses.map(({ appRoot }) => appRoot)).toEqual([firstRoot, secondRoot]);
-  }
-  expect((await fs.stat(legacyPath)).isFile()).toBe(true);
-  await expect(fs.stat(`${legacyPath}.migrating`)).rejects.toThrow();
-  await expect(fs.stat(buildManagedRootsDirectoryPath(registryHome))).rejects.toThrow();
-});
-
-test('status-all combines current and legacy roots without retiring either source', async () => {
-  const currentRoot = path.join(testRoot, 'current-root');
-  const legacyOnlyRoot = path.join(testRoot, 'legacy-only-root');
-  await writeManagedRootRecord(currentRoot);
-  const legacyPath = await writeLegacyManagedRootsRegistry([currentRoot, legacyOnlyRoot]);
-
-  expect(
-    (await readAllIslandShellStatuses({ registryHome })).map(({ appRoot }) => appRoot)
-  ).toEqual([currentRoot, legacyOnlyRoot]);
-  expect((await fs.stat(legacyPath)).isFile()).toBe(true);
-});
-
-test('the retirement marker prevents a recreated legacy list from reviving a removed root', async () => {
-  const appRoot = path.join(testRoot, 'retired-root');
-  const legacyPath = await writeLegacyManagedRootsRegistry([appRoot]);
-
-  await readAllIslandShellStatuses({ registryHome });
-  await restoreAllIslandShells({ registryHome });
-  await writeLegacyManagedRootsRegistry([appRoot]);
-
-  await expect(readAllIslandShellStatuses({ registryHome })).resolves.toEqual([]);
-  expect((await fs.stat(legacyPath)).isFile()).toBe(true);
-  expect((await fs.stat(buildLegacyRetirementMarkerPath(registryHome))).isFile()).toBe(true);
-});
-
-test('status-all projects both legacy snapshots without claiming either', async () => {
-  const snapshottedRoot = path.join(testRoot, 'snapshotted-root');
-  const concurrentlyWrittenRoot = path.join(testRoot, 'concurrently-written-root');
-  const legacyPath = await writeLegacyManagedRootsRegistry([snapshottedRoot]);
-  await fs.copyFile(legacyPath, `${legacyPath}.migrating`);
-  await writeLegacyManagedRootsRegistry([snapshottedRoot, concurrentlyWrittenRoot]);
-
-  expect(
-    (await readAllIslandShellStatuses({ registryHome })).map(({ appRoot }) => appRoot)
-  ).toEqual([concurrentlyWrittenRoot, snapshottedRoot]);
-  expect((await fs.stat(legacyPath)).isFile()).toBe(true);
-  expect((await fs.stat(`${legacyPath}.migrating`)).isFile()).toBe(true);
-});
-
-test('status-all combines published records with an unclaimed migration snapshot', async () => {
-  const publishedRoot = path.join(testRoot, 'published-root');
-  const snapshottedRoot = path.join(testRoot, 'unpublished-snapshot-root');
-  await writeManagedRootRecord(publishedRoot);
-  const legacyPath = await writeLegacyManagedRootsRegistry([snapshottedRoot]);
-  const migrationPath = `${legacyPath}.migrating`;
-  await fs.copyFile(legacyPath, migrationPath);
-
-  expect(
-    (await readAllIslandShellStatuses({ registryHome })).map(({ appRoot }) => appRoot)
-  ).toEqual([publishedRoot, snapshottedRoot]);
-  expect((await fs.stat(migrationPath)).isFile()).toBe(true);
-});
-
-test('migrated roots become durably disabled without reviving the legacy authority', async () => {
-  const appRoot = await createAppRoot('migrated-unregister');
-  const cssSource = path.join(testRoot, 'migrated-theme.css');
+test('unsupported desired records are report-only and untouched by direct or bulk restore', async () => {
+  const appRoot = await createAppRoot('unsupported-record');
+  const cssSource = path.join(testRoot, 'unsupported-record.css');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  const paths = buildIslandPatchPaths(appRoot);
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
-  await writeLegacyManagedRootsRegistry([appRoot]);
-  await readAllIslandShellStatuses({ registryHome });
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
 
-  await restoreIslandShell({ appRoot, registryHome });
+  const unsupportedRecord = JSON.stringify({ version: 1, appRoot }).concat('\n');
+  const workbenchBefore = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, unsupportedRecord, 'utf8');
 
-  await expect(readAllIslandShellStatuses({ registryHome })).resolves.toMatchObject([
-    { appRoot, registrationState: 'valid', desiredThemeId: null, classification: 'clean' },
-  ]);
+  await expect(readAllIslandShellStatusesWithDiagnostics({ registryHome })).resolves.toMatchObject({
+    statuses: [],
+    registryDiagnostics: [expect.stringContaining('expected version 2 with an absolute appRoot')],
+  });
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    registrationState: 'unsupported',
+    registered: false,
+  });
+
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
+    'expected version 2 with an absolute appRoot'
+  );
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(unsupportedRecord);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(workbenchBefore);
+
+  await expect(restoreAllIslandShells({ registryHome })).resolves.toMatchObject({
+    changed: false,
+    failedAppRoots: [],
+    enumerationFailure: { code: 'corrupt' },
+  });
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(unsupportedRecord);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(workbenchBefore);
 });
 
-test('legacy migration reports a record written before a later collision', async () => {
-  const firstRoot = path.join(testRoot, 'partial-migration-a-first');
-  const collidingRoot = path.join(testRoot, 'partial-migration-z-collision');
-  await fs.mkdir(firstRoot);
-  await fs.mkdir(collidingRoot);
-  await writeLegacyManagedRootsRegistry([firstRoot, collidingRoot]);
-  const collisionPath = buildManagedRootRecordPath(collidingRoot, registryHome);
-  await fs.mkdir(path.dirname(collisionPath), { recursive: true });
-  await fs.writeFile(
-    collisionPath,
-    JSON.stringify({ version: 1, appRoot: firstRoot }, null, 2).concat('\n'),
-    'utf8'
+test('unsupported desired records block current transaction recovery before mutation', async () => {
+  const appRoot = await createAppRoot('unsupported-record-with-recovery');
+  const paths = buildIslandPatchPaths(appRoot);
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const desiredHtml = originalHtml.replace('</head>', '<meta name="interrupted">\n\t</head>');
+  const originalStats = await fs.lstat(paths.workbenchHtmlPath);
+  const transactionId = crypto.randomUUID();
+  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, transactionId, 'backup');
+  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, transactionId, 'stage');
+  const retiredPath = transactionTemporaryPath(paths.workbenchHtmlPath, transactionId, 'retired');
+  const unsupportedRecord = JSON.stringify({ version: 1, appRoot }).concat('\n');
+
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, unsupportedRecord, 'utf8');
+  await fs.copyFile(paths.workbenchHtmlPath, backupPath);
+  await fs.writeFile(stagedPath, desiredHtml, 'utf8');
+  await fs.chmod(stagedPath, originalStats.mode);
+  await fs.rename(paths.workbenchHtmlPath, retiredPath);
+  await fs.link(stagedPath, paths.workbenchHtmlPath);
+  const journal = JSON.stringify(
+    {
+      version: 4,
+      id: transactionId,
+      appRoot,
+      phase: 'committing',
+      entries: [
+        {
+          filePath: paths.workbenchHtmlPath,
+          backupPath,
+          stagedPath,
+          retiredPath,
+          existed: true,
+          originalChecksum: sha256Base64(originalHtml),
+          desiredChecksum: sha256Base64(desiredHtml),
+          originalMode: Number(originalStats.mode),
+          originalDevice: String(originalStats.dev),
+          originalInode: String(originalStats.ino),
+        },
+      ],
+    },
+    null,
+    2
+  ).concat('\n');
+  await fs.writeFile(paths.transactionJournalPath, journal, 'utf8');
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    registrationState: 'unsupported',
+    transaction: { kind: 'recoverable', version: 4 },
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
+    'expected version 2 with an absolute appRoot'
   );
 
-  const result = await restoreAllIslandShells({ registryHome });
-
-  expect(result).toMatchObject({
-    changed: true,
-    registryChanged: true,
-    enumerationFailure: {
-      changed: true,
-      registryChanged: true,
-      reason: expect.stringContaining('hash collision'),
-    },
-  });
-  expect(
-    JSON.parse(await fs.readFile(buildManagedRootRecordPath(firstRoot, registryHome), 'utf8'))
-  ).toEqual({ version: 1, appRoot: firstRoot });
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(unsupportedRecord);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(desiredHtml);
+  expect(await fs.readFile(backupPath, 'utf8')).toBe(originalHtml);
+  expect(await fs.readFile(stagedPath, 'utf8')).toBe(desiredHtml);
+  expect(await fs.readFile(retiredPath, 'utf8')).toBe(originalHtml);
+  expect(await fs.readFile(paths.transactionJournalPath, 'utf8')).toBe(journal);
 });
 
-test('legacy migration rejects symlinked owned inputs without consuming their targets', async () => {
-  const cases = [
-    'retirement marker',
-    'legacy registry',
-    'migration snapshot',
-    'hashed record',
-  ] as const;
+test('unidentifiable unsupported desired records remain untouched by bulk restore', async () => {
+  const appRoot = await createAppRoot('unidentifiable-unsupported-record');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  const unsupportedRecord = JSON.stringify({ version: 1 }).concat('\n');
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, unsupportedRecord, 'utf8');
 
-  for (const kind of cases) {
-    const caseHome = path.join(testRoot, `symlinked-${kind.replaceAll(' ', '-')}`);
-    const appRoot = path.join(testRoot, `symlinked-${kind.replaceAll(' ', '-')}-root`);
-    const externalPath = path.join(testRoot, `external-${kind.replaceAll(' ', '-')}.json`);
-    const legacyPath = buildLegacyManagedRootsRegistryPath(caseHome);
-    const migrationPath = `${legacyPath}.migrating`;
-    const retirementPath = buildLegacyRetirementMarkerPath(caseHome);
-    const recordPath = buildManagedRootRecordPath(appRoot, caseHome);
-    let ownedPath: string;
-    let externalContent: string;
-
-    if (kind === 'retirement marker') {
-      ownedPath = retirementPath;
-      externalContent = JSON.stringify({ version: 1, retiredAt: new Date().toISOString() });
-    } else if (kind === 'hashed record') {
-      await fs.mkdir(appRoot, { recursive: true });
-      await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-      await fs.writeFile(
-        legacyPath,
-        JSON.stringify({ version: 1, appRoots: [appRoot] }).concat('\n'),
-        'utf8'
-      );
-      ownedPath = recordPath;
-      externalContent = JSON.stringify({ version: 1, appRoot }).concat('\n');
-    } else {
-      ownedPath = kind === 'legacy registry' ? legacyPath : migrationPath;
-      externalContent = JSON.stringify({ version: 1, appRoots: [appRoot] }).concat('\n');
-    }
-
-    await fs.mkdir(path.dirname(ownedPath), { recursive: true });
-    await fs.writeFile(externalPath, externalContent, 'utf8');
-    await fs.symlink(externalPath, ownedPath);
-
-    const result = await restoreAllIslandShells({ registryHome: caseHome });
-
-    expect(result.enumerationFailure?.reason).toContain('not an owned regular file');
-    expect((await fs.lstat(ownedPath)).isSymbolicLink()).toBe(true);
-    expect(await fs.readFile(externalPath, 'utf8')).toBe(externalContent);
-  }
-});
-
-test('legacy migration rejects an identity change during an owned input read', async () => {
-  const appRoot = path.join(testRoot, 'legacy-read-identity-root');
-  await fs.mkdir(appRoot);
-  const legacyPath = await writeLegacyManagedRootsRegistry([appRoot]);
-  const replacementPath = path.join(path.dirname(legacyPath), 'legacy-replacement.json');
-  const content = await fs.readFile(legacyPath, 'utf8');
-  await fs.writeFile(replacementPath, content, 'utf8');
-  const originalReadFile = fs.readFile;
-  const originalRename = fs.rename;
-  let injected = false;
-
-  fs.readFile = (async (...args: Parameters<typeof fs.readFile>) => {
-    const result = await originalReadFile(...args);
-    const [filePath] = args;
-    if (!injected && String(filePath) === legacyPath) {
-      injected = true;
-      await originalRename(replacementPath, legacyPath);
-    }
-    return result;
-  }) as typeof fs.readFile;
-
-  let result: Awaited<ReturnType<typeof restoreAllIslandShells>>;
-  try {
-    result = await restoreAllIslandShells({ registryHome });
-  } finally {
-    fs.readFile = originalReadFile;
-  }
-
-  expect(injected).toBe(true);
-  expect(result).toMatchObject({
-    changed: true,
-    registryChanged: true,
-    externalDrift: true,
-    incompleteRecovery: true,
-    enumerationFailure: {
-      externalDrift: true,
-      reason: expect.stringContaining('changed during inspection'),
-    },
+  await expect(restoreAllIslandShells({ registryHome })).resolves.toMatchObject({
+    changed: false,
+    failedAppRoots: [],
+    enumerationFailure: { code: 'corrupt' },
   });
-  expect(await fs.readFile(legacyPath, 'utf8')).toBe(content);
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(unsupportedRecord);
 });
 
 test('concurrent app roots register and unregister without overwriting each other', async () => {
@@ -779,10 +592,11 @@ test('different registry homes serialize mutation through one physical app-root 
   await fs.writeFile(
     rootLockPath,
     JSON.stringify({
-      version: 1,
+      version: 3,
       pid: process.pid,
       token: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
+      processIdentity: await currentLockProcessIdentity(),
     }).concat('\n'),
     'utf8'
   );
@@ -854,10 +668,11 @@ test('a live lock owner is never stolen because of age', async () => {
   await fs.writeFile(
     lockPath,
     JSON.stringify({
-      version: 1,
+      version: 3,
       token: crypto.randomUUID(),
       pid: process.pid,
       createdAt: '2000-01-01T00:00:00.000Z',
+      processIdentity: await currentLockProcessIdentity(),
     }),
     'utf8'
   );
@@ -908,7 +723,7 @@ test('clean roots with semantically correct checksum are not rewritten during re
   });
 });
 
-test('restore-all removes registered clean roots without touching workbench files', async () => {
+test('restore-all retains a current disabled desired record without touching workbench files', async () => {
   const appRoot = await createAppRoot('registered-clean');
   const productPath = buildIslandPatchPaths(appRoot).productJsonPath;
   const before = await fs.readFile(productPath, 'utf8');
@@ -920,10 +735,10 @@ test('restore-all removes registered clean roots without touching workbench file
 
   const result = await restoreAllIslandShells({ registryHome });
 
-  expect(result.changed).toBe(true);
+  expect(result.changed).toBe(false);
   expect(result).toMatchObject({
-    desiredStateChanged: true,
-    registryChanged: true,
+    desiredStateChanged: false,
+    registryChanged: false,
     physicalChanged: false,
   });
   expect(result.failedAppRoots).toEqual([]);
@@ -1654,156 +1469,46 @@ test('apply preflights corrupt managed root registry before writing app files', 
   await expectRestoredAppRoot(appRoot);
 });
 
-test('legacy v2 transaction evidence fails closed without overwriting a newer target', async () => {
-  const appRoot = await createAppRoot('interrupted-transaction');
-  const cssSource = path.join(testRoot, 'interrupted.css');
-  await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
-  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
-
-  const paths = buildIslandPatchPaths(appRoot);
-  const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  await fs.copyFile(paths.workbenchHtmlPath, backupPath);
-  await fs.writeFile(stagedPath, 'interrupted staged content\n', 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify(
-      {
-        version: 2,
-        id,
-        appRoot,
-        phase: 'prepared',
-        entries: [
-          {
-            filePath: paths.workbenchHtmlPath,
-            backupPath,
-            stagedPath,
-            existed: true,
-          },
-        ],
-      },
-      null,
-      2
-    ).concat('\n'),
-    'utf8'
-  );
-  await fs.writeFile(paths.workbenchHtmlPath, 'partially committed content\n', 'utf8');
-
-  await expect(readAllIslandShellStatuses({ registryHome })).resolves.toMatchObject([
-    {
-      classification: 'transaction-blocked',
-      verificationPassed: false,
-      transaction: {
-        kind: 'unsupported',
-        recoverability: 'manual',
-        version: 2,
-      },
-    },
-  ]);
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe('partially committed content\n');
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-
-  await expect(
-    applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
-  ).rejects.toMatchObject({
-    incompleteRecovery: true,
-    physicalChanged: false,
-    externalDrift: false,
-  });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe('partially committed content\n');
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-  expect((await fs.stat(backupPath)).isFile()).toBe(true);
-  expect((await fs.stat(stagedPath)).isFile()).toBe(true);
-});
-
-test('legacy v1 transaction evidence is also preserved as unsupported', async () => {
-  const appRoot = await createAppRoot('legacy-v1-transaction');
+test('noncurrent transaction journal versions are corrupt and left untouched', async () => {
+  const appRoot = await createAppRoot('external-drift-recovery');
   const paths = buildIslandPatchPaths(appRoot);
   const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const newerHtml = originalHtml.replace('</head>', '<meta name="newer">\n\t</head>');
+  const originalStats = await fs.lstat(paths.workbenchHtmlPath);
   const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  await fs.writeFile(backupPath, originalHtml, 'utf8');
-  await fs.writeFile(stagedPath, 'legacy staged content\n', 'utf8');
-  await fs.writeFile(paths.workbenchHtmlPath, newerHtml, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify({
-      version: 1,
-      id,
-      phase: 'prepared',
-      entries: [
-        {
-          filePath: paths.workbenchHtmlPath,
-          backupPath,
-          stagedPath,
-          existed: true,
-        },
-      ],
-    }).concat('\n'),
-    'utf8'
-  );
+  const journal = JSON.stringify({
+    version: 3,
+    id,
+    appRoot,
+    phase: 'prepared',
+    entries: [
+      {
+        filePath: paths.workbenchHtmlPath,
+        backupPath: transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup'),
+        stagedPath: transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage'),
+        existed: true,
+        originalChecksum: sha256Base64(originalHtml),
+        desiredChecksum: sha256Base64(`${originalHtml}\n`),
+        originalMode: Number(originalStats.mode),
+        originalDevice: String(originalStats.dev),
+        originalInode: String(originalStats.ino),
+        retiredPath: transactionTemporaryPath(paths.workbenchHtmlPath, id, 'retired'),
+      },
+    ],
+  }).concat('\n');
+  await fs.writeFile(paths.transactionJournalPath, journal, 'utf8');
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'transaction-blocked',
-    transaction: { kind: 'unsupported', version: 1 },
+    transaction: {
+      kind: 'corrupt',
+      recoverability: 'manual',
+      reason: expect.stringContaining('invalid'),
+    },
   });
-  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
-    incompleteRecovery: true,
-    physicalChanged: false,
-  });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(newerHtml);
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-});
-
-test('transaction recovery never overwrites an externally replaced generation', async () => {
-  const appRoot = await createAppRoot('external-drift-recovery');
-  await restoreIslandShell({ appRoot, registryHome });
-  const paths = buildIslandPatchPaths(appRoot);
-  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const desiredHtml = originalHtml.replace('</head>', '<meta name="desired">\n\t</head>');
-  const externalHtml = originalHtml.replace('</head>', '<meta name="external">\n\t</head>');
-  const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  await fs.writeFile(backupPath, originalHtml, 'utf8');
-  await fs.writeFile(stagedPath, desiredHtml, 'utf8');
-  await fs.writeFile(paths.workbenchHtmlPath, externalHtml, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify(
-      {
-        version: 3,
-        id,
-        appRoot,
-        phase: 'committing',
-        entries: [
-          {
-            filePath: paths.workbenchHtmlPath,
-            backupPath,
-            stagedPath,
-            existed: true,
-            originalChecksum: sha256Base64(originalHtml),
-            desiredChecksum: sha256Base64(desiredHtml),
-          },
-        ],
-      },
-      null,
-      2
-    ).concat('\n'),
-    'utf8'
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
+    'Tyrian file transaction journal is invalid'
   );
-
-  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
-    changed: false,
-    physicalChanged: false,
-    externalDrift: true,
-    incompleteRecovery: true,
-  });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(externalHtml);
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
+  expect(await fs.readFile(paths.transactionJournalPath, 'utf8')).toBe(journal);
 });
 
 test('v4 transaction recovery restores the retired generation and removes its evidence', async () => {
@@ -1911,50 +1616,6 @@ test('v4 recovery restores a target retired before staged publication', async ()
   }
 });
 
-test('v3 verified cleanup preserves the historical managed-record target path', async () => {
-  const appRoot = await createAppRoot('v3-managed-record-cleanup');
-  const paths = buildIslandPatchPaths(appRoot);
-  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
-  const recordContent = JSON.stringify(
-    { version: 2, appRoot, desiredThemeId: null },
-    null,
-    2
-  ).concat('\n');
-  await fs.mkdir(path.dirname(recordPath), { recursive: true });
-  await fs.writeFile(recordPath, recordContent, 'utf8');
-  const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(recordPath, id, 'backup');
-  await fs.writeFile(backupPath, recordContent, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify(
-      {
-        version: 3,
-        id,
-        appRoot,
-        phase: 'verified',
-        entries: [
-          {
-            filePath: recordPath,
-            backupPath,
-            existed: true,
-            originalChecksum: sha256Base64(recordContent),
-            desiredChecksum: sha256Base64(recordContent),
-          },
-        ],
-      },
-      null,
-      2
-    ).concat('\n'),
-    'utf8'
-  );
-
-  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toBeDefined();
-  expect(await fs.readFile(recordPath, 'utf8')).toBe(recordContent);
-  await expect(fs.lstat(backupPath)).rejects.toThrow();
-  await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
-});
-
 test('verified cleanup preserves replacement evidence and reports the physical mutation', async () => {
   const appRoot = await createAppRoot('verified-cleanup-replacement');
   const cssSource = path.join(testRoot, 'verified-cleanup-replacement.css');
@@ -1997,226 +1658,6 @@ test('verified cleanup preserves replacement evidence and reports the physical m
   );
 });
 
-test('restore reports a physical mutation performed by successful transaction recovery', async () => {
-  const appRoot = await createAppRoot('recovery-mutation-result');
-  await restoreIslandShell({ appRoot, registryHome });
-  const paths = buildIslandPatchPaths(appRoot);
-  const id = crypto.randomUUID();
-  const transactionContent = '{"pending":true}\n';
-  const backupPath = transactionTemporaryPath(paths.manifestPath, id, 'backup');
-  await fs.writeFile(paths.manifestPath, transactionContent, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify(
-      {
-        version: 3,
-        id,
-        appRoot,
-        phase: 'committing',
-        entries: [
-          {
-            filePath: paths.manifestPath,
-            backupPath,
-            existed: false,
-            originalChecksum: null,
-            desiredChecksum: sha256Base64(transactionContent),
-          },
-        ],
-      },
-      null,
-      2
-    ).concat('\n'),
-    'utf8'
-  );
-
-  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
-    changed: true,
-    desiredStateChanged: false,
-    registryChanged: false,
-    physicalChanged: true,
-  });
-  await expect(fs.stat(paths.manifestPath)).rejects.toThrow();
-  await expect(fs.stat(paths.transactionJournalPath)).rejects.toThrow();
-});
-
-test('post-rollback cleanup failure retains the completed physical mutation fact', async () => {
-  const appRoot = await createAppRoot('rollback-cleanup-mutation-fact');
-  await restoreIslandShell({ appRoot, registryHome });
-  const paths = buildIslandPatchPaths(appRoot);
-  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const desiredHtml = `${originalHtml}\n<!-- pending transaction -->\n`;
-  const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  await fs.writeFile(backupPath, originalHtml, 'utf8');
-  await fs.mkdir(stagedPath);
-  await fs.writeFile(
-    path.join(stagedPath, 'cleanup-blocker'),
-    'preserve failure evidence\n',
-    'utf8'
-  );
-  await fs.writeFile(paths.workbenchHtmlPath, desiredHtml, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify({
-      version: 3,
-      id,
-      appRoot,
-      phase: 'committing',
-      entries: [
-        {
-          filePath: paths.workbenchHtmlPath,
-          backupPath,
-          stagedPath,
-          existed: true,
-          originalChecksum: sha256Base64(originalHtml),
-          desiredChecksum: sha256Base64(desiredHtml),
-        },
-      ],
-    }).concat('\n'),
-    'utf8'
-  );
-
-  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toMatchObject({
-    changed: true,
-    physicalChanged: true,
-    incompleteRecovery: true,
-  });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
-  expect((await fs.stat(stagedPath)).isDirectory()).toBe(true);
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-});
-
-test('transaction recovery rejects a journal target outside the owned patch set', async () => {
-  const appRoot = await createAppRoot('unowned-journal-target');
-  const paths = buildIslandPatchPaths(appRoot);
-  const outsideTarget = path.join(testRoot, 'outside-target.txt');
-  const outsideContent = 'outside generation\n';
-  const id = crypto.randomUUID();
-  await fs.writeFile(outsideTarget, outsideContent, 'utf8');
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify({
-      version: 3,
-      id,
-      appRoot,
-      phase: 'committing',
-      entries: [
-        {
-          filePath: outsideTarget,
-          backupPath: transactionTemporaryPath(outsideTarget, id, 'backup'),
-          stagedPath: transactionTemporaryPath(outsideTarget, id, 'stage'),
-          existed: true,
-          originalChecksum: sha256Base64(outsideContent),
-          desiredChecksum: sha256Base64('replacement generation\n'),
-        },
-      ],
-    }).concat('\n'),
-    'utf8'
-  );
-
-  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'transaction-blocked',
-    transaction: { kind: 'corrupt', recoverability: 'manual' },
-  });
-  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
-    'transaction journal contains an invalid entry'
-  );
-  expect(await fs.readFile(outsideTarget, 'utf8')).toBe(outsideContent);
-});
-
-test('raw CLI failure envelopes preserve all actionable recovery causes', async () => {
-  const appRoot = await createAppRoot('aggregate-cli-recovery');
-  await restoreIslandShell({ appRoot, registryHome });
-  const paths = buildIslandPatchPaths(appRoot);
-  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const originalProduct = await fs.readFile(paths.productJsonPath, 'utf8');
-  const desiredHtml = `${originalHtml}\n<!-- desired generation -->\n`;
-  const desiredProduct = `${originalProduct}\n`;
-  const externalHtml = `${originalHtml}\n<!-- external generation -->\n`;
-  const externalProduct = `${originalProduct} `;
-  const id = crypto.randomUUID();
-  const htmlBackup = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  const htmlStage = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  const productBackup = transactionTemporaryPath(paths.productJsonPath, id, 'backup');
-  const productStage = transactionTemporaryPath(paths.productJsonPath, id, 'stage');
-  await Promise.all([
-    fs.writeFile(htmlBackup, originalHtml, 'utf8'),
-    fs.writeFile(htmlStage, desiredHtml, 'utf8'),
-    fs.writeFile(productBackup, originalProduct, 'utf8'),
-    fs.writeFile(productStage, desiredProduct, 'utf8'),
-    fs.writeFile(paths.workbenchHtmlPath, externalHtml, 'utf8'),
-    fs.writeFile(paths.productJsonPath, externalProduct, 'utf8'),
-  ]);
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify({
-      version: 3,
-      id,
-      appRoot,
-      phase: 'committing',
-      entries: [
-        {
-          filePath: paths.workbenchHtmlPath,
-          backupPath: htmlBackup,
-          stagedPath: htmlStage,
-          existed: true,
-          originalChecksum: sha256Base64(originalHtml),
-          desiredChecksum: sha256Base64(desiredHtml),
-        },
-        {
-          filePath: paths.productJsonPath,
-          backupPath: productBackup,
-          stagedPath: productStage,
-          existed: true,
-          originalChecksum: sha256Base64(originalProduct),
-          desiredChecksum: sha256Base64(desiredProduct),
-        },
-      ],
-    }).concat('\n'),
-    'utf8'
-  );
-
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      path.resolve('apps/vscode/src/islandCli.ts'),
-      'restore',
-      '--app-root',
-      appRoot,
-    ],
-    {
-      env: { ...process.env, HOME: registryHome },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    }
-  );
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  const failure = JSON.parse(stderr);
-
-  expect(exitCode).toBe(1);
-  expect(stdout).toBe('');
-  expect(failure).toMatchObject({
-    changed: false,
-    physicalChanged: false,
-    externalDrift: true,
-    incompleteRecovery: true,
-  });
-  expect(failure.causes).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ reason: expect.stringContaining(paths.workbenchHtmlPath) }),
-      expect.objectContaining({ reason: expect.stringContaining(paths.productJsonPath) }),
-    ])
-  );
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(externalHtml);
-  expect(await fs.readFile(paths.productJsonPath, 'utf8')).toBe(externalProduct);
-});
-
 test('status exposes corrupt transaction evidence before mutation blocks', async () => {
   const appRoot = await createAppRoot('corrupt-journal');
   const { transactionJournalPath } = buildIslandPatchPaths(appRoot);
@@ -2233,52 +1674,6 @@ test('status exposes corrupt transaction evidence before mutation blocks', async
   await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
     'Tyrian file transaction journal is invalid JSON'
   );
-});
-
-test('verified v3 cleanup failure is visible and remains retryable from the journal', async () => {
-  const appRoot = await createAppRoot('verified-cleanup-retry');
-  const paths = buildIslandPatchPaths(appRoot);
-  const id = crypto.randomUUID();
-  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
-  await fs.mkdir(backupPath);
-  await fs.writeFile(
-    paths.transactionJournalPath,
-    JSON.stringify(
-      {
-        version: 3,
-        id,
-        appRoot,
-        phase: 'verified',
-        entries: [
-          {
-            filePath: paths.workbenchHtmlPath,
-            backupPath,
-            existed: false,
-            originalChecksum: null,
-            desiredChecksum: null,
-          },
-        ],
-      },
-      null,
-      2
-    ).concat('\n'),
-    'utf8'
-  );
-
-  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'transaction-pending',
-    transaction: { kind: 'recoverable', phase: 'verified' },
-  });
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-
-  await fs.rm(backupPath, { recursive: true });
-  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    classification: 'transaction-pending',
-    transaction: { kind: 'recoverable', phase: 'verified' },
-  });
-  expect((await fs.stat(paths.transactionJournalPath)).isFile()).toBe(true);
-  await restoreIslandShell({ appRoot, registryHome });
-  await expect(fs.stat(paths.transactionJournalPath)).rejects.toThrow();
 });
 
 async function createAppRoot(
@@ -2339,19 +1734,6 @@ async function expectRestoredAppRoot(appRoot: string): Promise<void> {
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 }
 
-async function writeLegacyManagedRootsRegistry(appRoots: string[]): Promise<string> {
-  const registryPath = buildLegacyManagedRootsRegistryPath(registryHome);
-
-  await fs.mkdir(path.dirname(registryPath), { recursive: true });
-  await fs.writeFile(
-    registryPath,
-    JSON.stringify({ version: 1, appRoots }, null, 2).concat('\n'),
-    'utf8'
-  );
-
-  return registryPath;
-}
-
 async function writeCorruptManagedRootRecord(): Promise<void> {
   const directoryPath = buildManagedRootsDirectoryPath(registryHome);
   await fs.mkdir(directoryPath, { recursive: true });
@@ -2362,23 +1744,35 @@ async function writeCorruptManagedRootRecord(): Promise<void> {
   );
 }
 
-async function writeLegacyManagedRootsRegistryContent(content: string): Promise<void> {
-  const registryPath = buildLegacyManagedRootsRegistryPath(registryHome);
-
-  await fs.mkdir(path.dirname(registryPath), { recursive: true });
-  await fs.writeFile(registryPath, content, 'utf8');
-}
-
 async function writeManagedRootRecord(appRoot: string): Promise<string> {
   const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
 
   await fs.mkdir(path.dirname(recordPath), { recursive: true });
   await fs.writeFile(
     recordPath,
-    JSON.stringify({ version: 1, appRoot }, null, 2).concat('\n'),
+    JSON.stringify({ version: 2, appRoot, desiredThemeId: null }, null, 2).concat('\n'),
     'utf8'
   );
   return recordPath;
+}
+
+async function currentLockProcessIdentity(): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+
+  const [bootId, stat] = await Promise.all([
+    fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8'),
+    fs.readFile(`/proc/${process.pid}/stat`, 'utf8'),
+  ]);
+  const commandEnd = stat.lastIndexOf(')');
+  const startTime =
+    commandEnd === -1
+      ? undefined
+      : stat
+          .slice(commandEnd + 1)
+          .trim()
+          .split(/\s+/u)[19];
+
+  return bootId.trim() && startTime ? `${bootId.trim()}:${startTime}` : null;
 }
 
 async function expectOnlyWorkbenchHtmlSidecarRemains(appRoot: string): Promise<void> {

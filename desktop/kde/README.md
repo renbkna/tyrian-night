@@ -43,11 +43,11 @@ themes through symlinks)
 (`bun run desktop:plasma:apply`) and the Plasma-only rice command do these
 package installs automatically.
 
-Union CSS packages are kept as Plasma 6.7 tech-preview assets only. The live
-Plasma profile leaves KDE on Breeze application style, removes the old persisted
-`QT_QUICK_CONTROLS_STYLE=org.kde.union` env file, and does not mutate the live
-D-Bus/session environment. Restart the user session after migration, or clear
-an already-imported override manually before testing. To test Union manually,
+Union CSS packages are kept as Plasma 6.7 tech-preview assets only. The live Plasma
+profile leaves KDE on Breeze application style and does not mutate the live
+D-Bus/session environment. It does not migrate or clean up existing Union runtime
+or environment paths. Clear an already-imported override manually before testing.
+To test Union manually,
 install your distro's `union` package, copy or symlink
 `/usr/share/union/css/defaults` into `~/.local/share/union/css/defaults`, copy
 or symlink the packaged Union base style directories

@@ -12,7 +12,12 @@ import {
   syncGeneratedContracts,
 } from '../scripts/generatedContracts.mjs';
 import { terminalColor } from '../scripts/themeDefinition.mjs';
-import { SOURCE_THEMES, getDefaultThemeSource, readSourceTheme } from '../scripts/themeSources.mjs';
+import {
+  SOURCE_THEMES,
+  getDefaultThemeSource,
+  loadThemeRepository,
+  readSourceTheme,
+} from '../scripts/themeSources.mjs';
 import { syncVscodePackageAssets } from '../scripts/vscodePackageAssets.mjs';
 
 type ExtensionPackage = {
@@ -158,16 +163,13 @@ test('VS Code package assets never follow generated targets through symlinks', (
   }
 });
 
-test('source theme catalog owns ordered membership and explicit default roles only', () => {
+test('source theme catalog owns ordered membership and terminal defaults; family owns canonical default', () => {
   const catalog = readJson<Array<Record<string, unknown>>>('source/themeCatalog.json');
-  const defaultEntries = catalog.filter((entry) => entry.default === true);
+  const family = loadThemeRepository().definition.familyContract;
   const terminalDefaultEntries = catalog.filter((entry) => entry.terminalDefault === true);
 
-  expect(defaultEntries).toEqual([
-    expect.objectContaining({
-      slug: 'tyrian-nocturne',
-    }),
-  ]);
+  expect(family.canonical).toBe('tyrian-nocturne');
+  expect(catalog.some((entry) => Object.hasOwn(entry, 'default'))).toBe(false);
   expect(terminalDefaultEntries.map(({ slug }) => slug)).toEqual([
     'tyrian-nocturne',
     'tyrian-dawn',
@@ -176,7 +178,7 @@ test('source theme catalog owns ordered membership and explicit default roles on
   for (const entry of catalog) {
     expect(Object.keys(entry).toSorted()).toEqual(
       Object.keys(entry)
-        .filter((key) => ['default', 'slug', 'terminalDefault'].includes(key))
+        .filter((key) => ['slug', 'terminalDefault'].includes(key))
         .toSorted()
     );
     expect(entry).not.toHaveProperty('label');
@@ -382,7 +384,7 @@ test('workspace and product manifests have non-competing release ownership', () 
     'bun run check:tracked-generated && bun run build:generated'
   );
   expect(workspace.scripts['check:tracked-generated']).toBe(
-    'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme'
+    'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme && bun run check:theme-preview'
   );
   expect(workspace.scripts['test:isolated']).toBe('bun test --isolate');
   for (const scriptName of ['test', 'verify:vscode', 'verify:vscode-portable', 'verify:desktop']) {
@@ -394,17 +396,21 @@ test('workspace and product manifests have non-competing release ownership', () 
   for (const pathspec of [
     '.oxlintrc.json',
     'source/themeCatalog.json',
+    'source/themeFamilyContract.json',
     'source/themeOpacityContract.json',
     'source/themePigmentPolicy.json',
     'source/themeSafetyContract.json',
     'source/themes/*.json',
     'scripts/colorScience.mjs',
     'scripts/colorVision.mjs',
+    'scripts/themePreview.mjs',
+    'scripts/themeSources.mjs',
     'scripts/zedTheme.mjs',
     'apps/vscode/src/generated/*.ts',
     'apps/vscode/themes/*.json',
     'apps/zed/themes/*.json',
     'examples/theme-preview/*',
+    'examples/theme-preview/generated/*.js',
   ]) {
     expect(trackedGeneratedGate).toContain(pathspec);
   }
@@ -423,7 +429,9 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.scripts.verify).toContain('bun run check:generated');
   expect(workspace.scripts.verify).toContain('bun run check:rice');
   expect(workspace.scripts['build:generated']).toContain('bun run build:vscode-package-assets');
+  expect(workspace.scripts['build:generated']).toContain('bun run build:theme-preview');
   expect(workspace.scripts['check:generated']).toContain('bun run check:vscode-package-assets');
+  expect(workspace.scripts['check:generated']).toContain('bun run check:theme-preview');
   expect(workspace.scripts.build).toBe('bun run build:generated && bun run build:vscode');
   expect(workspace.scripts.package).toBe('bun run package:vscode');
   expect(workspace.scripts['package:vscode']).toBe(

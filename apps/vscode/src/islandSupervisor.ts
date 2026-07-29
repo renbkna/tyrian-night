@@ -7,8 +7,6 @@ import {
   readIslandShellStatus,
   readIslandShellWriteAccess,
   restoreAllIslandShells,
-  seedIslandDesiredTheme,
-  type IslandDesiredSeedResult,
   type IslandMutationResult,
   type IslandShellCleanupSummary,
   type IslandShellStatus,
@@ -65,14 +63,6 @@ export type IslandUiSupervisorStatus = IslandShellStatus & {
   recommendedAction: IslandUiRecommendedAction;
 };
 
-export function seedIslandDesiredThemeSupervised(options: {
-  appRoot: string;
-  desiredThemeId: string;
-  registryHome?: string;
-}): Promise<IslandDesiredSeedResult> {
-  return seedIslandDesiredTheme(options);
-}
-
 export async function applyIslandUiSupervised(options: {
   appRoot: string;
   cssSourcePath: string;
@@ -99,7 +89,6 @@ export async function applyIslandUiSupervised(options: {
       ...islandMutationFacts({
         externalDrift: transaction?.kind === 'external-drift',
         incompleteRecovery:
-          transaction?.kind === 'unsupported' ||
           transaction?.kind === 'corrupt' ||
           transaction?.kind === 'external-drift' ||
           transaction?.kind === 'unavailable',
@@ -250,7 +239,6 @@ function recommendIslandUiAction(
   status: IslandShellStatus,
   writeAccess: IslandShellWriteAccess
 ): IslandUiRecommendedAction {
-  if (status.transaction.kind === 'unsupported') return 'manual-recovery';
   if (
     status.transaction.kind === 'corrupt' ||
     status.transaction.kind === 'external-drift' ||
@@ -259,9 +247,9 @@ function recommendIslandUiAction(
     return 'manual-recovery';
   }
 
+  if (status.registrationState === 'unsupported') return 'manual-recovery';
   if (status.classification === 'missing') return status.registered ? 'prune-missing' : 'none';
   if (status.registrationState === 'corrupt') return 'restore';
-  if (status.registrationState === 'legacy') return 'restore';
 
   const desired = typeof status.desiredThemeId === 'string';
   if (status.classification === 'permission-denied' || !writeAccess.writable) {

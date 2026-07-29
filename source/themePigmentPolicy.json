@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reservations": [
     {
       "id": "green-cyan-reserved",
@@ -17,33 +17,6 @@
         "vscode:editor.hint.border",
         "vscode:editor.overviewRuler.addedForeground",
         "vscode:merge.incoming.header.background"
-      ],
-      "exemptions": [
-        {
-          "theme": "tyrian-night-old",
-          "role": "brackets:depth2",
-          "reason": "Frozen legacy cyan bracket pigment compatibility; current themes are not exempt."
-        },
-        {
-          "theme": "tyrian-night-old",
-          "role": "brackets:depth4",
-          "reason": "Frozen legacy bracket pigment compatibility; current themes are not exempt."
-        },
-        {
-          "theme": "tyrian-night-old",
-          "role": "syntax:function",
-          "reason": "Frozen legacy cyan function pigment compatibility; current themes are not exempt."
-        },
-        {
-          "theme": "tyrian-night-old",
-          "role": "terminal:ansi.brightCyan",
-          "reason": "Frozen legacy bright-cyan ANSI compatibility; current themes are not exempt."
-        },
-        {
-          "theme": "tyrian-night-old",
-          "role": "terminal:ansi.cyan",
-          "reason": "Frozen legacy cyan ANSI compatibility; current themes are not exempt."
-        }
       ]
     }
   ]

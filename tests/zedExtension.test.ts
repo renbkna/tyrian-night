@@ -3,10 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { expect, test } from 'bun:test';
-import { contrastRatio } from '../scripts/colorScience.mjs';
-import { parseHexColor } from '../scripts/colorUtils.mjs';
+import { contrastRatio, oklchToHex } from '../scripts/colorScience.mjs';
+import { opaqueHex, parseHexColor, withHexAlpha } from '../scripts/colorUtils.mjs';
 import { buildZedThemeFamily, writeZedThemeFamily } from '../scripts/zedTheme.mjs';
-import { REQUIRED_THEME_ROLES, bracketColor } from '../scripts/themeDefinition.mjs';
+import {
+  REQUIRED_THEME_ROLES,
+  bracketColor,
+  loadThemeDefinitionContext,
+  themePigmentHue,
+} from '../scripts/themeDefinition.mjs';
 import {
   SOURCE_THEMES,
   getDefaultThemeSource,
@@ -319,7 +324,9 @@ test('every generated Zed color uses a supported hex representation', () => {
   }
 
   const dawn = generated.themes.find((theme) => theme.name === 'Tyrian Dawn');
-  expect(dawn?.style['border.transparent']).toBe('#C7BFD800');
+  expect(dawn?.style['border.transparent']).toBe(
+    withHexAlpha(sourceTheme('Tyrian Dawn').ui['border.tab'], '00')
+  );
 });
 
 test('Zed generation resolves theme membership and identity from the injected root', () => {
@@ -330,21 +337,33 @@ test('Zed generation resolves theme membership and identity from the injected ro
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
     const theme = readJson<{
       name: string;
-      pigments: Record<string, string>;
+      oklch: Record<string, [number, number]>;
     }>(themePath);
     theme.name = 'Injected Zed Night';
-    theme.pigments['ui:surface.canvas'] = '#112233';
-    theme.pigments['syntax:function'] = '#445566';
-    theme.pigments['brackets:depth1'] = '#667788';
-    theme.pigments['ui:status.error'] = '#778899';
+    const injected = {
+      'ui:surface.canvas': [0.13, 0.02],
+      'syntax:function': [0.65, 0.085],
+      'brackets:depth1': [0.61, 0.05],
+      'ui:status.error': [0.63, 0.11],
+    } satisfies Record<string, [number, number]>;
+    Object.assign(theme.oklch, injected);
     fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+    const definition = loadThemeDefinitionContext(root);
+    const color = (pigment: keyof typeof injected) => {
+      const [L, C] = injected[pigment];
+      return oklchToHex({
+        C,
+        L,
+        h: themePigmentHue(definition, 'core', pigment)!,
+      });
+    };
 
     const generated = buildZedThemeFamily(root) as ZedThemeFamily;
     expect(generated.themes[0]?.name).toBe('Injected Zed Night');
-    expect(generated.themes[0]?.style['editor.background']).toBe('#112233');
-    expect(generated.themes[0]?.style.syntax.function?.color).toBe('#445566');
-    expect(generated.themes[0]?.style.accents[0]).toBe('#667788');
-    expect(generated.themes[0]?.style['terminal.ansi.red']).toBe('#778899');
+    expect(generated.themes[0]?.style['editor.background']).toBe(color('ui:surface.canvas'));
+    expect(generated.themes[0]?.style.syntax.function?.color).toBe(color('syntax:function'));
+    expect(generated.themes[0]?.style.accents[0]).toBe(color('brackets:depth1'));
+    expect(generated.themes[0]?.style['terminal.ansi.red']).toBe(color('ui:status.error'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -416,9 +435,7 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.parameter.color).toBe(source.syntax.data);
     expect(theme.style.syntax.boolean.color).toBe(source.syntax.constantLanguage);
-    expect(theme.style.syntax['constant.builtin']?.color).toBe(
-      theme.name === 'Tyrian Night Old' ? source.syntax.constantLanguage : source.syntax.null
-    );
+    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.null);
     expect(theme.style.syntax.constant.color).toBe(source.syntax.data);
     expect(theme.style.syntax.number.color).toBe(source.syntax.data);
     expect(theme.style.syntax['variable.special']?.color).toBe(source.syntax.data);
@@ -456,8 +473,16 @@ test('Zed bracket accents are exact source projections and dim ANSI colors use t
         expect(dim).toBe(normal);
       } else {
         expect(dim).not.toBe(normal);
-        expect(dimContrast).toBeGreaterThanOrEqual(mutedContrast - 0.02);
-        expect(dimContrast).toBeLessThan(mutedContrast + 0.15);
+        const closestRepresentableDistance = Math.min(
+          ...Array.from({ length: 254 }, (_, index) => {
+            const alpha = (index + 1).toString(16).padStart(2, '0');
+            const candidate = opaqueHex(withHexAlpha(normal, alpha), background);
+            return candidate === normal
+              ? Number.POSITIVE_INFINITY
+              : Math.abs(contrastRatio(candidate, background) - mutedContrast);
+          })
+        );
+        expect(Math.abs(dimContrast - mutedContrast)).toBeCloseTo(closestRepresentableDistance, 12);
       }
     }
   }

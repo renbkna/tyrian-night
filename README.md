@@ -21,12 +21,12 @@ The six variants are intentionally different expressions of the same semantic sy
 
 | Theme | Visual center | Purpose |
 |---|---|---|
-| **Tyrian Night** | Mineral blue-black and cold | Calmer cobalt structure, restrained violet, and a blue-black surface ladder |
-| **Tyrian Nocturne** | Deep cave, gothic, and nocturnal | Default and semantic base: cobalt functions, indigo structure, cave-Tyrian keywords, dried-rose data, and carved low-energy depth |
-| **Tyrian Pastel** | Neutral-black and dusty | The same hierarchy in darker, quiet pastel pigments without a bright or sugary canvas |
-| **Tyrian Abyss** | Near-black cosmic nebula | The most chromatic dark variant, with stellar cobalt and ultraviolet structure on deep-space indigo |
+| **Tyrian Night** | Quiet plum-black and low-energy | Nocturne's violet, cobalt, indigo, and rose grammar with lower chroma, softer contrast, and calmer plum surfaces |
+| **Tyrian Nocturne** | Tempered cosmic and nocturnal | Default family center: restrained ultraviolet identity, cobalt functions, indigo structure, rose data, and controlled plum-black depth |
+| **Tyrian Pastel** | Velvet plum and soft-focus | Independent soft-focus branch with related categorical hues, gentle pigments, and layered plum surfaces |
+| **Tyrian Abyss** | Near-black cosmic nebula | Nocturne pushed darker and more chromatic, with stellar cobalt and ultraviolet structure on deep-space indigo |
 | **Tyrian Dawn** | Near-white and ink-dark | Light translation of Nocturne with the same categorical syntax, hierarchy, and interaction behavior |
-| **Tyrian Night Old** | Legacy comparison | Exact previous palette, kept last in the catalog and excluded from new family constraints |
+| **Tyrian Night Old** | Historical reference | Earlier low-chroma character translated onto the same schema-v5 roles, family hues, opacity policy, and safety gates |
 
 Purple owns identity, focus, keywords, and selected emphasis. It does not replace warm errors, amber warnings and regular expressions, green strings and success, dusty-blue functions, smoky-indigo structural types, cool-rose data, or blue information. Green-through-cyan hues are reserved for strings, success-derived states, hints, and ANSI green; they are excluded from other code and UI roles. Terminal ANSI names remain protocol slots; each theme owns their rendered material.
 
@@ -34,13 +34,11 @@ Bracket nesting uses a dedicated six-depth palette rather than borrowing syntax 
 
 ## Palette
 
-Tyrian Nocturne is the selected default and semantic base. Production variants author exact sRGB pigments; the shared opacity contract owns role alpha. WCAG contrast is a hard minimum readability gate, and independent states may not resolve to the same rendered color. These rules catch real failures without pretending to choose a beautiful palette.
+Tyrian Nocturne is the selected default and semantic base. Night, Nocturne, and Abyss share one exact hue profile; their recipes author explicit per-role OKLCH lightness and chroma. Night stays within 60–70% of Nocturne's mean semantic chroma, Nocturne is the 100% center, and Abyss stays within 130–145% with roughly 0.19–0.20 mean semantic chroma and higher syntax contrast. Pastel and Dawn use related branch hue profiles. The shared opacity contract owns role alpha. WCAG contrast is a hard minimum readability gate, and independent states may not resolve to the same rendered color. These rules catch real failures without pretending to choose a beautiful palette.
 
 OKLCH, OKLab distance, color-vision simulation, and gamut-relative pigment richness are author diagnostics. Richness is `rho = C / Cmax(L, h, sRGB)`, which distinguishes an intentionally deep pigment from an accidentally gray one at the same lightness and hue. None of these observations is an attention, comfort, harmony, or quality score. The green-through-cyan reservation is explicit Tyrian brand policy, not a scientific law.
 
-Exact Nocturne pigments are edited only in `source/themes/tyrian-nocturne.json`. Generated VS Code, Zed, terminal, and desktop files are projections and never become palette inputs. Human design judgment happens in the real editors using the compact scenes in [`examples/theme-preview`](examples/theme-preview/README.md): important code should read clearly, comments and punctuation should recede without disappearing, active errors/search/selection should interrupt appropriately, and the result should remain comfortable during ordinary work.
-
-The earlier personal A/B exercise is retained only as this historical observation: both tested candidates were preferred to the previous production palette, and “deep-rich” was preferred to “cohesive.” That is useful taste evidence, not proof about attention or visual physiology.
+Family hue profiles, canonical default, and each variant's appearance classification are edited only in `source/themeFamilyContract.json`; per-variant lightness and chroma are edited only in the matching schema-v5 recipe, such as `source/themes/tyrian-nocturne.json`. Generated VS Code, Zed, terminal, desktop, and production-preview files are projections and never become palette inputs. Human design judgment happens in the real editors using the compact scenes in [`examples/theme-preview`](examples/theme-preview/README.md): important code should read clearly, comments and punctuation should recede without disappearing, active errors/search/selection should interrupt appropriately, and the result should remain comfortable during ordinary work.
 
 Blue functions, salmon errors, cool-rose data, and cool structural types remain separate categories in the current projections and diagnostics. ANSI red retains the error category.
 
@@ -87,14 +85,15 @@ Read the desktop product contract before applying it. The full rice is not a gen
 ## Authority and Repository Layout
 
 - `source/themeRoleContract.json` owns role membership.
-- `source/themeCatalog.json` owns ordered family membership and defaults.
+- `source/themeCatalog.json` owns ordered family membership and per-appearance terminal defaults.
 - `source/themeColorBindings.json` owns explicit role aliases and alpha derivations; unlisted roles self-own one opaque pigment.
-- `source/themeOpacityContract.json` owns opacity policy per binding profile, with explicit appearance-only overrides.
-- `source/themePigmentPolicy.json` owns the family-wide green-through-cyan reservation over resolved semantic roles: strings, success-derived states, hints, and ANSI green are allowed; five exact frozen-legacy violations are explicitly exempted.
-- `source/themes/` owns production pigments. The frozen legacy theme remains an exact compatibility profile.
-- `source/themeSafetyContract.json` owns hard rendered-contrast and state-identity requirements and applies automatically to every catalog theme. Its two exact legacy exemptions document frozen compatibility failures without weakening current themes.
+- `source/themeOpacityContract.json` owns one family opacity policy, with explicit appearance-only overrides.
+- `source/themeFamilyContract.json` owns the canonical/default theme, semantic pigment vocabulary, hue profiles, variant appearance classifications, energy envelopes, and branch hue limits.
+- `source/themePigmentPolicy.json` owns the family-wide green-through-cyan reservation over resolved semantic roles: strings, success-derived states, hints, and ANSI green are allowed.
+- `source/themes/` owns explicit per-role OKLCH lightness and chroma for every schema-v5 variant, including the historical-reference Tyrian Night Old recipe.
+- `source/themeSafetyContract.json` owns hard rendered-contrast and state-identity requirements and applies automatically to every catalog theme.
 - `scripts/colorScience.mjs` owns policy-free sRGB, contrast, OKLab/OKLCH, distance, and richness observations.
-- `examples/theme-preview/` owns the small real-editor inspection corpus; it is guidance, not a scored approval system.
+- `examples/theme-preview/` owns the small real-editor inspection corpus and a generated production-family workbench; it is guidance, not a scored approval system.
 - `source/union-css/` owns reusable component geometry and interaction rules.
 - `scripts/projections/` owns consumer-specific key and grammar mappings.
 - `apps/vscode/` owns the VS Code manifest, build, runtime, package contents, and support contract.

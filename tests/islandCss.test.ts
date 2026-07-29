@@ -4,9 +4,14 @@ import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
+import { oklchToHex } from '../scripts/colorScience.mjs';
 import { ISLAND_CSS_THEMES, buildAllIslandCss } from '../scripts/islandCss.mjs';
 import { parseHexColor } from '../scripts/colorUtils.mjs';
-import { themeColor } from '../scripts/themeDefinition.mjs';
+import {
+  loadThemeDefinitionContext,
+  themeColor,
+  themePigmentHue,
+} from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 
 const ISLAND_CSS_FILES = [
@@ -45,13 +50,24 @@ test('Island CSS generation resolves catalog identity from the injected reposito
     fs.mkdirSync(path.join(root, 'apps/vscode/island'), { recursive: true });
     fs.copyFileSync('apps/vscode/island/base.css', path.join(root, 'apps/vscode/island/base.css'));
     const themePath = path.join(root, 'source/themes/tyrian-night.json');
-    const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as Record<string, unknown>;
+    const theme = JSON.parse(fs.readFileSync(themePath, 'utf8')) as {
+      name: string;
+      oklch: Record<string, [number, number]>;
+    };
     theme.name = 'Injected Island Night';
-    (theme.pigments as Record<string, string>)['ui:accent.glow'] = '#123456';
+    theme.oklch['ui:accent.glow'] = [0.55, 0.08];
     fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+    const definition = loadThemeDefinitionContext(root);
+    const injected = oklchToHex({
+      C: 0.08,
+      L: 0.55,
+      h: themePigmentHue(definition, 'core', 'ui:accent.glow')!,
+    });
 
     expect(buildAllIslandCss(root)[0]?.css).toContain('Injected Island Night - Custom UI Styles');
-    expect(buildAllIslandCss(root)[0]?.css).toContain('--islands-accent-glow-rgb: 18, 52, 86;');
+    expect(buildAllIslandCss(root)[0]?.css).toContain(
+      `--islands-accent-glow-rgb: ${rgbChannels(injected)};`
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

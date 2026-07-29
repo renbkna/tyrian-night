@@ -1,22 +1,6 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "background": "ui:surface.canvas",
-  "exemptions": [
-    {
-      "theme": "tyrian-night-old",
-      "constraint": "readable-supporting-ui",
-      "kind": "wcag-minimum-contrast",
-      "role": "ui:text.muted",
-      "reason": "Frozen legacy palette compatibility; current themes are not exempt."
-    },
-    {
-      "theme": "tyrian-night-old",
-      "constraint": "readable-syntax",
-      "kind": "wcag-minimum-contrast",
-      "role": "syntax:null",
-      "reason": "Frozen legacy null alias compatibility; current themes are not exempt."
-    }
-  ],
   "contrast": [
     {
       "id": "readable-primary",

@@ -12,9 +12,9 @@ import {
   applyIslandUiSupervised,
   readIslandUiSupervisorStatuses,
   restoreIslandUiSupervised,
-  seedIslandDesiredThemeSupervised,
 } from './islandSupervisor.js';
 import {
+  ISLAND_WIRE_PROTOCOL_VERSION,
   projectIslandReconciliationStatus,
   projectIslandSupervisorInventory,
 } from './islandWire.js';
@@ -23,7 +23,6 @@ type IslandCliArgs = {
   'app-root'?: string;
   'css-source'?: string;
   'theme-version'?: string;
-  'desired-theme-id'?: string;
 };
 
 async function main(): Promise<void> {
@@ -52,14 +51,6 @@ async function main(): Promise<void> {
       writeJson(
         await restoreIslandShell({
           appRoot: requireArg(args, 'app-root'),
-        })
-      );
-      return;
-    case 'seed-desired-supervised':
-      writeJson(
-        await seedIslandDesiredThemeSupervised({
-          appRoot: requireArg(args, 'app-root'),
-          desiredThemeId: requireArg(args, 'desired-theme-id'),
         })
       );
       return;
@@ -108,7 +99,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "Unknown Tyrian Night CLI command. Use 'apply', 'apply-supervised', 'seed-desired-supervised', 'restore', 'restore-supervised', 'restore-all', 'status', 'status-all', or 'status-all-supervised'."
+        "Unknown Tyrian Night CLI command. Use 'apply', 'apply-supervised', 'restore', 'restore-supervised', 'restore-all', 'status', 'status-all', or 'status-all-supervised'."
       );
   }
 }
@@ -121,7 +112,6 @@ function parseCommandLine(argv: string[]): { args: IslandCliArgs; command: strin
       'app-root': { type: 'string' },
       'css-source': { type: 'string' },
       'theme-version': { type: 'string' },
-      'desired-theme-id': { type: 'string' },
     },
     strict: true,
   });
@@ -152,6 +142,8 @@ try {
   await main();
 } catch (error) {
   const failure = describeIslandShellFailure(error);
-  process.stderr.write(`${JSON.stringify({ version: 1, ...failure })}\n`);
+  process.stderr.write(
+    `${JSON.stringify({ version: ISLAND_WIRE_PROTOCOL_VERSION, ...failure })}\n`
+  );
   process.exitCode = 1;
 }

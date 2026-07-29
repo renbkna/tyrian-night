@@ -6,41 +6,29 @@ import { fileURLToPath } from 'node:url';
 
 import { hexToOklch, hueInsideRange } from './colorScience.mjs';
 import { loadThemeDefinitionContext } from './themeDefinition.mjs';
-import { readThemeSources } from './themeSources.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const THEME_PIGMENT_POLICY_PATH = path.join(ROOT, 'source/themePigmentPolicy.json');
 
-/** @typedef {{ reason: string; role: string; theme: string }} PigmentPolicyExemption */
-/** @typedef {{ allowedRoles: string[]; exemptions: PigmentPolicyExemption[]; id: string; maximum: number; minimum: number }} PigmentReservation */
-/** @typedef {{ reservations: PigmentReservation[]; schemaVersion: 1 }} ThemePigmentPolicy */
+/** @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation */
+/** @typedef {{ reservations: PigmentReservation[]; schemaVersion: 2 }} ThemePigmentPolicy */
 
 /** @param {string} [policyPath] @returns {ThemePigmentPolicy} */
 export function readThemePigmentPolicy(policyPath = THEME_PIGMENT_POLICY_PATH) {
   const root = path.resolve(path.dirname(policyPath), '..');
   const definition = loadThemeDefinitionContext(root);
-  const themes = readThemeSources(root, definition).map(({ slug }) => slug);
-  return validateThemePigmentPolicy(
-    JSON.parse(fs.readFileSync(policyPath, 'utf8')),
-    definition,
-    themes
-  );
+  return validateThemePigmentPolicy(JSON.parse(fs.readFileSync(policyPath, 'utf8')), definition);
 }
 
 /**
  * @param {unknown} value
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @param {readonly string[]} [themes]
  * @returns {ThemePigmentPolicy}
  */
-export function validateThemePigmentPolicy(
-  value,
-  definition = loadThemeDefinitionContext(ROOT),
-  themes = readThemeSources(definition.root, definition).map(({ slug }) => slug)
-) {
+export function validateThemePigmentPolicy(value, definition = loadThemeDefinitionContext(ROOT)) {
   const policy = requireObject(value, 'root');
   requireExactFields(policy, ['reservations', 'schemaVersion'], 'root');
-  invariant(policy.schemaVersion === 1, 'schemaVersion must be 1');
+  invariant(policy.schemaVersion === 2, 'schemaVersion must be 2');
   invariant(
     Array.isArray(policy.reservations) && policy.reservations.length > 0,
     'reservations must be a non-empty array'
@@ -51,13 +39,12 @@ export function validateThemePigmentPolicy(
     )
   );
   const ids = new Set();
-  const exemptionKeys = new Set();
   const reservations = /** @type {any[]} */ (policy.reservations).map(
     /** @param {unknown} raw @param {number} index */ (raw, index) => {
       const reservation = requireObject(raw, `reservations[${index}]`);
       requireExactFields(
         reservation,
-        ['allowedRoles', 'exemptions', 'id', 'maximum', 'minimum'],
+        ['allowedRoles', 'id', 'maximum', 'minimum'],
         `reservations[${index}]`
       );
       requireId(reservation.id, `reservations[${index}] id`);
@@ -70,67 +57,22 @@ export function validateThemePigmentPolicy(
         knownRoles,
         `reservation ${reservation.id} allowedRoles`
       );
-      invariant(
-        Array.isArray(reservation.exemptions),
-        `reservation ${reservation.id} exemptions must be an array`
-      );
-      const exemptions = /** @type {any[]} */ (reservation.exemptions).map(
-        /** @param {unknown} rawExemption @param {number} exemptionIndex */ (
-          rawExemption,
-          exemptionIndex
-        ) => {
-          const exemption = requireObject(
-            rawExemption,
-            `reservation ${reservation.id} exemptions[${exemptionIndex}]`
-          );
-          requireExactFields(
-            exemption,
-            ['reason', 'role', 'theme'],
-            `reservation ${reservation.id} exemptions[${exemptionIndex}]`
-          );
-          invariant(
-            themes.includes(exemption.theme),
-            `reservation ${reservation.id} exemption references unknown theme ${exemption.theme}`
-          );
-          invariant(
-            knownRoles.has(exemption.role),
-            `reservation ${reservation.id} exemption references unknown role ${exemption.role}`
-          );
-          invariant(
-            !allowedRoles.includes(exemption.role),
-            `reservation ${reservation.id} exemption redundantly allows ${exemption.role}`
-          );
-          invariant(
-            typeof exemption.reason === 'string' && exemption.reason.length >= 24,
-            `reservation ${reservation.id} exemption requires a specific reason`
-          );
-          const key = `${reservation.id}\0${exemption.theme}\0${exemption.role}`;
-          invariant(
-            !exemptionKeys.has(key),
-            `reservation ${reservation.id} exemption for ${exemption.theme}/${exemption.role} is duplicated`
-          );
-          exemptionKeys.add(key);
-          return { reason: exemption.reason, role: exemption.role, theme: exemption.theme };
-        }
-      );
       return {
         allowedRoles,
-        exemptions,
         id: reservation.id,
         maximum: reservation.maximum,
         minimum: reservation.minimum,
       };
     }
   );
-  return /** @type {ThemePigmentPolicy} */ (deepFreeze({ reservations, schemaVersion: 1 }));
+  return /** @type {ThemePigmentPolicy} */ (deepFreeze({ reservations, schemaVersion: 2 }));
 }
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- * @param {string} themeSlug
  * @param {ThemePigmentPolicy} [policy]
  */
-export function auditThemePigmentPolicy(theme, themeSlug, policy = readThemePigmentPolicy()) {
+export function auditThemePigmentPolicy(theme, policy = readThemePigmentPolicy()) {
   const violations = [];
   for (const namespace of /** @type {const} */ ([
     'brackets',
@@ -146,10 +88,7 @@ export function auditThemePigmentPolicy(theme, themeSlug, policy = readThemePigm
       for (const reservation of policy.reservations) {
         if (
           hueInsideRange(hue, reservation.minimum, reservation.maximum) &&
-          !reservation.allowedRoles.includes(role) &&
-          !reservation.exemptions.some(
-            (exemption) => exemption.theme === themeSlug && exemption.role === role
-          )
+          !reservation.allowedRoles.includes(role)
         ) {
           violations.push({ hue, reservation: reservation.id, role });
         }

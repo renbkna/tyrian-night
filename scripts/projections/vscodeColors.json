@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "contrastPairs": [
     {
       "foreground": "editor.selectionForeground",
@@ -970,7 +970,7 @@
     },
     {
       "scope": ["constant.language.null", "constant.language.nil", "constant.language.none"],
-      "roles": { "current": "null", "legacy": "constantLanguage" }
+      "role": "null"
     },
     {
       "scope": ["constant.language"],
@@ -1045,7 +1045,7 @@
     },
     {
       "scope": ["markup.underline.link"],
-      "roles": { "current": "file", "legacy": "type" }
+      "role": "file"
     },
     {
       "scope": ["markup.quote"],

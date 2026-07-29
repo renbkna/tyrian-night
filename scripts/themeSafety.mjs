@@ -13,29 +13,22 @@ import {
 import { opaqueHex } from './colorUtils.mjs';
 import { COLOR_VISION_MODES, simulateColorVision } from './colorVision.mjs';
 import { loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
-import { readThemeSources } from './themeSources.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const THEME_SAFETY_CONTRACT_PATH = path.join(ROOT, 'source', 'themeSafetyContract.json');
 const PAIRINGS = new Set(['adjacent', 'adjacent-cycle', 'all']);
 
 /** @typedef {Record<string, any>} JsonObject */
-/** @typedef {{ constraint: string; kind: string; reason: string; role: string; theme: string }} SafetyExemption */
 /** @typedef {{ id: string; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
 /** @typedef {{ id: string; pairing: string; roles: string[] }} SafetyStateComparison */
-/** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; exemptions: SafetyExemption[]; schemaVersion: 2; stateComparisons: SafetyStateComparison[]; themes: string[] }} ThemeSafetyContract */
+/** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; schemaVersion: 3; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
 /** @param {string} [contractPath] @returns {ThemeSafetyContract} */
 export function readThemeSafetyContract(contractPath = THEME_SAFETY_CONTRACT_PATH) {
   const root = path.resolve(path.dirname(contractPath), '..');
   const definition = loadThemeDefinitionContext(root);
-  const themeSlugs = readThemeSources(root, definition).map(({ slug }) => slug);
-  return validateThemeSafetyContract(
-    JSON.parse(fs.readFileSync(contractPath, 'utf8')),
-    definition,
-    themeSlugs
-  );
+  return validateThemeSafetyContract(JSON.parse(fs.readFileSync(contractPath, 'utf8')), definition);
 }
 
 /**
@@ -45,21 +38,15 @@ export function readThemeSafetyContract(contractPath = THEME_SAFETY_CONTRACT_PAT
  * has human-validation authority.
  * @param {unknown} value
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @param {readonly string[]} [themeSlugs]
  */
-export function validateThemeSafetyContract(
-  value,
-  definition = loadThemeDefinitionContext(ROOT),
-  themeSlugs = readThemeSources(definition.root, definition).map(({ slug }) => slug)
-) {
+export function validateThemeSafetyContract(value, definition = loadThemeDefinitionContext(ROOT)) {
   const contract = requireObject(value, 'root');
   requireExactFields(
     contract,
-    ['background', 'contrast', 'contrastPairs', 'exemptions', 'schemaVersion', 'stateComparisons'],
+    ['background', 'contrast', 'contrastPairs', 'schemaVersion', 'stateComparisons'],
     'root'
   );
-  invariant(contract.schemaVersion === 2, 'schemaVersion must be 2');
-  const themes = requireUniqueStrings(themeSlugs, 'source themes');
+  invariant(contract.schemaVersion === 3, 'schemaVersion must be 3');
   requireThemeRole(contract.background, definition, 'background');
   const ids = new Set();
   const contrast = requireArray(contract.contrast, 'contrast').map((raw, index) => {
@@ -96,27 +83,22 @@ export function validateThemeSafetyContract(
       return { ...entry, roles };
     }
   );
-  const exemptions = validateExemptions(contract.exemptions, themes, ids, definition);
   return /** @type {ThemeSafetyContract} */ (
     deepFreeze({
       background: contract.background,
       contrast,
       contrastPairs,
-      exemptions,
-      schemaVersion: 2,
+      schemaVersion: 3,
       stateComparisons,
-      themes,
     })
   );
 }
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- * @param {string} themeSlug
  * @param {ReturnType<typeof readThemeSafetyContract>} [contract]
  */
-export function auditThemeSafety(theme, themeSlug, contract = readThemeSafetyContract()) {
-  invariant(contract.themes.includes(themeSlug), `unknown theme slug ${themeSlug}`);
+export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
   const canvas = opaqueHex(themeColor(theme, contract.background));
   /** @type {JsonObject[]} */
   const violations = [];
@@ -161,12 +143,7 @@ export function auditThemeSafety(theme, themeSlug, contract = readThemeSafetyCon
       }
     }
   }
-  return violations.filter(
-    (violation) =>
-      !contract.exemptions.some((/** @type {SafetyExemption} */ exemption) =>
-        exemptionMatches(exemption, themeSlug, violation)
-      )
-  );
+  return violations;
 }
 
 /**
@@ -181,7 +158,6 @@ export function reportThemeColorDiagnostics(
   themeSlug,
   contract = readThemeSafetyContract()
 ) {
-  invariant(contract.themes.includes(themeSlug), `unknown theme slug ${themeSlug}`);
   const background = opaqueHex(themeColor(theme, contract.background));
   const roles = /** @type {string[]} */ (
     [
@@ -256,55 +232,6 @@ function channelPairs(roles, pairing) {
     }
   }
   return pairs;
-}
-
-/** @param {unknown} value @param {string[]} themes @param {Set<string>} constraintIds @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition */
-function validateExemptions(value, themes, constraintIds, definition) {
-  if (!Array.isArray(value)) {
-    throw new Error('Invalid theme safety contract: exemptions must be an array.');
-  }
-  const keys = new Set();
-  return value.map((raw, index) => {
-    const exemption = requireObject(raw, `exemptions[${index}]`);
-    requireExactFields(
-      exemption,
-      ['constraint', 'kind', 'reason', 'role', 'theme'],
-      `exemptions[${index}]`
-    );
-    invariant(themes.includes(exemption.theme), `exemptions[${index}] references unknown theme`);
-    invariant(
-      constraintIds.has(exemption.constraint),
-      `exemptions[${index}] references unknown constraint`
-    );
-    invariant(
-      typeof exemption.kind === 'string' && exemption.kind.length > 0,
-      `exemptions[${index}] requires kind`
-    );
-    invariant(
-      typeof exemption.reason === 'string' && exemption.reason.length >= 24,
-      `exemptions[${index}] requires a specific reason`
-    );
-    requireThemeRole(exemption.role, definition, `exemptions[${index}] role`);
-    const key = JSON.stringify([
-      exemption.theme,
-      exemption.constraint,
-      exemption.kind,
-      exemption.role,
-    ]);
-    invariant(!keys.has(key), `exemptions[${index}] is duplicated`);
-    keys.add(key);
-    return /** @type {SafetyExemption} */ ({ ...exemption });
-  });
-}
-
-/** @param {JsonObject} exemption @param {string} themeSlug @param {JsonObject} violation */
-function exemptionMatches(exemption, themeSlug, violation) {
-  return (
-    exemption.theme === themeSlug &&
-    exemption.constraint === violation.constraint &&
-    exemption.kind === violation.kind &&
-    exemption.role === violation.role
-  );
 }
 
 /** @param {unknown} value @param {string} owner @returns {JsonObject} */

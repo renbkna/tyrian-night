@@ -9,7 +9,7 @@ import {
 
 test('Island CLI failures preserve semantic code and mutation facts', () => {
   const failure = {
-    version: 1,
+    version: 2,
     code: 'permission-required',
     changed: true,
     desiredStateChanged: true,
@@ -39,14 +39,33 @@ test('Island CLI failures preserve semantic code and mutation facts', () => {
   });
 });
 
-test('legacy aggregate-only failure envelopes are rejected instead of inventing typed facts', () => {
+test('aggregate-only failure envelopes are rejected instead of inventing typed facts', () => {
+  expect(
+    parseIslandProcessFailure(
+      JSON.stringify({
+        version: 2,
+        code: 'blocked',
+        changed: true,
+        reason: 'mutation category is unknown',
+      })
+    )
+  ).toBeUndefined();
+});
+
+test('v1 failure envelopes are rejected by the current-only process protocol', () => {
   expect(
     parseIslandProcessFailure(
       JSON.stringify({
         version: 1,
         code: 'blocked',
-        changed: true,
-        reason: 'mutation category is unknown',
+        changed: false,
+        desiredStateChanged: false,
+        registryChanged: false,
+        physicalChanged: false,
+        externalDrift: false,
+        incompleteRecovery: false,
+        reason: 'old protocol',
+        causes: [],
       })
     )
   ).toBeUndefined();

@@ -7,7 +7,6 @@ import { expect, test } from 'bun:test';
 import {
   applyIslandShellForPlatform,
   readIslandShellApplyReadinessForPlatform,
-  seedIslandDesiredThemeForPlatform,
 } from '../apps/vscode/src/islandShell';
 import {
   ISLAND_APPLY_SUPPORTED_PLATFORMS,
@@ -27,10 +26,13 @@ test('Island apply support has one explicit platform authority', () => {
       platform,
       reason: expect.stringContaining('only patches VS Code on Linux'),
     });
+    expect(readIslandApplyPlatformSupport(platform).reason).toContain(
+      'current managed installations'
+    );
   }
 });
 
-test('unsupported apply and desired-state seed fail before filesystem admission', async () => {
+test('unsupported apply fails before filesystem admission', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-island-platform-'));
   const appRoot = path.join(root, 'missing-app-root');
   const cssSourcePath = path.join(root, 'missing.css');
@@ -50,15 +52,6 @@ test('unsupported apply and desired-state seed fail before filesystem admission'
       applyIslandShellForPlatform(
         { appRoot, cssSourcePath, themeVersion: 'test', registryHome },
         'win32'
-      )
-    ).rejects.toMatchObject({
-      code: 'unsupported',
-      changed: false,
-    });
-    await expect(
-      seedIslandDesiredThemeForPlatform(
-        { appRoot, desiredThemeId: 'tyrian-night.css', registryHome },
-        'darwin'
       )
     ).rejects.toMatchObject({
       code: 'unsupported',

@@ -8,7 +8,7 @@ import {
   getIslandCssFileForTheme,
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
-import type { IslandDesiredSeedResult, IslandShellResult } from './islandShell.js';
+import type { IslandShellResult } from './islandShell.js';
 import { readIslandApplyPlatformSupport } from './islandPlatform.js';
 import type {
   IslandUiApplySupervisionResult,
@@ -29,8 +29,6 @@ const LATER_ACTION = 'Later';
 const PERMISSION_ACTIONS = [TRUST_DOCS_ACTION, OPEN_DOCTOR_ACTION, LATER_ACTION] as const;
 const ISLAND_UI_TRUST_DOCS_URL =
   'https://github.com/renbkna/tyrian-night/blob/main/apps/vscode/README.md#island-ui';
-const LEGACY_ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
-const LEGACY_ISLAND_UI_CONFIG_KEY_PREFIX = 'tyrianNight.islandUi:';
 const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
 const UNINSTALL_WARNING_ACKNOWLEDGED_KEY = 'tyrianNight.uninstallWarningAcknowledged';
 const UNINSTALL_WARNING_MESSAGE =
@@ -38,11 +36,6 @@ const UNINSTALL_WARNING_MESSAGE =
 
 let extContext: vscode.ExtensionContext;
 let syncQueue = Promise.resolve();
-
-type LegacyStateMigration = {
-  theme: string;
-  keys: string[];
-};
 
 type IslandApplyResult = IslandUiApplySupervisionResult extends infer Result
   ? Result extends IslandUiApplySupervisionResult
@@ -65,13 +58,6 @@ type IslandRestoreResult = IslandUiRestoreSupervisionResult extends infer Result
           : object)
     : never
   : never;
-
-const DESIRED_SEED_RESULT_KINDS: {
-  [Kind in IslandDesiredSeedResult['kind']]: Kind;
-} = {
-  seeded: 'seeded',
-  existing: 'existing',
-};
 
 const APPLY_RESULT_KINDS: {
   [Kind in IslandUiApplySupervisionResult['kind']]: Kind;
@@ -96,17 +82,12 @@ function isTyrianTheme(theme: string | undefined): theme is string {
   return isTyrianThemeLabel(theme);
 }
 
-function getCssFileForTheme(theme: string): string {
-  return getIslandCssFileForTheme(theme) ?? getIslandCssFileForTheme(DEFAULT_TYRIAN_THEME_LABEL)!;
-}
-
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
 
   try {
-    const legacyMigration = await consumeLegacyState();
     registerCommands();
-    await enqueueSync(() => reconcileIslandUi(legacyMigration));
+    await enqueueSync(reconcileIslandUi);
     await maybePromptToSwitchTheme(getActiveTheme());
   } catch (error) {
     if (error instanceof IslandProcessFailure) {
@@ -116,42 +97,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const message = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Tyrian Night: ${message}`);
   }
-}
-
-async function consumeLegacyState(): Promise<LegacyStateMigration | undefined> {
-  const configKey = legacyIslandUiConfigKey(vscode.env.appRoot);
-  const storedConfig = extContext.globalState.get<unknown>(configKey);
-  const legacyEnabled = extContext.globalState.get<boolean | undefined>(
-    LEGACY_ISLAND_UI_ENABLED_KEY
-  );
-  let legacyTheme: string | undefined;
-
-  if (
-    typeof storedConfig === 'object' &&
-    storedConfig !== null &&
-    !Array.isArray(storedConfig) &&
-    'theme' in storedConfig &&
-    typeof storedConfig.theme === 'string' &&
-    isTyrianTheme(storedConfig.theme)
-  ) {
-    legacyTheme = storedConfig.theme;
-  } else if (legacyEnabled) {
-    legacyTheme = DEFAULT_TYRIAN_THEME_LABEL;
-  }
-
-  const keys = [
-    ...(storedConfig === undefined ? [] : [configKey]),
-    ...(legacyEnabled === undefined ? [] : [LEGACY_ISLAND_UI_ENABLED_KEY]),
-  ];
-
-  if (legacyTheme !== undefined) {
-    return { theme: legacyTheme, keys };
-  }
-
-  for (const key of keys) {
-    await extContext.globalState.update(key, undefined);
-  }
-  return undefined;
 }
 
 function registerCommands(): void {
@@ -183,53 +128,35 @@ function enqueueSync(task: () => Promise<void>): Promise<void> {
   return syncQueue;
 }
 
-async function reconcileIslandUi(legacyMigration: LegacyStateMigration | undefined): Promise<void> {
+async function reconcileIslandUi(): Promise<void> {
   if (!readIslandApplyPlatformSupport().supported) {
     const status = await readCurrentIslandStatus();
+
+    if (status.registration.kind === 'unsupported') {
+      throw new Error(
+        'Island UI desired-state record uses an unsupported format. Run Doctor before changing app files.'
+      );
+    }
 
     if (status.registration.kind !== 'absent' || status.managed || status.active) {
       await restoreCurrentIslandUi();
     }
 
-    if (legacyMigration !== undefined) {
-      for (const key of legacyMigration.keys) {
-        await extContext.globalState.update(key, undefined);
-      }
-    }
     return;
   }
 
-  if (legacyMigration !== undefined) {
-    const desiredThemeId = getCssFileForTheme(legacyMigration.theme);
-    const result = await runIslandCli(
-      [
-        'seed-desired-supervised',
-        '--app-root',
-        vscode.env.appRoot,
-        '--desired-theme-id',
-        desiredThemeId,
-      ],
-      validateDesiredSeedResult
-    );
-
-    if (result.kind === 'seeded' || result.kind === 'existing') {
-      for (const key of legacyMigration.keys) {
-        await extContext.globalState.update(key, undefined);
-      }
-    }
-  }
-
   const status = await readCurrentIslandStatus();
+
+  if (status.registration.kind === 'unsupported') {
+    throw new Error(
+      'Island UI desired-state record uses an unsupported format. Run Doctor before changing app files.'
+    );
+  }
 
   if (status.registration.kind === 'corrupt') {
     throw new Error(
       'Island UI desired-state record is corrupt. Run Doctor before changing app files.'
     );
-  }
-
-  if (status.registration.kind === 'legacy') {
-    await restoreCurrentIslandUi();
-    return;
   }
 
   if (status.registration.kind === 'absent') {
@@ -331,6 +258,12 @@ async function repairIslandUi(): Promise<void> {
   if (!(await admitIslandApplyCommand())) return;
 
   const status = await readCurrentIslandStatus();
+  if (status.registration.kind === 'unsupported') {
+    vscode.window.showErrorMessage(
+      'Tyrian Night: Island UI desired-state record uses an unsupported format. Run Doctor before changing app files.'
+    );
+    return;
+  }
   const desiredThemeId =
     status.registration.kind === 'valid' ? status.registration.desiredThemeId : undefined;
   const configuredCssFile = resolveDesiredCssFile(desiredThemeId);
@@ -381,7 +314,7 @@ async function applyIslandUi(
   },
   theme: string
 ): Promise<IslandApplyResult> {
-  const cssFile = getCssFileForTheme(theme);
+  const cssFile = getIslandCssFileForTheme(theme)!;
   return applyIslandCssFile(cssFile, options);
 }
 
@@ -699,24 +632,9 @@ async function restoreCurrentIslandUi(): Promise<void> {
 
   if (result.physicalChanged) {
     await promptForReload(
-      'Tyrian Night: Incomplete legacy Island UI state was restored. Reload VS Code to finish reverting.'
+      'Tyrian Night: Incomplete Island UI state was restored. Reload VS Code to finish reverting.'
     );
   }
-}
-
-function validateDesiredSeedResult(
-  value: unknown
-): Pick<IslandDesiredSeedResult, 'kind' | 'desiredThemeId'> {
-  const record = requireProtocolRecord(value, 'desired-state seed result');
-  const kind = requireProtocolDiscriminant(
-    record.kind,
-    DESIRED_SEED_RESULT_KINDS,
-    'desired-state seed result.kind'
-  );
-  if (record.desiredThemeId !== null && typeof record.desiredThemeId !== 'string') {
-    throw invalidProtocolField('desired-state seed result.desiredThemeId');
-  }
-  return { kind, desiredThemeId: record.desiredThemeId };
 }
 
 function validateApplyResult(value: unknown): IslandApplyResult {
@@ -1008,8 +926,4 @@ async function ensureUninstallWarningAcknowledged(options: {
 
   await extContext.globalState.update(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   return true;
-}
-
-function legacyIslandUiConfigKey(appRoot: string): string {
-  return `${LEGACY_ISLAND_UI_CONFIG_KEY_PREFIX}${appRoot}`;
 }

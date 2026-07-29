@@ -5,7 +5,11 @@ import path from 'node:path';
 
 import { contrastRatio } from '../scripts/colorScience.mjs';
 import { opaqueHex, parseHexColor } from '../scripts/colorUtils.mjs';
-import { buildDesktopThemeAssets } from '../scripts/desktopThemes.mjs';
+import {
+  buildDesktopThemeAssets,
+  desktopThemeAssetPaths,
+  isDesktopThemeId,
+} from '../scripts/desktopThemes.mjs';
 import { themeColor } from '../scripts/themeDefinition.mjs';
 import { readSourceTheme, SOURCE_THEMES } from '../scripts/themeSources.mjs';
 import { flattenCssFile } from '../scripts/union/flattenCss.mjs';
@@ -50,6 +54,26 @@ const UNION_FORBIDDEN_CONTRACT = [
 test('desktop theme assets match the neutral theme definitions', () => {
   for (const [assetPath, content] of assets) {
     expect(fs.readFileSync(assetPath, 'utf8')).toBe(content);
+  }
+});
+
+test('desktop theme identifiers accept only Tyrian package IDs from source slugs', () => {
+  for (const source of SOURCE_THEMES) {
+    expect(isDesktopThemeId(desktopThemeAssetPaths(source.slug).themeId)).toBe(true);
+  }
+  for (const slug of ['tyrian-2d-night', 'tyrian-n-i-g-h-t']) {
+    expect(isDesktopThemeId(desktopThemeAssetPaths(slug).themeId)).toBe(true);
+  }
+
+  for (const invalidId of [
+    'Tyrian',
+    'CustomUser',
+    'TyrianNight.colors',
+    'TyrianNight/contents',
+    'Tyrian-Night',
+    'Tyriannight',
+  ]) {
+    expect(isDesktopThemeId(invalidId)).toBe(false);
   }
 });
 
@@ -181,7 +205,7 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
       `/*
  * ${theme.name} Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * Palette and shape tokens are generated from neutral source/themes roles by scripts/desktopThemes.mjs.
+ * Palette and shape tokens are generated from the family contract and neutral source-theme roles by scripts/desktopThemes.mjs.
  */
 
 :root {

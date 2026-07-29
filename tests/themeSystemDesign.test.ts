@@ -1,15 +1,22 @@
-import { createHash } from 'node:crypto';
-
 import { expect, test } from 'bun:test';
 
-import { SOURCE_THEMES, readSourceTheme, readSourceThemeRecipe } from '../scripts/themeSources.mjs';
-import { VSCODE_PROJECTION, syntaxColor, uiColor } from '../scripts/themeDefinition.mjs';
+import { contrastRatio, hexToOklch, hueDistance } from '../scripts/colorScience.mjs';
+import {
+  SOURCE_THEMES,
+  loadThemeRepository,
+  readSourceTheme,
+  readSourceThemeRecipe,
+} from '../scripts/themeSources.mjs';
+import {
+  VSCODE_PROJECTION,
+  syntaxColor,
+  themeColor,
+  uiColor,
+} from '../scripts/themeDefinition.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
 import { buildZedThemeFamily } from '../scripts/zedTheme.mjs';
 
-const FROZEN_LEGACY_V2_SHA256 = 'b906660b139a56decb054037bce3d59f0f4675d8aed90a044630f7fd2845efc8';
-
-test('the family exposes five deliberate visual poles plus one explicit legacy profile', () => {
+test('the family exposes six schema-v5 palettes through one current recipe path', () => {
   expect(SOURCE_THEMES.map(({ slug }) => slug)).toEqual([
     'tyrian-night',
     'tyrian-nocturne',
@@ -19,51 +26,145 @@ test('the family exposes five deliberate visual poles plus one explicit legacy p
     'tyrian-night-old',
   ]);
 
-  const current = SOURCE_THEMES.filter(({ slug }) => slug !== 'tyrian-night-old');
   expect(
-    current.every((source) => readSourceThemeRecipe(source).bindingProfile === 'current')
+    SOURCE_THEMES.every((source) => {
+      const recipe = readSourceThemeRecipe(source);
+      return (
+        recipe.schemaVersion === 5 &&
+        !Object.hasOwn(recipe, 'appearance') &&
+        !Object.hasOwn(recipe, 'hueProfile') &&
+        !Object.hasOwn(recipe, 'pigments')
+      );
+    })
   ).toBe(true);
-  const legacySource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old');
-  expect(legacySource).toBeDefined();
-  expect(readSourceThemeRecipe(legacySource!).bindingProfile).toBe('legacy');
+  expect(
+    loadThemeRepository().definition.familyContract.branches['tyrian-night-old']!.hueProfile
+  ).toBe('core');
 
-  const themes = current.map((source) => readSourceTheme(source));
+  const themes = SOURCE_THEMES.map((source) => readSourceTheme(source));
   expect(new Set(themes.map((theme) => uiColor(theme, 'surface.canvas'))).size).toBe(themes.length);
-  expect(new Set(themes.map((theme) => uiColor(theme, 'accent.primary'))).size).toBe(themes.length);
+  const paletteFingerprints = themes.map(({ brackets, syntax, terminal, ui, vscode }) =>
+    JSON.stringify({ brackets, syntax, terminal, ui, vscode })
+  );
+  expect(new Set(paletteFingerprints).size).toBe(themes.length);
 });
 
-test('the legacy schema migration preserves the complete resolved v2 palette', () => {
+test('the family contract fixes hue identity and proves each declared energy tier', () => {
+  const repository = loadThemeRepository();
+  const family = repository.definition.familyContract;
+  expect(family.canonical).toBe('tyrian-nocturne');
+  expect(repository.sources.find(({ isDefault }) => isDefault)?.slug).toBe(family.canonical);
+  expect(family.energyLine.hueProfile).toBe('core');
+  expect(
+    Object.values(family.energyLine.variants).every((variant) => !('hueProfile' in variant))
+  ).toBe(true);
+  expect(family.semanticPigments).toEqual([
+    'ui:accent.primary',
+    'syntax:keyword',
+    'syntax:function',
+    'syntax:type',
+    'syntax:data',
+    'syntax:string',
+    'syntax:regexp',
+  ]);
+  expect(family.energyLine.variants['tyrian-night'].semanticChromaRatio).toEqual({
+    minimum: 0.6,
+    maximum: 0.7,
+  });
+  expect(family.energyLine.variants['tyrian-nocturne'].semanticChromaRatio).toEqual({
+    minimum: 1,
+    maximum: 1,
+  });
+  expect(family.energyLine.variants['tyrian-abyss'].semanticChromaRatio).toEqual({
+    minimum: 1.3,
+    maximum: 1.45,
+  });
+
+  const themes = Object.fromEntries(
+    repository.sources
+      .filter(({ slug }) => slug !== 'tyrian-night-old')
+      .map((source) => [
+        source.slug,
+        readSourceTheme(source, repository.root, repository.definition),
+      ])
+  );
+  const semanticColors = (slug: string) => {
+    const theme = themes[slug];
+    return family.semanticPigments.map((pigment) => themeColor(theme, pigment));
+  };
+  const semanticChroma = (slug: string) => {
+    const colors = semanticColors(slug);
+    return colors.reduce((sum, color) => sum + hexToOklch(color).C, 0) / colors.length;
+  };
+  const canvasLightness = (slug: string) => hexToOklch(uiColor(themes[slug], 'surface.canvas')).L;
+  const semanticContrast = (slug: string) => {
+    const canvas = uiColor(themes[slug], 'surface.canvas');
+    const colors = semanticColors(slug);
+    return colors.reduce((sum, color) => sum + contrastRatio(color, canvas), 0) / colors.length;
+  };
+  const nocturneHues = semanticColors('tyrian-nocturne').map((color) => hexToOklch(color).h);
+
+  for (const slug of ['tyrian-night', 'tyrian-abyss']) {
+    const hueDistances = semanticColors(slug).map((color, index) =>
+      hueDistance(nocturneHues[index], hexToOklch(color).h)
+    );
+    expect(Math.max(...hueDistances)).toBeLessThan(1);
+  }
+  for (const slug of ['tyrian-pastel', 'tyrian-dawn']) {
+    const hueDistances = semanticColors(slug).map((color, index) =>
+      hueDistance(nocturneHues[index], hexToOklch(color).h)
+    );
+    expect(Math.max(...hueDistances)).toBeLessThan(12);
+  }
+
+  const nocturneChroma = semanticChroma('tyrian-nocturne');
+  expectWithin(semanticChroma('tyrian-night') / nocturneChroma, 0.6, 0.7);
+  expectWithin(semanticChroma('tyrian-abyss') / nocturneChroma, 1.3, 1.45);
+  expectWithin(semanticChroma('tyrian-abyss'), 0.19, 0.2);
+  expectWithin(semanticContrast('tyrian-night'), 4.8, 5.3);
+  expectWithin(semanticContrast('tyrian-nocturne'), 5.8, 6.4);
+  expectWithin(semanticContrast('tyrian-abyss'), 6.6, 7.3);
+  expect(canvasLightness('tyrian-abyss')).toBeLessThan(canvasLightness('tyrian-nocturne'));
+  expect(canvasLightness('tyrian-nocturne')).toBeLessThan(canvasLightness('tyrian-night'));
+  expect(canvasLightness('tyrian-dawn')).toBeGreaterThan(0.95);
+});
+
+test('the historical-reference branch uses current bindings and opacity policy', () => {
   const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old');
   expect(source).toBeDefined();
-  const legacy = readSourceTheme(source!);
-  const historicalPalette = structuredClone(legacy);
-  delete historicalPalette.vscode['chrome.statusBar.offlineForeground'];
-  delete historicalPalette.vscode['input.validation.errorForeground'];
-  delete historicalPalette.vscode['input.validation.infoForeground'];
-  delete historicalPalette.vscode['input.validation.warningForeground'];
-
-  const canonical = JSON.stringify(sortJson(historicalPalette));
-  expect(createHash('sha256').update(canonical).digest('hex')).toBe(FROZEN_LEGACY_V2_SHA256);
-  expect(legacy.vscode['chrome.statusBar.offlineForeground']).toBe('#C09040');
-  const vscode = buildVscodeTheme(legacy, VSCODE_PROJECTION).colors;
-  expect(vscode['statusBarItem.offlineForeground']).toBe('#C09040');
-  expect(vscode['inputValidation.errorForeground']).toBe(legacy.ui['status.error']);
-  expect(vscode['inputValidation.infoForeground']).toBe(legacy.ui['status.info']);
-  expect(vscode['inputValidation.warningForeground']).toBe(legacy.ui['status.warning']);
+  const historical = readSourceTheme(source!);
+  const repository = loadThemeRepository();
+  const recipe = readSourceThemeRecipe(source!, repository.root, repository.definition);
+  expect(recipe).toEqual(expect.objectContaining({ schemaVersion: 5 }));
+  expect(recipe).not.toHaveProperty('appearance');
+  expect(recipe).not.toHaveProperty('hueProfile');
+  expect(repository.definition.familyContract.branches['tyrian-night-old']).toEqual({
+    hueProfile: 'core',
+    kind: 'historical-reference',
+    maximumSemanticHueDistance: 0,
+  });
+  expect(historical.vscode['chrome.statusBar.offlineForeground']).toBe(
+    historical.ui['text.primary']
+  );
+  const vscode = buildVscodeTheme(historical, VSCODE_PROJECTION).colors;
+  expect(vscode['statusBarItem.offlineForeground']).toBe(historical.ui['text.primary']);
+  expect(vscode['inputValidation.errorForeground']).toBe(historical.ui['text.primary']);
+  expect(vscode['inputValidation.infoForeground']).toBe(historical.ui['text.primary']);
+  expect(vscode['inputValidation.warningForeground']).toBe(historical.ui['text.primary']);
 });
 
-test('current editor projections share semantic bindings while legacy keeps its compatibility mapping', () => {
+test('all editor projections share the current semantic bindings', () => {
   const family = buildZedThemeFamily() as {
     themes: Array<{ name: string; style: { syntax: Record<string, { color: string }> } }>;
   };
   const current = family.themes.find(({ name }) => name === 'Tyrian Nocturne')!;
-  const legacy = family.themes.find(({ name }) => name === 'Tyrian Night Old')!;
+  const historical = family.themes.find(({ name }) => name === 'Tyrian Night Old')!;
   const currentSource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne')!;
   const currentTheme = readSourceTheme(currentSource);
-  const legacySource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
-  const legacyTheme = readSourceTheme(legacySource);
-  const currentVscode = buildVscodeTheme(currentTheme, VSCODE_PROJECTION, 'current');
-  const legacyVscode = buildVscodeTheme(legacyTheme, VSCODE_PROJECTION, 'legacy');
+  const historicalSource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
+  const historicalTheme = readSourceTheme(historicalSource);
+  const currentVscode = buildVscodeTheme(currentTheme, VSCODE_PROJECTION);
+  const historicalVscode = buildVscodeTheme(historicalTheme, VSCODE_PROJECTION);
   const grammarColor = (theme: typeof currentVscode, scope: string) =>
     theme.tokenColors.find((token) => token.scope.includes(scope))!.settings.foreground;
 
@@ -71,28 +172,25 @@ test('current editor projections share semantic bindings while legacy keeps its 
   expect(current.style.syntax.link_uri.color).not.toBe(current.style.syntax.type.color);
   expect(current.style.syntax['constant.builtin'].color).toBe(syntaxColor(currentTheme, 'null'));
   expect(current.style.syntax.boolean.color).toBe(syntaxColor(currentTheme, 'constantLanguage'));
-  expect(legacy.style.syntax.link_uri.color).toBe(legacy.style.syntax.type.color);
-  expect(legacy.style.syntax['constant.builtin'].color).toBe(legacy.style.syntax.boolean.color);
+  expect(historical.style.syntax.link_uri.color).toBe(syntaxColor(historicalTheme, 'file'));
+  expect(historical.style.syntax['constant.builtin'].color).toBe(
+    syntaxColor(historicalTheme, 'null')
+  );
   expect(grammarColor(currentVscode, 'constant.language.null')).toBe(
     syntaxColor(currentTheme, 'null')
   );
-  expect(grammarColor(legacyVscode, 'constant.language.null')).toBe(
-    syntaxColor(legacyTheme, 'constantLanguage')
+  expect(grammarColor(historicalVscode, 'constant.language.null')).toBe(
+    syntaxColor(historicalTheme, 'null')
   );
   expect(grammarColor(currentVscode, 'markup.underline.link')).toBe(
     syntaxColor(currentTheme, 'file')
   );
-  expect(grammarColor(legacyVscode, 'markup.underline.link')).toBe(
-    syntaxColor(legacyTheme, 'type')
+  expect(grammarColor(historicalVscode, 'markup.underline.link')).toBe(
+    syntaxColor(historicalTheme, 'file')
   );
 });
 
-function sortJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortJson);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, sortJson(entry)])
-  );
+function expectWithin(value: number, minimum: number, maximum: number): void {
+  expect(value).toBeGreaterThanOrEqual(minimum);
+  expect(value).toBeLessThanOrEqual(maximum);
 }

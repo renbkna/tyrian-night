@@ -26,8 +26,8 @@ if (sources.length === 0) throw new Error(`Unknown source theme '${requestedThem
 let failed = false;
 for (const source of sources) {
   const theme = readSourceTheme(source, repository.root, repository.definition);
-  const violations = auditThemeSafety(theme, source.slug, contract);
-  const pigmentViolations = auditThemePigmentPolicy(theme, source.slug, pigmentPolicy);
+  const violations = auditThemeSafety(theme, contract);
+  const pigmentViolations = auditThemePigmentPolicy(theme, pigmentPolicy);
   const diagnostics = reportThemeColorDiagnostics(theme, source.slug, contract);
   console.log(
     `${source.slug}: accessibility=${violations.length === 0 ? 'pass' : `${violations.length} violation(s)`}; ` +

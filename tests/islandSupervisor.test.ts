@@ -25,8 +25,6 @@ import {
   buildIslandPatchPaths,
   buildIslandRegistryLockPath,
   buildIslandRootLockPath,
-  buildLegacyManagedRootsRegistryPath,
-  buildLegacyRetirementMarkerPath,
   buildManagedRootRecordPath,
   buildManagedRootsDirectoryPath,
 } from '../apps/vscode/src/islandPatchContract';
@@ -84,12 +82,19 @@ test('supervised apply recovers a committing journal before deciding it is curre
   const id = crypto.randomUUID();
   const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
   const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
-  await fs.writeFile(backupPath, originalHtml, 'utf8');
+  const retiredPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'retired');
+  await fs.writeFile(paths.workbenchHtmlPath, originalHtml, 'utf8');
+  const originalStats = await fs.lstat(paths.workbenchHtmlPath);
+  await fs.copyFile(paths.workbenchHtmlPath, backupPath);
+  await fs.writeFile(stagedPath, desiredHtml, 'utf8');
+  await fs.chmod(stagedPath, originalStats.mode);
+  await fs.rename(paths.workbenchHtmlPath, retiredPath);
+  await fs.link(stagedPath, paths.workbenchHtmlPath);
   await fs.writeFile(
     paths.transactionJournalPath,
     JSON.stringify(
       {
-        version: 3,
+        version: 4,
         id,
         appRoot,
         phase: 'committing',
@@ -101,6 +106,10 @@ test('supervised apply recovers a committing journal before deciding it is curre
             existed: true,
             originalChecksum: sha256Base64(originalHtml),
             desiredChecksum: sha256Base64(desiredHtml),
+            originalMode: Number(originalStats.mode),
+            originalDevice: String(originalStats.dev),
+            originalInode: String(originalStats.ino),
+            retiredPath,
           },
         ],
       },
@@ -121,6 +130,8 @@ test('supervised apply recovers a committing journal before deciding it is curre
   expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(desiredHtml);
   await expect(fs.stat(paths.transactionJournalPath)).rejects.toThrow();
   await expect(fs.stat(backupPath)).rejects.toThrow();
+  await expect(fs.stat(stagedPath)).rejects.toThrow();
+  await expect(fs.stat(retiredPath)).rejects.toThrow();
 });
 
 test('supervised apply blocks a symlinked target before desired or physical mutation', async () => {
@@ -331,57 +342,11 @@ test('supervised apply converts a read-only app root into permission-required', 
   }
 });
 
-test('non-ready supervised apply returns before legacy registry migration', async () => {
-  const appRoot = await createAppRoot('readonly-no-migration');
-  const cssSource = await writeCssSource('readonly-no-migration.css');
-  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
-  const retirementPath = buildLegacyRetirementMarkerPath(registryHome);
-  const paths = buildIslandPatchPaths(appRoot);
-  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-  await fs.writeFile(
-    legacyPath,
-    JSON.stringify({ version: 1, appRoots: [appRoot] }, null, 2).concat('\n'),
-    'utf8'
-  );
-
-  try {
-    await fs.chmod(paths.workbenchDirPath, 0o555);
-    await fs.chmod(paths.workbenchHtmlPath, 0o444);
-    await fs.chmod(paths.productJsonPath, 0o444);
-    await expect(
-      applyIslandUiSupervised({
-        appRoot,
-        cssSourcePath: cssSource,
-        themeVersion: 'test',
-        registryHome,
-      })
-    ).resolves.toMatchObject({
-      kind: 'permission-required',
-      changed: false,
-      desiredStateChanged: false,
-      registryChanged: false,
-      physicalChanged: false,
-    });
-    expect((await fs.stat(legacyPath)).isFile()).toBe(true);
-    await expect(fs.stat(retirementPath)).rejects.toThrow();
-    await expect(fs.stat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
-  } finally {
-    await fs.chmod(paths.workbenchDirPath, 0o755);
-    await fs.chmod(paths.workbenchHtmlPath, 0o644);
-    await fs.chmod(paths.productJsonPath, 0o644);
-  }
-});
-
-test('lock-held readiness revalidation precedes every registry initialization mutation', async () => {
+test('lock-held readiness revalidation precedes registry initialization', async () => {
   const appRoot = await createAppRoot('readiness-flip-before-init');
   const cssSource = await writeCssSource('readiness-flip-before-init.css');
-  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
-  const retirementPath = buildLegacyRetirementMarkerPath(registryHome);
   const managedDirectory = buildManagedRootsDirectoryPath(registryHome);
   const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
-  const legacyContent = JSON.stringify({ version: 1, appRoots: [appRoot] }, null, 2).concat('\n');
-  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-  await fs.writeFile(legacyPath, legacyContent, 'utf8');
 
   let releaseRegistryLock!: () => void;
   let registryLockAcquired!: () => void;
@@ -420,42 +385,8 @@ test('lock-held readiness revalidation precedes every registry initialization mu
     registryChanged: false,
   });
   await registryHolder;
-  expect(await fs.readFile(legacyPath, 'utf8')).toBe(legacyContent);
   await expect(fs.stat(managedDirectory)).rejects.toThrow();
-  await expect(fs.stat(retirementPath)).rejects.toThrow();
   await expect(fs.stat(recordPath)).rejects.toThrow();
-});
-
-test('supervised restore preserves partial legacy migration mutation facts', async () => {
-  const firstRoot = path.join(testRoot, 'supervised-partial-migration-a-first');
-  const collidingRoot = path.join(testRoot, 'supervised-partial-migration-z-collision');
-  const legacyPath = buildLegacyManagedRootsRegistryPath(registryHome);
-  const collisionPath = buildManagedRootRecordPath(collidingRoot, registryHome);
-  await fs.mkdir(firstRoot);
-  await fs.mkdir(collidingRoot);
-  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-  await fs.writeFile(
-    legacyPath,
-    JSON.stringify({ version: 1, appRoots: [firstRoot, collidingRoot] }, null, 2).concat('\n'),
-    'utf8'
-  );
-  await fs.mkdir(path.dirname(collisionPath), { recursive: true });
-  await fs.writeFile(
-    collisionPath,
-    JSON.stringify({ version: 1, appRoot: firstRoot }, null, 2).concat('\n'),
-    'utf8'
-  );
-
-  await expect(restoreIslandUiSupervised({ registryHome })).resolves.toMatchObject({
-    kind: 'blocked',
-    changed: true,
-    registryChanged: true,
-    enumerationFailure: {
-      changed: true,
-      registryChanged: true,
-      reason: expect.stringContaining('hash collision'),
-    },
-  });
 });
 
 test('missing registered roots receive a typed prune recommendation before permission advice', async () => {
@@ -483,8 +414,8 @@ test('missing registered roots receive a typed prune recommendation before permi
   });
 });
 
-test('legacy registrations receive the supervisor-owned restore remedy', async () => {
-  const appRoot = await createAppRoot('legacy-registration-remedy');
+test('unsupported registration records require manual recovery', async () => {
+  const appRoot = await createAppRoot('unsupported-registration-remedy');
   const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
   await fs.mkdir(path.dirname(recordPath), { recursive: true });
   await fs.writeFile(
@@ -499,9 +430,10 @@ test('legacy registrations receive the supervisor-owned restore remedy', async (
     statuses: [
       {
         appRoot,
-        registrationState: 'legacy',
+        registrationState: 'unsupported',
+        registered: false,
         classification: 'broken-backup',
-        recommendedAction: 'restore',
+        recommendedAction: 'manual-recovery',
       },
     ],
   });
@@ -703,8 +635,8 @@ test('missing-root registry cleanup failures are returned and classified', async
     await fs.chmod(registryDirectory, 0o555);
     await expect(restoreIslandUiSupervised({ registryHome })).resolves.toMatchObject({
       kind: 'permission-required',
-      changed: true,
-      registryChanged: true,
+      changed: false,
+      registryChanged: false,
       failedAppRoots: [
         {
           appRoot,
@@ -760,7 +692,7 @@ function productJson(checksum: string): string {
 function transactionTemporaryPath(
   filePath: string,
   transactionId: string,
-  kind: 'backup' | 'stage'
+  kind: 'backup' | 'stage' | 'retired'
 ): string {
   return path.join(
     path.dirname(filePath),

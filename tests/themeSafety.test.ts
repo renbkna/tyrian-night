@@ -12,18 +12,21 @@ import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 const contract = readThemeSafetyContract();
 
 describe('theme safety authority', () => {
+  test('rejects the retired sole-current schema version', () => {
+    const retired = structuredClone(contract);
+    retired.schemaVersion = 2;
+    expect(() => validateThemeSafetyContract(retired)).toThrow('schemaVersion must be 3');
+  });
+
   test('hard policy cannot grow aesthetic ranking fields', () => {
     const source = JSON.parse(fs.readFileSync('source/themeSafetyContract.json', 'utf8'));
     expect(source).not.toHaveProperty('themes');
-    expect(contract.themes).toEqual(SOURCE_THEMES.map(({ slug }) => slug));
     expect(Object.keys(contract).toSorted()).toEqual([
       'background',
       'contrast',
       'contrastPairs',
-      'exemptions',
       'schemaVersion',
       'stateComparisons',
-      'themes',
     ]);
 
     const aesthetic = structuredClone(source) as Record<string, unknown>;
@@ -56,31 +59,21 @@ describe('theme safety authority', () => {
       expect.arrayContaining(['ansi-bright-warm-states', 'ansi-bright-cool-states'])
     );
     for (const source of SOURCE_THEMES) {
-      expect(auditThemeSafety(readSourceTheme(source), source.slug, contract)).toEqual([]);
+      expect(auditThemeSafety(readSourceTheme(source), contract)).toEqual([]);
     }
   });
 
-  test('every compatibility exemption is legacy-only and matches one live violation', () => {
-    const withoutExemptions = { ...contract, exemptions: [] };
-    const unexempted = SOURCE_THEMES.flatMap((source) =>
-      auditThemeSafety(readSourceTheme(source), source.slug, withoutExemptions).map(
-        (violation) => ({
-          ...violation,
-          theme: source.slug,
-        })
-      )
+  test('the historical-reference theme follows the same safety gates', () => {
+    const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
+    const unreadable = structuredClone(readSourceTheme(source));
+    unreadable.ui['text.muted'] = unreadable.ui['surface.canvas'];
+    expect(auditThemeSafety(unreadable, contract)).toContainEqual(
+      expect.objectContaining({
+        constraint: 'readable-supporting-ui',
+        kind: 'wcag-minimum-contrast',
+        role: 'ui:text.muted',
+      })
     );
-
-    expect(contract.exemptions.every(({ theme }) => theme === 'tyrian-night-old')).toBe(true);
-    expect(unexempted).toHaveLength(contract.exemptions.length);
-    const violationKeys = unexempted.map((violation) =>
-      JSON.stringify([violation.theme, violation.constraint, violation.kind, violation.role])
-    );
-    for (const exemption of contract.exemptions) {
-      expect(violationKeys).toContain(
-        JSON.stringify([exemption.theme, exemption.constraint, exemption.kind, exemption.role])
-      );
-    }
   });
 
   test('readability and identical state colors fail at their owning boundary', () => {
@@ -88,7 +81,7 @@ describe('theme safety authority', () => {
     const theme = readSourceTheme(source);
     const unreadable = structuredClone(theme);
     unreadable.syntax.function = unreadable.ui['surface.canvas'];
-    expect(auditThemeSafety(unreadable, source.slug, contract)).toContainEqual(
+    expect(auditThemeSafety(unreadable, contract)).toContainEqual(
       expect.objectContaining({
         constraint: 'readable-syntax',
         kind: 'wcag-minimum-contrast',
@@ -98,7 +91,7 @@ describe('theme safety authority', () => {
 
     const collapsedState = structuredClone(theme);
     collapsedState.ui['status.success'] = collapsedState.ui['status.error'];
-    expect(auditThemeSafety(collapsedState, source.slug, contract)).toContainEqual(
+    expect(auditThemeSafety(collapsedState, contract)).toContainEqual(
       expect.objectContaining({
         constraint: 'status-states',
         kind: 'identical-independent-state-color',
@@ -109,7 +102,7 @@ describe('theme safety authority', () => {
     const collapsedBrightAnsi = structuredClone(theme);
     collapsedBrightAnsi.terminal['ansi.brightCyan'] =
       collapsedBrightAnsi.terminal['ansi.brightMagenta'];
-    expect(auditThemeSafety(collapsedBrightAnsi, source.slug, contract)).toContainEqual(
+    expect(auditThemeSafety(collapsedBrightAnsi, contract)).toContainEqual(
       expect.objectContaining({
         constraint: 'ansi-bright-cool-states',
         kind: 'identical-independent-state-color',

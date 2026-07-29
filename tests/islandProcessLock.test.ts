@@ -94,7 +94,7 @@ test('a reused live pid does not impersonate the recorded process generation', a
   await fs.writeFile(
     lockKey,
     JSON.stringify({
-      version: 2,
+      version: 3,
       pid: process.pid,
       token: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -109,6 +109,40 @@ test('a reused live pid does not impersonate the recorded process generation', a
     );
     await expect(fs.stat(lockKey)).rejects.toThrow();
   } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('new claims publish the current v3 owner format', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-v3-write-test-'));
+  const lockKey = path.join(testRoot, 'current.lock');
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered!: () => void;
+  const enteredLock = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+
+  try {
+    const owner = withIslandProcessLock(lockKey, async () => {
+      entered();
+      await held;
+    });
+    await enteredLock;
+    const persistedOwner = JSON.parse(await fs.readFile(lockKey, 'utf8'));
+    expect(persistedOwner).toMatchObject({
+      version: 3,
+      pid: process.pid,
+    });
+    expect(
+      persistedOwner.processIdentity === null || typeof persistedOwner.processIdentity === 'string'
+    ).toBe(true);
+    release();
+    await owner;
+  } finally {
+    release();
     await fs.rm(testRoot, { force: true, recursive: true });
   }
 });
@@ -199,16 +233,7 @@ test('claim inspection fails closed after bounded continuous replacement', async
 test('concurrent dead-owner reapers elect once and never unlink a replacement generation', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-reaper-test-'));
   const lockKey = path.join(testRoot, 'shared.lock');
-  await fs.writeFile(
-    lockKey,
-    JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      token: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    }).concat('\n'),
-    'utf8'
-  );
+  await fs.writeFile(lockKey, JSON.stringify(deadLockOwner()).concat('\n'), 'utf8');
   let activeOwners = 0;
   let maximumActiveOwners = 0;
 
@@ -248,25 +273,90 @@ test('an old unidentifiable claim fails closed and is never stolen by age', asyn
   }
 });
 
-test('a PID-only live claim is reported as ambiguous within the acquisition bound', async () => {
+test('a null-identity v3 claim remains ambiguous and is never reaped', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-null-identity-test-'));
+  const lockKey = path.join(testRoot, 'null-identity.lock');
+  const content = JSON.stringify({
+    version: 3,
+    pid: process.pid,
+    token: crypto.randomUUID(),
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    processIdentity: null,
+  }).concat('\n');
+  await fs.writeFile(lockKey, content, 'utf8');
+  let actionEntered = false;
+
+  try {
+    await expect(
+      withIslandProcessLockCore(
+        lockKey,
+        async () => {
+          actionEntered = true;
+        },
+        { timeoutMs: 60, retryMs: 5 }
+      )
+    ).rejects.toThrow('ambiguous process identity');
+    expect(actionEntered).toBe(false);
+    expect(await fs.readFile(lockKey, 'utf8')).toBe(content);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('a v2 owner claim is rejected as unknown and left untouched', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-pid-only-test-'));
   const lockKey = path.join(testRoot, 'pid-only.lock');
-  await fs.writeFile(
-    lockKey,
-    JSON.stringify({
-      version: 1,
-      pid: process.pid,
-      token: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    }).concat('\n'),
-    'utf8'
-  );
+  const content = JSON.stringify({
+    ...previousLockOwnerV2(),
+    pid: process.pid,
+  }).concat('\n');
+  await fs.writeFile(lockKey, content, 'utf8');
 
   try {
     await expect(
       withIslandProcessLockCore(lockKey, async () => undefined, { timeoutMs: 60, retryMs: 5 })
-    ).rejects.toThrow('ambiguous PID-only process identity');
-    expect(await fs.readFile(lockKey, 'utf8')).toContain(`"pid":${process.pid}`);
+    ).rejects.toThrow('unidentifiable and cannot be proven safe to reclaim');
+    expect(await fs.readFile(lockKey, 'utf8')).toBe(content);
+  } finally {
+    await fs.rm(testRoot, { force: true, recursive: true });
+  }
+});
+
+test('a v1 reaper election is rejected without touching its claim', async () => {
+  const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-old-reaper-test-'));
+  const lockKey = path.join(testRoot, 'old-reaper.lock');
+  const claimContent = JSON.stringify(deadLockOwner()).concat('\n');
+  await fs.writeFile(lockKey, claimContent, 'utf8');
+  const claimStats = await fs.lstat(lockKey);
+  const claimOwner = JSON.parse(claimContent) as { token: string };
+  const expected = {
+    dev: String(claimStats.dev),
+    ino: String(claimStats.ino),
+    contentHash: crypto.createHash('sha256').update(claimContent, 'utf8').digest('hex'),
+    ownerToken: claimOwner.token,
+  };
+  const generationId = crypto
+    .createHash('sha256')
+    .update(
+      `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
+      'utf8'
+    )
+    .digest('hex');
+  const electionPath = `${lockKey}.reap-${generationId}`;
+  const electionContent = JSON.stringify({
+    version: 1,
+    expected,
+    reaper: previousLockOwnerV2(),
+    predecessorToken: null,
+  }).concat('\n');
+  await fs.writeFile(electionPath, electionContent, 'utf8');
+
+  try {
+    await expect(
+      withIslandProcessLockCore(lockKey, async () => undefined, { timeoutMs: 60, retryMs: 5 })
+    ).rejects.toThrow('unidentifiable and cannot be recovered safely');
+    expect(await fs.readFile(lockKey, 'utf8')).toBe(claimContent);
+    expect(await fs.readFile(electionPath, 'utf8')).toBe(electionContent);
   } finally {
     await fs.rm(testRoot, { force: true, recursive: true });
   }
@@ -279,12 +369,7 @@ test('a parseable crash-left owner candidate is scavenged before acquisition', a
   const candidatePath = path.join(testRoot, `.${path.basename(lockKey)}.${token}.owner`);
   await fs.writeFile(
     candidatePath,
-    JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      token,
-      createdAt: new Date(Date.now() - 60_000).toISOString(),
-    }).concat('\n'),
+    JSON.stringify(deadLockOwner(token, new Date(Date.now() - 60_000).toISOString())).concat('\n'),
     'utf8'
   );
 
@@ -299,12 +384,7 @@ test('a parseable crash-left owner candidate is scavenged before acquisition', a
 test('cyclic persisted reaper metadata fails within the acquisition bound', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-cycle-test-'));
   const lockKey = path.join(testRoot, 'cycle.lock');
-  const claimContent = JSON.stringify({
-    version: 1,
-    pid: 2_147_483_647,
-    token: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  }).concat('\n');
+  const claimContent = JSON.stringify(deadLockOwner()).concat('\n');
   await fs.writeFile(lockKey, claimContent, 'utf8');
   const stats = await fs.lstat(lockKey);
   const owner = JSON.parse(claimContent) as { token: string };
@@ -337,14 +417,9 @@ test('cyclic persisted reaper metadata fails within the acquisition bound', asyn
     await fs.writeFile(
       `${lockKey}.reap-${generationId}${suffix}`,
       JSON.stringify({
-        version: 1,
+        version: 2,
         expected,
-        reaper: {
-          version: 1,
-          pid: 2_147_483_647,
-          token: record.token,
-          createdAt: new Date().toISOString(),
-        },
+        reaper: deadLockOwner(record.token),
         predecessorToken: record.predecessorToken,
       }).concat('\n'),
       'utf8'
@@ -363,12 +438,7 @@ test('cyclic persisted reaper metadata fails within the acquisition bound', asyn
 test('a crashed parseable reaper generation is resumed without stealing a replacement', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-dead-reaper-test-'));
   const lockKey = path.join(testRoot, 'shared.lock');
-  const claimContent = JSON.stringify({
-    version: 1,
-    pid: 2_147_483_647,
-    token: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  }).concat('\n');
+  const claimContent = JSON.stringify(deadLockOwner()).concat('\n');
   const claimOwner = JSON.parse(claimContent) as { token: string };
   await fs.writeFile(lockKey, claimContent, 'utf8');
   const claimStats = await fs.lstat(lockKey);
@@ -389,14 +459,9 @@ test('a crashed parseable reaper generation is resumed without stealing a replac
   await fs.writeFile(
     electionPath,
     JSON.stringify({
-      version: 1,
+      version: 2,
       expected,
-      reaper: {
-        version: 1,
-        pid: 2_147_483_647,
-        token: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-      },
+      reaper: deadLockOwner(),
       predecessorToken: null,
     }).concat('\n'),
     'utf8'
@@ -416,12 +481,7 @@ test('a crashed parseable reaper generation is resumed without stealing a replac
 test('a live reaper barrier blocks publication and entry until validated cleanup completes', async () => {
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-barrier-test-'));
   const lockKey = path.join(testRoot, 'shared.lock');
-  const deadClaim = JSON.stringify({
-    version: 1,
-    pid: 2_147_483_647,
-    token: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  }).concat('\n');
+  const deadClaim = JSON.stringify(deadLockOwner()).concat('\n');
   await fs.writeFile(lockKey, deadClaim, 'utf8');
   let releaseReaper!: () => void;
   let signalValidated!: () => void;
@@ -498,16 +558,7 @@ test('reaper restores a replacement moved across the final generation boundary',
   const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tyrian-lock-reaper-race-test-'));
   const lockKey = path.join(testRoot, 'reaper-race.lock');
   const replacement = 'external replacement generation\n';
-  await fs.writeFile(
-    lockKey,
-    JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      token: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    }).concat('\n'),
-    'utf8'
-  );
+  await fs.writeFile(lockKey, JSON.stringify(deadLockOwner()).concat('\n'), 'utf8');
 
   try {
     await expect(
@@ -564,16 +615,7 @@ test('reaper exposes a retirement cleanup artifact instead of hiding it', async 
   const lockKey = path.join(testRoot, 'reaper-cleanup.lock');
   let retirementPath: string | undefined;
   let cleanupCalls = 0;
-  await fs.writeFile(
-    lockKey,
-    JSON.stringify({
-      version: 1,
-      pid: 2_147_483_647,
-      token: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    }).concat('\n'),
-    'utf8'
-  );
+  await fs.writeFile(lockKey, JSON.stringify(deadLockOwner()).concat('\n'), 'utf8');
 
   try {
     await expect(
@@ -707,6 +749,41 @@ function mutationFacts(
   return {
     ...result,
     changed: result.desiredStateChanged || result.registryChanged || result.physicalChanged,
+  };
+}
+
+function deadLockOwner(
+  token = crypto.randomUUID(),
+  createdAt = new Date().toISOString()
+): {
+  version: 3;
+  pid: number;
+  token: string;
+  createdAt: string;
+  processIdentity: string;
+} {
+  return {
+    version: 3,
+    pid: 2_147_483_647,
+    token,
+    createdAt,
+    processIdentity: 'dead-process-generation',
+  };
+}
+
+function previousLockOwnerV2(): {
+  version: 2;
+  pid: number;
+  token: string;
+  createdAt: string;
+  processIdentity: string;
+} {
+  return {
+    version: 2,
+    pid: 2_147_483_647,
+    token: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    processIdentity: 'previous-process-generation',
   };
 }
 

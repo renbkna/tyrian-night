@@ -924,13 +924,15 @@ function readValidatedSnapshotManifest(backupRoot, options) {
       JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
     );
 
+  if (candidate?.version !== 5) {
+    throw new Error('Owned filesystem snapshot manifest must use version 5');
+  }
+
   if (
-    (candidate?.version !== 4 && candidate?.version !== 5) ||
     candidate.snapshotId !== options.snapshotId ||
     !Array.isArray(candidate.entries) ||
     candidate.entries.length !== expectedTargetPaths.length ||
-    (candidate.version === 4 && !Array.isArray(candidate.missingOwnedParents)) ||
-    (candidate.version === 5 && candidate.missingOwnedParents !== undefined) ||
+    candidate.missingOwnedParents !== undefined ||
     !Array.isArray(candidate.missingBackupParents)
   ) {
     throw new Error('Owned filesystem snapshot manifest is corrupt');
@@ -1674,7 +1676,7 @@ function writeExclusiveJson(filePath, value) {
 
 /**
  * @param {string} lockPath
- * @returns {{ stats: fs.Stats; owner?: { pid: number; token: string; ownerFileName: string; processIdentity?: string } }}
+ * @returns {{ stats: fs.Stats; owner?: { pid: number; token: string; ownerFileName: string; processIdentity: string } }}
  */
 function readLockGeneration(lockPath) {
   const stats = fs.lstatSync(lockPath);
@@ -1683,39 +1685,51 @@ function readLockGeneration(lockPath) {
     return { stats };
   }
 
+  /** @type {any} */
+  let candidate;
   try {
-    const candidate = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-
-    if (
-      (candidate?.version !== 1 && candidate?.version !== 2) ||
-      !Number.isSafeInteger(candidate.pid) ||
-      candidate.pid <= 0 ||
-      typeof candidate.token !== 'string' ||
-      candidate.token.length === 0 ||
-      candidate.ownerFileName !== `${path.basename(lockPath)}.owner-${candidate.token}.json` ||
-      (candidate.version === 2 &&
-        (typeof candidate.processIdentity !== 'string' || candidate.processIdentity.length === 0))
-    ) {
-      return { stats };
-    }
-
-    return {
-      stats,
-      owner: {
-        pid: candidate.pid,
-        token: candidate.token,
-        ownerFileName: candidate.ownerFileName,
-        ...(candidate.version === 2 ? { processIdentity: candidate.processIdentity } : {}),
-      },
-    };
+    candidate = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
   } catch {
     return { stats };
   }
+
+  if (
+    candidate !== null &&
+    typeof candidate === 'object' &&
+    !Array.isArray(candidate) &&
+    Object.hasOwn(candidate, 'version') &&
+    candidate.version !== 2
+  ) {
+    throw new Error('Token lock owner must use version 2');
+  }
+
+  if (
+    candidate?.version !== 2 ||
+    !Number.isSafeInteger(candidate.pid) ||
+    candidate.pid <= 0 ||
+    typeof candidate.token !== 'string' ||
+    candidate.token.length === 0 ||
+    candidate.ownerFileName !== `${path.basename(lockPath)}.owner-${candidate.token}.json` ||
+    typeof candidate.processIdentity !== 'string' ||
+    candidate.processIdentity.length === 0
+  ) {
+    return { stats };
+  }
+
+  return {
+    stats,
+    owner: {
+      pid: candidate.pid,
+      token: candidate.token,
+      ownerFileName: candidate.ownerFileName,
+      processIdentity: candidate.processIdentity,
+    },
+  };
 }
 
 /**
  * @param {string} lockPath
- * @param {{ stats: fs.Stats; owner?: { pid: number; token: string; ownerFileName: string; processIdentity?: string } }} generation
+ * @param {{ stats: fs.Stats; owner?: { pid: number; token: string; ownerFileName: string; processIdentity: string } }} generation
  * @param {(() => void) | undefined} testBeforeReap
  * @returns {void}
  */
@@ -1816,7 +1830,7 @@ function releaseOwnedLock(lockPath, ownerPath, token) {
 }
 
 /**
- * @param {{ pid: number; processIdentity?: string }} owner
+ * @param {{ pid: number; processIdentity: string }} owner
  * @returns {boolean}
  */
 function isProcessAlive(owner) {
@@ -1826,7 +1840,6 @@ function isProcessAlive(owner) {
     if (!(error instanceof Error) || !('code' in error) || error.code !== 'EPERM') return false;
   }
 
-  if (owner.processIdentity === undefined) return true;
   const currentIdentity = readLinuxProcessIdentity(owner.pid);
   return currentIdentity === undefined || currentIdentity === owner.processIdentity;
 }
@@ -1834,18 +1847,22 @@ function isProcessAlive(owner) {
 /**
  * @param {string} ownerFileName
  * @param {string} token
- * @returns {{ version: 1 | 2; pid: number; token: string; ownerFileName: string; createdAtMs: number; processIdentity?: string }}
+ * @returns {{ version: 2; pid: number; token: string; ownerFileName: string; createdAtMs: number; processIdentity: string }}
  */
 function createTokenLockOwner(ownerFileName, token) {
   const processIdentity = readLinuxProcessIdentity(process.pid);
 
+  if (processIdentity === undefined) {
+    throw new Error('Cannot determine current process identity for token lock');
+  }
+
   return {
-    version: processIdentity === undefined ? 1 : 2,
+    version: 2,
     pid: process.pid,
     token,
     ownerFileName,
     createdAtMs: Date.now(),
-    ...(processIdentity !== undefined ? { processIdentity } : {}),
+    processIdentity,
   };
 }
 

@@ -1169,11 +1169,10 @@ function validateCaptureJournal(root, candidate) {
   ];
 
   if (
-    (journal.version !== 2 && journal.version !== 3) ||
+    journal.version !== 3 ||
     typeof journal.token !== 'string' ||
     !/^[0-9a-f-]+$/u.test(journal.token) ||
     !['allocating', 'prepared', 'verified', 'rolledBack'].includes(journal.phase) ||
-    (journal.version === 2 && journal.phase === 'allocating') ||
     journal.transactionRoot !== `${CAPTURE_TRANSACTION_PREFIX}${journal.token}` ||
     !Array.isArray(journal.entries) ||
     journal.entries.length !== allowedTargets.length
@@ -1217,7 +1216,7 @@ function validateCaptureJournal(root, candidate) {
     seenTargets.add(entry.targetPath);
   }
 
-  return /** @type {ReturnType<typeof buildCaptureJournal>} */ ({ ...journal, version: 3 });
+  return /** @type {ReturnType<typeof buildCaptureJournal>} */ (journal);
 }
 
 /**

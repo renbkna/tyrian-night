@@ -21,6 +21,8 @@ Unsupported mutation semantics fail before a transaction is allocated.
 
 Both profiles manage Ghostty, Foot, and fish. Each command then manages only its selected desktop surface. A Plasma apply does not write Hyprland or Caelestia runtime paths; a Caelestia apply does not write KDE or Plasma paths. The stable copied source under `~/.local/share/tyrian-night/` contains generated assets for both profiles, but it is installer-owned data rather than live desktop configuration.
 
+The theme family contract owns the selected desktop theme; it is currently Tyrian Nocturne. Terminal configuration independently uses the catalog's appearance-specific defaults: Nocturne for dark mode and Dawn for light mode. The installer derives its materialized assets, package identifiers, and Caelestia state from those owned roles rather than a hard-coded variant.
+
 ```sh
 # Read-only Plasma plan, then transactional apply.
 bun run desktop:plasma:preview
@@ -50,7 +52,7 @@ The default apply copies stable assets under `~/.local/share/tyrian-night/`; the
 node scripts/installLiveTyrian.mjs --target=plasma --apply --link
 ```
 
-Backups are stored under `~/.local/state/tyrian-night/backups/`. Failed non-interrupted operations roll back immediately. A deliberately simulated or real process interruption preserves recovery evidence; run the explicit recovery command before another preview if you want the prior generation restored. Ownership state is profile-scoped and retains each profile's XDG roots, so moving XDG configuration does not orphan the previous generation. Version 1 mixed and version 2 path-only manifests migrate transactionally while retaining the unselected profile.
+Backups are stored under `~/.local/state/tyrian-night/backups/`. Failed non-interrupted operations roll back immediately. A deliberately simulated or real process interruption preserves recovery evidence; run the explicit recovery command before another preview if you want the prior generation restored. Ownership state is profile-scoped v3 data and retains each profile's XDG roots, so moving XDG configuration does not orphan the previous generation. If no ownership manifest exists, the installer only records its current outputs; it does not migrate or clean up historical paths.
 
 ## Full Rice
 

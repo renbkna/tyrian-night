@@ -5,8 +5,6 @@ import { beforeEach, expect, mock, test } from 'bun:test';
 
 type CommandHandler = () => unknown | Promise<unknown>;
 
-const ISLAND_UI_CONFIG_KEY = 'tyrianNight.islandUi:/test-vscode-app-root';
-const LEGACY_ISLAND_UI_ENABLED_KEY = 'tyrianNight.islandUiEnabled';
 const UNINSTALL_WARNING_ACKNOWLEDGED_KEY = 'tyrianNight.uninstallWarningAcknowledged';
 
 const registeredCommands = new Map<string, CommandHandler>();
@@ -153,7 +151,6 @@ test('repair Island UI requires warning acknowledgement and delegates desired st
 
   expect(warningMessages).toHaveLength(1);
   expect(globalStateUpdates).toContainEqual([UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true]);
-  expect(globalStateUpdates.some(([key]) => key === ISLAND_UI_CONFIG_KEY)).toBe(false);
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['status', 'apply-supervised']);
 });
 
@@ -165,7 +162,6 @@ test('repair Island UI does not patch when warning acknowledgement is cancelled'
   await repairCommand();
 
   expect(warningMessages).toHaveLength(1);
-  expect(globalStateUpdates.some(([key]) => key === ISLAND_UI_CONFIG_KEY)).toBe(false);
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['status']);
 });
 
@@ -209,7 +205,7 @@ test('extension rejects an impossible versioned registration payload', async () 
   const repairCommand = await activateAndGetRepairCommand();
   resetObservations();
   queuedSpawnResponses.push({
-    version: 1,
+    version: 2,
     registration: { kind: 'absent', desiredThemeId: 'tyrian-night.css' },
     managed: false,
     active: false,
@@ -217,6 +213,21 @@ test('extension rejects an impossible versioned registration payload', async () 
 
   await expect(repairCommand()).rejects.toThrow(
     'Invalid Island reconciliation status.registration.desiredThemeId.'
+  );
+});
+
+test('extension rejects a v1 reconciliation payload as unsupported', async () => {
+  const repairCommand = await activateAndGetRepairCommand();
+  resetObservations();
+  queuedSpawnResponses.push({
+    version: 1,
+    registration: { kind: 'absent' },
+    managed: false,
+    active: false,
+  });
+
+  await expect(repairCommand()).rejects.toThrow(
+    'Tyrian Night CLI returned invalid output: Unsupported Island reconciliation status protocol version 1; expected current version 2.'
   );
 });
 
@@ -271,118 +282,6 @@ test('typed nonzero supervised restore failure retains recovery and reload guida
   ).toBe(true);
 });
 
-test('typed nonzero direct restore failure receives startup lifecycle remediation', async () => {
-  queuedSpawnResponses.push(
-    fakeReconciliationStatus({ kind: 'legacy' }, true, true),
-    typedIslandFailureResponse('direct restore failed after mutation')
-  );
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(spawnCalls.map((call) => call.args[1])).toEqual(['status', 'restore']);
-  expect(
-    informationMessages.some(([message]) => String(message).includes('direct restore failed'))
-  ).toBe(true);
-  expect(warningMessages.some(([message]) => String(message).includes('manual recovery'))).toBe(
-    true
-  );
-});
-
-test('legacy enabled state migrates once into the shared shell record', async () => {
-  activeTheme = 'Tyrian Nocturne';
-  globalStateStore.set(LEGACY_ISLAND_UI_ENABLED_KEY, true);
-  globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
-  queuedSpawnResponses.push(
-    { kind: 'seeded', desiredThemeId: 'tyrian-nocturne.css' },
-    fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-nocturne.css' }, true)
-  );
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(globalStateUpdates.some(([key]) => key === ISLAND_UI_CONFIG_KEY)).toBe(false);
-  expect(globalStateUpdates).toContainEqual([LEGACY_ISLAND_UI_ENABLED_KEY, undefined]);
-  expect(spawnCalls.map((call) => call.args[1])).toEqual([
-    'seed-desired-supervised',
-    'status',
-    'apply-supervised',
-  ]);
-  const desiredIndex = spawnCalls[0]!.args.indexOf('--desired-theme-id');
-  expect(spawnCalls[0]!.args[desiredIndex + 1]).toBe('tyrian-nocturne.css');
-});
-
-test('legacy per-root state migrates into shell authority and is deleted', async () => {
-  activeTheme = 'Default Dark Modern';
-  globalStateStore.set(ISLAND_UI_CONFIG_KEY, { theme: 'Tyrian Nocturne' });
-  queuedSpawnResponses.push(
-    { kind: 'seeded', desiredThemeId: 'tyrian-nocturne.css' },
-    fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-nocturne.css' }, true)
-  );
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(globalStateUpdates).toContainEqual([ISLAND_UI_CONFIG_KEY, undefined]);
-  expect(spawnCalls.map((call) => call.args[1])).toEqual([
-    'seed-desired-supervised',
-    'status',
-    'apply-supervised',
-  ]);
-  const cssSourceIndex = spawnCalls[2]!.args.indexOf('--css-source');
-  expect(spawnCalls[2]!.args[cssSourceIndex + 1]).toEndWith('tyrian-nocturne.css');
-});
-
-test('legacy desired state is retained until the shared shell migration commits', async () => {
-  globalStateStore.set(LEGACY_ISLAND_UI_ENABLED_KEY, true);
-  queuedSpawnResponses.push({
-    kind: 'permission-required',
-    ...mutationFacts(),
-    status: fakeIslandStatus('clean'),
-    writeAccess: {
-      writable: false,
-      blockedPaths: [{ path: '/test-vscode-app-root/product.json', reason: 'EACCES' }],
-      issues: [],
-    },
-    reason: 'EACCES: permission denied',
-  });
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(globalStateStore.get(LEGACY_ISLAND_UI_ENABLED_KEY)).toBe(true);
-  expect(globalStateUpdates).not.toContainEqual([LEGACY_ISLAND_UI_ENABLED_KEY, undefined]);
-});
-
-test('stale local migration cannot overwrite an existing shared desired style', async () => {
-  globalStateStore.set(ISLAND_UI_CONFIG_KEY, { theme: 'Tyrian Nocturne' });
-  queuedSpawnResponses.push(
-    { kind: 'existing', desiredThemeId: 'tyrian-night.css' },
-    fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-night.css' }, true, true)
-  );
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(globalStateUpdates).toContainEqual([ISLAND_UI_CONFIG_KEY, undefined]);
-  expect(spawnCalls.map((call) => call.args[1])).toEqual([
-    'seed-desired-supervised',
-    'status',
-    'apply-supervised',
-  ]);
-  const cssSourceIndex = spawnCalls[2]!.args.indexOf('--css-source');
-  expect(spawnCalls[2]!.args[cssSourceIndex + 1]).toEndWith('tyrian-night.css');
-});
-
-test('activation restores a desired-unknown v1 record instead of selecting a window theme', async () => {
-  queuedSpawnResponses.push(fakeReconciliationStatus({ kind: 'legacy' }, true, true));
-
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-
-  expect(spawnCalls.map((call) => call.args[1])).toEqual(['status', 'restore']);
-});
-
 test('activation restores current physical evidence when no desired record exists', async () => {
   activeTheme = 'Default Dark Modern';
   queuedSpawnResponses.push(
@@ -400,7 +299,6 @@ test('activation restores current physical evidence when no desired record exist
 
 test('commands serialize Island UI mutations through the sync queue', async () => {
   const { activate } = await import('../apps/vscode/src/extension');
-  globalStateStore.delete(ISLAND_UI_CONFIG_KEY);
   globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   await activate(createExtensionContext());
 
@@ -522,7 +420,6 @@ test('restore completes through the supervisor without extra prompts', async () 
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['restore-supervised']);
   expect(warningMessages).toEqual([]);
-  expect(globalStateUpdates.some(([key]) => key === ISLAND_UI_CONFIG_KEY)).toBe(false);
 });
 
 test('restore does not request reload for desired-state and registry changes without physical change', async () => {
@@ -562,7 +459,7 @@ test('repair Island UI handles permission-required supervisor result through Doc
       reason: 'EACCES: permission denied',
     },
     {
-      version: 1,
+      version: 2,
       statuses: [
         {
           ...fakeIslandStatus('clean'),
@@ -651,7 +548,7 @@ test('Doctor treats a null desired record as disabled and recommends restore for
   const doctor = registeredCommands.get('tyrianNight.doctorIslandUi');
   resetObservations();
   queuedSpawnResponses.push({
-    version: 1,
+    version: 2,
     statuses: [
       {
         ...fakeIslandStatus('broken-backup'),
@@ -669,40 +566,13 @@ test('Doctor treats a null desired record as disabled and recommends restore for
   expect(content).toContain('Recommended action: Restore Classic UI');
 });
 
-test('Doctor exposes the supervisor-owned restore remedy for a legacy registration', async () => {
-  const { activate } = await import('../apps/vscode/src/extension');
-  await activate(createExtensionContext());
-  const doctor = registeredCommands.get('tyrianNight.doctorIslandUi');
-  resetObservations();
-  queuedWarningResponses.push('Later');
-  queuedSpawnResponses.push({
-    version: 1,
-    statuses: [
-      {
-        ...fakeIslandStatus('broken-backup'),
-        desiredThemeId: undefined,
-        recommendedAction: 'restore',
-        accessInspection: { kind: 'available', writable: true, blockedPaths: [] },
-      },
-    ],
-    registryDiagnostics: [],
-  });
-
-  await doctor?.();
-
-  const content = (openedDocuments.at(-1) as { content?: string } | undefined)?.content;
-  expect(content).toContain('Self-heal: available via Restore Classic UI');
-  expect(content).toContain('Recommended action: Restore Classic UI');
-  expect(warningMessages.at(-1)?.[0]).toContain('self-healable Island UI issues');
-});
-
 test('Doctor reports unidentifiable registry data without mutating it', async () => {
   const { activate } = await import('../apps/vscode/src/extension');
   await activate(createExtensionContext());
   const doctor = registeredCommands.get('tyrianNight.doctorIslandUi');
   resetObservations();
   queuedSpawnResponses.push({
-    version: 1,
+    version: 2,
     statuses: [],
     registryDiagnostics: [
       {
@@ -728,7 +598,7 @@ test('Doctor exposes failed access inspection and owner-forced manual recovery',
   const doctor = registeredCommands.get('tyrianNight.doctorIslandUi');
   resetObservations();
   queuedSpawnResponses.push({
-    version: 1,
+    version: 2,
     statuses: [
       {
         ...fakeIslandStatus('clean'),
@@ -840,7 +710,7 @@ function defaultCliResult(args: string[]): unknown {
       };
     case 'status-all-supervised':
       return {
-        version: 1,
+        version: 2,
         statuses: [
           {
             ...fakeIslandStatus('clean'),
@@ -855,8 +725,6 @@ function defaultCliResult(args: string[]): unknown {
       };
     case 'status':
       return fakeReconciliationStatus({ kind: 'absent' });
-    case 'seed-desired-supervised':
-      return { kind: 'seeded', desiredThemeId: 'tyrian-night.css' };
     case 'restore':
       return { ...mutationFacts(), active: false };
     default:
@@ -890,12 +758,11 @@ function fakeReconciliationStatus(
   registration:
     | { kind: 'absent' }
     | { kind: 'valid'; desiredThemeId: string | null }
-    | { kind: 'legacy' }
     | { kind: 'corrupt' },
   managed = false,
   active = false
 ) {
-  return { version: 1, registration, managed, active };
+  return { version: 2, registration, managed, active };
 }
 
 function typedIslandFailureResponse(reason: string): FakeProcessResponse {
@@ -904,7 +771,7 @@ function typedIslandFailureResponse(reason: string): FakeProcessResponse {
     exitCode: 1,
     stdout: '',
     stderr: JSON.stringify({
-      version: 1,
+      version: 2,
       code: 'blocked',
       ...mutationFacts({ physicalChanged: true, incompleteRecovery: true }),
       reason,

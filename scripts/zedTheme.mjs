@@ -7,7 +7,7 @@ import { contrastRatio } from './colorScience.mjs';
 import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { bracketColor, syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
-import { loadThemeRepository, readSourceTheme, readSourceThemeRecipe } from './themeSources.mjs';
+import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
@@ -32,8 +32,7 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
     themes: repository.sources.map((source) =>
       buildZedTheme(
         /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot, repository.definition)),
-        repository.definition.requiredThemeRoles.brackets,
-        readSourceThemeRecipe(source, repoRoot, repository.definition).bindingProfile
+        repository.definition.requiredThemeRoles.brackets
       )
     ),
   };
@@ -63,10 +62,9 @@ export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
 /**
  * @param {ThemeDefinition} theme
  * @param {readonly string[]} bracketRoles
- * @param {string} [bindingProfile]
  * @returns {unknown}
  */
-export function buildZedTheme(theme, bracketRoles, bindingProfile = 'current') {
+export function buildZedTheme(theme, bracketRoles) {
   /** @param {string} role */
   const ui = (role) => uiColor(theme, role);
   /** @param {string} role */
@@ -74,7 +72,7 @@ export function buildZedTheme(theme, bracketRoles, bindingProfile = 'current') {
   /** @param {string} role */
   const terminal = (role) => terminalColor(theme, role);
   const dimAnsi = buildDimAnsi(theme);
-  const syntax = buildSyntax(theme, bindingProfile);
+  const syntax = buildSyntax(theme);
   const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
   const editorBackground = ui('surface.canvas');
   const accents = bracketRoles.map((role) => bracketColor(theme, role));
@@ -246,10 +244,9 @@ export function buildZedTheme(theme, bracketRoles, bindingProfile = 'current') {
 /**
  * Zed owns capture names and font styling. Colors come only from neutral theme roles.
  * @param {ThemeDefinition} theme
- * @param {string} bindingProfile
  * @returns {Record<string, unknown>}
  */
-function buildSyntax(theme, bindingProfile) {
+function buildSyntax(theme) {
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
   const syntax = (role, options = {}) => highlight({ color: syntaxColor(theme, role), ...options });
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
@@ -267,7 +264,7 @@ function buildSyntax(theme, bindingProfile) {
     }),
     'comment.documentation': syntax('documentation', { italic: true }),
     constant: syntax('data'),
-    'constant.builtin': syntax(bindingProfile === 'legacy' ? 'constantLanguage' : 'null'),
+    'constant.builtin': syntax('null'),
     constructor: syntax('type'),
     decorator: syntax('type'),
     embedded: syntax('string'),
@@ -289,7 +286,7 @@ function buildSyntax(theme, bindingProfile) {
     keyword: syntax('keyword'),
     label: syntax('type'),
     link_text: syntax('type'),
-    link_uri: syntax(bindingProfile === 'legacy' ? 'type' : 'file'),
+    link_uri: syntax('file'),
     macro: syntax('type'),
     'markup.quote': syntax('string', { italic: true }),
     method: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
@@ -394,16 +391,21 @@ function dimTerminalColor(color, background, targetContrast) {
     return opaqueColor;
   }
 
+  let closestDimmed = opaqueColor;
+  let closestDistance = Number.POSITIVE_INFINITY;
   for (let alpha = 1; alpha < 255; alpha += 1) {
     const alphaHex = alpha.toString(16).padStart(2, '0');
     const candidate = opaqueHex(withHexAlpha(opaqueColor, alphaHex), background);
+    if (candidate === opaqueColor) continue;
 
-    if (contrastRatio(candidate, background) >= targetContrast) {
-      return candidate;
+    const distance = Math.abs(contrastRatio(candidate, background) - targetContrast);
+    if (distance < closestDistance) {
+      closestDimmed = candidate;
+      closestDistance = distance;
     }
   }
 
-  return opaqueColor;
+  return closestDimmed;
 }
 
 /**

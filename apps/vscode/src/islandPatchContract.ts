@@ -29,8 +29,6 @@ export const ISLAND_TRANSACTION_FILE_NAME = 'tyrian-night.transaction.json';
 export const TYRIAN_STATE_DIR_NAME = '.tyrian-night';
 export const MANAGED_ROOTS_DIRECTORY_NAME = 'managed-app-roots';
 export const QUARANTINED_ROOTS_DIRECTORY_NAME = 'quarantined-managed-app-roots';
-export const LEGACY_RETIREMENT_FILE_NAME = 'managed-app-roots.retired.json';
-export const LEGACY_MANAGED_ROOTS_FILE_NAME = 'managed-app-roots.json';
 export const ISLAND_ROOT_LOCK_NAME = '.tyrian-night.lock';
 export const ISLAND_REGISTRY_LOCK_NAME = 'tyrian-night-managed-app-roots';
 
@@ -89,14 +87,6 @@ export function buildManagedRootsDirectoryPath(registryHome = os.homedir()): str
 
 export function buildQuarantinedRootsDirectoryPath(registryHome = os.homedir()): string {
   return path.join(registryHome, TYRIAN_STATE_DIR_NAME, QUARANTINED_ROOTS_DIRECTORY_NAME);
-}
-
-export function buildLegacyRetirementMarkerPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, LEGACY_RETIREMENT_FILE_NAME);
-}
-
-export function buildLegacyManagedRootsRegistryPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, LEGACY_MANAGED_ROOTS_FILE_NAME);
 }
 
 export function buildManagedRootRecordPath(appRoot: string, registryHome = os.homedir()): string {

@@ -84,7 +84,7 @@ test('shared color parser rejects malformed source hex colors', () => {
   }
 });
 
-test('README points to the catalog default authority without duplicating its palette', () => {
+test('README points to the family default authority without duplicating its palette', () => {
   const readme = fs.readFileSync('README.md', 'utf8');
   const theme = readSourceTheme(getDefaultThemeSource());
   const advertisedPalette = [

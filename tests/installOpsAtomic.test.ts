@@ -194,10 +194,9 @@ test('persisted recovery restores declared target absence without claiming paren
   }
 });
 
-test('persisted recovery accepts v4 parent metadata without granting deletion authority', () => {
+test('persisted recovery rejects v4 snapshot metadata without mutation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-v4-parent-'));
   const targetPath = path.join(root, 'owned.conf');
-  const unrelatedParent = path.join(root, 'external-empty-parent');
 
   try {
     fs.writeFileSync(targetPath, 'snapshot generation\n');
@@ -210,18 +209,21 @@ test('persisted recovery accepts v4 parent metadata without granting deletion au
     const manifestPath = path.join(receipt.backupRoot, 'snapshot.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     manifest.version = 4;
-    manifest.missingOwnedParents = [unrelatedParent];
-    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    fs.mkdirSync(unrelatedParent);
+    manifest.missingOwnedParents = [path.join(root, 'external-empty-parent')];
+    const retiredManifest = `${JSON.stringify(manifest, null, 2)}\n`;
+    fs.writeFileSync(manifestPath, retiredManifest);
 
-    restoreOwnedPathSnapshot(receipt.backupRoot, {
-      allowedRoots: [root],
-      expectedTargetPaths: receipt.targetPaths,
-      snapshotId: receipt.snapshotId,
-    });
+    expect(() =>
+      restoreOwnedPathSnapshot(receipt.backupRoot, {
+        allowedRoots: [root],
+        expectedTargetPaths: receipt.targetPaths,
+        snapshotId: receipt.snapshotId,
+      })
+    ).toThrow('must use version 5');
 
-    expect(fs.readFileSync(targetPath, 'utf8')).toBe('snapshot generation\n');
-    expect(fs.existsSync(unrelatedParent)).toBe(true);
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('interrupted generation\n');
+    expect(fs.readFileSync(manifestPath, 'utf8')).toBe(retiredManifest);
+    expect(fs.existsSync(receipt.backupRoot)).toBe(true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

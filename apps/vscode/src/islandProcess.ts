@@ -1,12 +1,14 @@
 import { spawn, type SpawnOptions } from 'node:child_process';
 
+import { ISLAND_WIRE_PROTOCOL_VERSION } from './islandWire.js';
+
 export type IslandProcessResult = {
   stdout: string;
   stderr: string;
 };
 
 export type IslandProcessFailureEnvelope = {
-  version: 1;
+  version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
   code: 'permission-required' | 'unsupported' | 'corrupt' | 'blocked';
   changed: boolean;
   desiredStateChanged: boolean;
@@ -114,7 +116,7 @@ export function parseIslandProcessFailure(output: string): IslandProcessFailure 
   try {
     const candidate = JSON.parse(candidateLine) as Partial<IslandProcessFailureEnvelope>;
     if (
-      candidate.version !== 1 ||
+      candidate.version !== ISLAND_WIRE_PROTOCOL_VERSION ||
       !['permission-required', 'unsupported', 'corrupt', 'blocked'].includes(
         candidate.code ?? ''
       ) ||

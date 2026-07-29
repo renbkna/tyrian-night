@@ -5,20 +5,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   loadThemeDefinitionContext,
+  resolveThemeRecipe,
+  themeFamilyClassification,
+  themeColor,
   validateThemeDefinition,
   validateThemeRecipe,
 } from './themeDefinition.mjs';
+import { contrastRatio, hexToOklch, hueDistance } from './colorScience.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @typedef {'dark' | 'light'} ThemeAppearance
  * @typedef {{
- *   default?: boolean;
  *   slug: string;
  *   terminalDefault?: boolean;
  * }} ThemeCatalogEntry
- * @typedef {{ appearance: ThemeAppearance; name: string }} ThemeIdentity
+ * @typedef {{ name: string }} ThemeIdentity
+ * @typedef {{ appearance: ThemeAppearance; isDefault: boolean }} ThemeClassification
  * @typedef {{
  *   appearance: ThemeAppearance;
  *   isDefault: boolean;
@@ -70,6 +74,8 @@ export function loadThemeRepository(root = repoRoot) {
 export function readThemeSources(root = repoRoot, definition = loadThemeDefinitionContext(root)) {
   const resolvedRoot = requireContextRoot(root, definition);
   const themesDirectory = path.join(resolvedRoot, 'source/themes');
+  /** @type {Map<string, import('./themeDefinition.mjs').ThemeDefinition>} */
+  const resolvedThemes = new Map();
   const themes = normalizeThemeCatalog(
     readJson(path.join(resolvedRoot, 'source/themeCatalog.json')),
     (slug) => {
@@ -80,8 +86,12 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
         throw new Error(`Theme source '${slug}' must be a regular file.`);
       }
 
-      return validateThemeDefinition(readJson(sourcePath), slug, definition);
-    }
+      const recipe = validateThemeRecipe(readJson(sourcePath), slug, definition);
+      const resolvedTheme = resolveThemeRecipe(recipe, slug, definition);
+      resolvedThemes.set(slug, resolvedTheme);
+      return { name: resolvedTheme.name };
+    },
+    (slug) => themeFamilyClassification(definition, slug)
   );
   const expectedFiles = new Set(themes.map(({ slug }) => `${slug}.json`));
   const orphanFiles = fs
@@ -94,6 +104,7 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
     throw new Error(`Source theme files are absent from the catalog: ${orphanFiles.join(', ')}.`);
   }
 
+  validateThemeFamilyRelationships(themes, resolvedThemes, definition);
   return themes;
 }
 
@@ -149,9 +160,10 @@ export function readSourceThemeRecipe(
 /**
  * @param {unknown} catalog
  * @param {(slug: string) => unknown} readThemeIdentity
+ * @param {(slug: string) => unknown} readThemeClassification
  * @returns {ThemeSource[]}
  */
-export function normalizeThemeCatalog(catalog, readThemeIdentity) {
+export function normalizeThemeCatalog(catalog, readThemeIdentity, readThemeClassification) {
   if (!Array.isArray(catalog) || catalog.length === 0) {
     throw new Error('Theme catalog must be a non-empty array.');
   }
@@ -166,7 +178,7 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
     const entry = /** @type {Partial<ThemeCatalogEntry>} */ (value);
     const slug = requireCatalogString(entry.slug, index, 'slug');
     const unsupportedFields = Object.keys(entry).filter(
-      (field) => field !== 'slug' && field !== 'default' && field !== 'terminalDefault'
+      (field) => field !== 'slug' && field !== 'terminalDefault'
     );
 
     if (unsupportedFields.length > 0) {
@@ -181,10 +193,6 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
 
     if (slugs.has(slug)) {
       throw new Error(`Theme catalog slug '${slug}' is duplicated.`);
-    }
-
-    if (entry.default !== undefined && typeof entry.default !== 'boolean') {
-      throw new Error(`Theme catalog entry '${slug}' has a non-boolean default flag.`);
     }
 
     if (entry.terminalDefault !== undefined && typeof entry.terminalDefault !== 'boolean') {
@@ -202,11 +210,23 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
 
     const identity = /** @type {Partial<ThemeIdentity>} */ (identityValue);
     const label = requireThemeName(identity.name, slug);
-    if (identity.appearance !== 'dark' && identity.appearance !== 'light') {
-      throw new Error(`Theme source '${slug}' has an invalid appearance.`);
+    const classificationValue = readThemeClassification(slug);
+    if (
+      typeof classificationValue !== 'object' ||
+      classificationValue === null ||
+      Array.isArray(classificationValue)
+    ) {
+      throw new Error(`Theme family classification '${slug}' must be an object.`);
+    }
+    const classification = /** @type {Partial<ThemeClassification>} */ (classificationValue);
+    if (classification.appearance !== 'dark' && classification.appearance !== 'light') {
+      throw new Error(`Theme family classification '${slug}' has an invalid appearance.`);
+    }
+    if (typeof classification.isDefault !== 'boolean') {
+      throw new Error(`Theme family classification '${slug}' has an invalid default flag.`);
     }
 
-    const appearance = identity.appearance;
+    const appearance = classification.appearance;
     const vscodeUiTheme = /** @type {'vs' | 'vs-dark'} */ (
       appearance === 'light' ? 'vs' : 'vs-dark'
     );
@@ -220,7 +240,7 @@ export function normalizeThemeCatalog(catalog, readThemeIdentity) {
 
     return {
       appearance,
-      isDefault: entry.default === true,
+      isDefault: classification.isDefault,
       isTerminalDefault: entry.terminalDefault === true,
       islandCssFile: `${slug}.css`,
       islandCssPath: `apps/vscode/island/${slug}.css`,
@@ -327,4 +347,100 @@ function requireContextRoot(root, definition) {
     throw new Error('Theme definition context does not belong to the requested repository root.');
   }
   return resolvedRoot;
+}
+
+/**
+ * Repository-bound validation for relationships no individual recipe can own.
+ * @param {ThemeSource[]} sources
+ * @param {Map<string, import('./themeDefinition.mjs').ThemeDefinition>} themes
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
+ */
+function validateThemeFamilyRelationships(sources, themes, definition) {
+  const family = definition.familyContract;
+  const classifiedSlugs = [
+    ...Object.keys(family.energyLine.variants),
+    ...Object.keys(family.branches),
+  ].toSorted();
+  const catalogSlugs = sources.map(({ slug }) => slug).toSorted();
+  if (JSON.stringify(classifiedSlugs) !== JSON.stringify(catalogSlugs)) {
+    throw new Error('Theme family classifications must exactly match the theme catalog.');
+  }
+
+  const canonicalTheme = themes.get(family.canonical);
+  if (!canonicalTheme) throw new Error('Theme family canonical theme is absent.');
+  const canonicalChroma = meanSemanticChroma(canonicalTheme, family.semanticPigments);
+  for (const [slug, variant] of Object.entries(family.energyLine.variants)) {
+    const theme = /** @type {import('./themeDefinition.mjs').ThemeDefinition} */ (themes.get(slug));
+    const chromaRatio = meanSemanticChroma(theme, family.semanticPigments) / canonicalChroma;
+    requireMetricRange(
+      chromaRatio,
+      variant.semanticChromaRatio,
+      `Energy variant '${slug}' semantic chroma ratio`
+    );
+    requireMetricRange(
+      meanSemanticContrast(theme, family.semanticPigments),
+      variant.semanticContrast,
+      `Energy variant '${slug}' semantic contrast`
+    );
+  }
+
+  let previousCanvasLightness = Number.NEGATIVE_INFINITY;
+  for (const slug of family.energyLine.canvasLightnessOrder) {
+    const theme = /** @type {import('./themeDefinition.mjs').ThemeDefinition} */ (themes.get(slug));
+    const canvasLightness = hexToOklch(themeColor(theme, 'ui:surface.canvas')).L;
+    if (canvasLightness <= previousCanvasLightness) {
+      throw new Error('Theme family canvas lightness order is violated.');
+    }
+    previousCanvasLightness = canvasLightness;
+  }
+
+  const canonicalProfile = family.energyLine.hueProfile;
+  for (const [slug, branch] of Object.entries(family.branches)) {
+    for (const pigment of family.semanticPigments) {
+      const hues = family.pigmentHues[pigment];
+      const distance = hueDistance(
+        /** @type {number} */ (hues[canonicalProfile]),
+        /** @type {number} */ (hues[branch.hueProfile])
+      );
+      if (distance > branch.maximumSemanticHueDistance) {
+        throw new Error(
+          `Theme branch '${slug}' moves semantic pigment '${pigment}' outside its family hue limit.`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
+ * @param {readonly string[]} semanticPigments
+ */
+function meanSemanticChroma(theme, semanticPigments) {
+  return mean(semanticPigments.map((pigment) => hexToOklch(themeColor(theme, pigment)).C));
+}
+
+/**
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
+ * @param {readonly string[]} semanticPigments
+ */
+function meanSemanticContrast(theme, semanticPigments) {
+  const canvas = themeColor(theme, 'ui:surface.canvas');
+  return mean(semanticPigments.map((pigment) => contrastRatio(themeColor(theme, pigment), canvas)));
+}
+
+/** @param {number[]} values */
+function mean(values) {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/**
+ * @param {number} value
+ * @param {{ maximum: number; minimum: number }} range
+ * @param {string} owner
+ */
+function requireMetricRange(value, range, owner) {
+  const tolerance = 1e-9;
+  if (value < range.minimum - tolerance || value > range.maximum + tolerance) {
+    throw new Error(`${owner} ${value.toFixed(4)} is outside ${range.minimum}..${range.maximum}.`);
+  }
 }

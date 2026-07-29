@@ -10,7 +10,6 @@ import {
   hydratePlasmaDesktopActivityIds,
   installPlasmaLayout,
   installRice,
-  recoverRice,
   RICE_LAYOUT_FILES,
   RICE_LAYOUT_REQUIRED_COMMANDS,
   RICE_MANIFEST_OWNER,
@@ -18,6 +17,7 @@ import {
   RICE_REQUIREMENTS_PATH,
   RICE_WALLPAPER_PATH,
   RICE_WALLPAPER_PLACEHOLDER,
+  recoverRice,
 } from '../scripts/rice.mjs';
 
 const FIXTURE_HOME = '/home/example';
@@ -664,6 +664,9 @@ test('rice capture recovers an interrupted publication from its fixed journal', 
     const journalPath = path.join(root, '.tyrian-rice-capture-journal.json');
     expect(fs.existsSync(journalPath)).toBe(true);
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+    fs.writeFileSync(journalPath, JSON.stringify({ ...journal, version: 2 }));
+    expect(() => checkRiceSnapshot({ repoRoot: root })).toThrow('capture journal is corrupt');
+    fs.writeFileSync(journalPath, JSON.stringify(journal));
     const alreadyRestored = journal.entries[0];
     fs.copyFileSync(
       path.join(root, alreadyRestored.backupPath),
@@ -1047,7 +1050,7 @@ test('full rice install honors injected home and command runner for style and la
       'qdbus6',
     ]);
     expect(fs.readFileSync(kdeglobals, 'utf8')).toContain('widgetStyle=Breeze');
-    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('name=TyrianNight');
+    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('name=TyrianNocturne');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

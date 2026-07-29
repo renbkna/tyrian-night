@@ -1,7 +1,7 @@
 /*
  * {{schemeName}} Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * Palette and shape tokens are generated from neutral source/themes roles by scripts/desktopThemes.mjs.
+ * Palette and shape tokens are generated from the family contract and neutral source-theme roles by scripts/desktopThemes.mjs.
  */
 
 :root {

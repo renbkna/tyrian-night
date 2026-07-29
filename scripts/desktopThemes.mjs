@@ -13,10 +13,23 @@ import { flattenCssFile } from './union/flattenCss.mjs';
 import { lintUnionCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Stable package identity for the PascalCase result of a valid
+// `tyrian-<segment>...` source slug. Installers use this to decode persisted
+// ownership after a source family has been retired from the current catalog.
+const DESKTOP_THEME_ID = /^Tyrian(?:[A-Z0-9][a-z0-9]*)+$/u;
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ path: string; content: string }} GeneratedAsset
+ * @typedef {{
+ *   themeId: string;
+ *   kdeColorScheme: string;
+ *   plasmaDesktopTheme: string;
+ *   plasmaLookAndFeel: string;
+ *   caelestiaSchemeState: string;
+ *   caelestiaHyprLegacy: string;
+ *   caelestiaHyprLua: string;
+ * }} DesktopThemeAssetPaths
  * @typedef {{
  *   background: string;
  *   foreground: string;
@@ -211,14 +224,15 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   return readThemeSources(repoRoot).flatMap((source) => {
     const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot));
     const palette = buildDesktopPalette(theme);
-    const kdeFileName = pascalSlug(source.slug);
+    const desktopAssets = desktopThemeAssetPaths(source.slug);
+    const kdeFileName = desktopAssets.themeId;
     const flavour = source.slug.replace(/^tyrian-/, '');
     const mode = source.appearance === 'light' ? 'light' : 'dark';
     const caelestiaColours = buildCaelestiaColours(theme, palette);
 
     return [
       {
-        path: `desktop/kde/color-schemes/${kdeFileName}.colors`,
+        path: desktopAssets.kdeColorScheme,
         content: buildKdeColorScheme(kdeFileName, theme.name, palette, { includeEffects: true }),
       },
       {
@@ -239,15 +253,15 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildCaelestiaSchemeText(caelestiaColours),
       },
       {
-        path: `desktop/caelestia/hypr/${source.slug}.conf`,
+        path: desktopAssets.caelestiaHyprLegacy,
         content: buildCaelestiaHyprScheme(caelestiaColours),
       },
       {
-        path: `desktop/caelestia/hypr/${source.slug}.lua`,
+        path: desktopAssets.caelestiaHyprLua,
         content: buildCaelestiaHyprLuaScheme(caelestiaColours),
       },
       {
-        path: `desktop/caelestia/state/${source.slug}.scheme.json`,
+        path: desktopAssets.caelestiaSchemeState,
         content: `${JSON.stringify(
           {
             name: 'tyrian',
@@ -1297,7 +1311,7 @@ function buildCaelestiaHyprScheme(colours) {
 
 /**
  * Current Caelestia/Hyprland loads the active scheme as a Lua module whose
- * fields carry the same no-hash hexadecimal strings as the legacy projection.
+ * fields carry the same no-hash hexadecimal strings as the hyprlang projection.
  *
  * @param {Record<string, string>} colours
  * @returns {string}
@@ -1364,13 +1378,34 @@ function contrastText(color) {
 
 /**
  * @param {string} slug
- * @returns {string}
+ * @returns {DesktopThemeAssetPaths}
  */
-function pascalSlug(slug) {
-  return slug
+export function desktopThemeAssetPaths(slug) {
+  const themeId = slug
     .split('-')
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join('');
+
+  return {
+    themeId,
+    kdeColorScheme: `desktop/kde/color-schemes/${themeId}.colors`,
+    plasmaDesktopTheme: `desktop/kde/plasma/desktoptheme/${themeId}`,
+    plasmaLookAndFeel: `desktop/kde/plasma/look-and-feel/${themeId}`,
+    caelestiaSchemeState: `desktop/caelestia/state/${slug}.scheme.json`,
+    caelestiaHyprLegacy: `desktop/caelestia/hypr/${slug}.conf`,
+    caelestiaHyprLua: `desktop/caelestia/hypr/${slug}.lua`,
+  };
+}
+
+/**
+ * Whether a value is a Tyrian desktop package identifier produced by the
+ * source-slug naming contract.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isDesktopThemeId(value) {
+  return DESKTOP_THEME_ID.test(value);
 }
 
 /**

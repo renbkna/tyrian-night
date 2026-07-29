@@ -7,6 +7,7 @@ import {
   gamutRelativeRichness,
   hexToOklab,
   hexToOklch,
+  oklchToHex,
   oklabDelta,
   quantizeDiagnosticNumber,
 } from '../scripts/colorScience.mjs';
@@ -25,6 +26,9 @@ test('color science helpers expose stable policy-free observations', () => {
   expect(red.L).toBeCloseTo(0.628, 3);
   expect(red.C).toBeCloseTo(0.258, 3);
   expect(red.h).toBeCloseTo(29.2, 1);
+  expect(oklchToHex(red)).toBe('#FF0000');
+  expect(oklchToHex(hexToOklch('#A66CFF'))).toBe('#A66CFF');
+  expect(() => oklchToHex({ L: 0.7, C: 0.5, h: 120 })).toThrow('outside the sRGB gamut');
   expect(hexToOklch('#FFFFFF').h).toBeNaN();
   expect(oklabDelta(hexToOklab('#000000'), hexToOklab('#FFFFFF'))).toBeCloseTo(100, 5);
 
