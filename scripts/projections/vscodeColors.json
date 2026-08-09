@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "contrastPairs": [
     {
       "foreground": "editor.selectionForeground",
@@ -789,102 +789,6 @@
     "ansi.brightMagenta": ["terminal.ansiBrightMagenta"],
     "ansi.brightCyan": ["terminal.ansiBrightCyan"],
     "ansi.brightWhite": ["terminal.ansiBrightWhite"]
-  },
-  "semanticTokenColors": {
-    "*.declaration": {
-      "bold": true
-    },
-    "variable": {
-      "role": "variable"
-    },
-    "parameter": {
-      "role": "data"
-    },
-    "variable.local": {
-      "role": "variable"
-    },
-    "variable.defaultLibrary": {
-      "role": "data"
-    },
-    "variable.readonly": {
-      "role": "data"
-    },
-    "property.readonly": {
-      "role": "data"
-    },
-    "function": {
-      "role": "function"
-    },
-    "function.defaultLibrary": {
-      "role": "function"
-    },
-    "method": {
-      "role": "function"
-    },
-    "class": {
-      "role": "type"
-    },
-    "class.defaultLibrary": {
-      "role": "type"
-    },
-    "interface": {
-      "role": "type"
-    },
-    "type": {
-      "role": "type"
-    },
-    "typeParameter": {
-      "role": "type"
-    },
-    "namespace": {
-      "role": "type"
-    },
-    "enum": {
-      "role": "type"
-    },
-    "enumMember": {
-      "role": "data"
-    },
-    "property": {
-      "role": "variable"
-    },
-    "decorator": {
-      "role": "type"
-    },
-    "macro": {
-      "role": "type"
-    },
-    "regexp": {
-      "role": "regexp"
-    },
-    "keyword": {
-      "role": "keyword"
-    },
-    "operator": {
-      "role": "keyword"
-    },
-    "string": {
-      "role": "string"
-    },
-    "number": {
-      "role": "data"
-    },
-    "comment": {
-      "role": "comment"
-    },
-    "*.readonly": {
-      "role": "data"
-    },
-    "*.deprecated": {
-      "role": "data",
-      "fontStyle": "strikethrough"
-    },
-    "*.documentation": {
-      "role": "documentation"
-    },
-    "constructor": {
-      "role": "type"
-    }
   },
   "tokenColors": [
     {

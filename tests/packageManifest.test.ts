@@ -270,6 +270,7 @@ test('VS Code companion settings example is parseable and aligned with Tyrian de
     "'Monaspace Radon var', 'Monaspace Neon var', 'IBM Plex Mono', 'SF Mono', monospace"
   );
   expect(settings['editor.lineHeight']).toBe(1.5);
+  expect(settings['editor.semanticHighlighting.enabled']).toBe('configuredByTheme');
   expect(settings['terminal.integrated.defaultProfile.linux']).toBe('fish');
   expect(settings['terminal.integrated.cursorStyle']).toBe('line');
   expect(settings['terminal.integrated.cursorWidth']).toBe(2);

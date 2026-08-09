@@ -1,6 +1,7 @@
 // @ts-check
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   loadThemeDefinitionContext,
@@ -80,6 +81,7 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
       }
 
       const recipe = validateThemeRecipe(readJson(sourcePath), slug, definition);
+      validateFrozenThemePalette(recipe, slug, definition);
       const resolvedTheme = resolveThemeRecipe(recipe, slug, definition);
       resolvedThemes.set(slug, resolvedTheme);
       return { name: resolvedTheme.name };
@@ -108,6 +110,24 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
  */
 function readJson(filePath) {
   return /** @type {T} */ (JSON.parse(fs.readFileSync(filePath, 'utf8')));
+}
+
+/**
+ * @param {import('./themeDefinition.mjs').ThemeRecipe} recipe
+ * @param {string} slug
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
+ */
+function validateFrozenThemePalette(recipe, slug, definition) {
+  const expected = definition.familyContract.branches[slug]?.frozenPaletteSha256;
+  if (!expected) return;
+
+  const palette = Object.entries(recipe.oklch).toSorted(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  );
+  const actual = createHash('sha256').update(JSON.stringify(palette)).digest('hex');
+  if (actual !== expected) {
+    throw new Error(`Historical-reference theme '${slug}' palette is frozen.`);
+  }
 }
 
 /**
@@ -361,6 +381,35 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
   const catalogSlugs = sources.map(({ slug }) => slug).toSorted();
   if (JSON.stringify(classifiedSlugs) !== JSON.stringify(catalogSlugs)) {
     throw new Error('Theme family classifications must exactly match the theme catalog.');
+  }
+
+  for (const { slug } of sources) {
+    if (family.branches[slug]?.kind === 'historical-reference') continue;
+    const theme = /** @type {import('./themeDefinition.mjs').ThemeDefinition} */ (themes.get(slug));
+    const keyword = hexToOklch(themeColor(theme, 'syntax:keyword'));
+    const type = hexToOklch(themeColor(theme, 'syntax:type'));
+    const method = hexToOklch(themeColor(theme, 'syntax:function'));
+    const balance = family.syntaxBalance;
+    requireMetricRange(
+      method.L - type.L,
+      balance.functionTypeLightnessDelta,
+      `Theme '${slug}' function/type lightness delta`
+    );
+    requireMetricRange(
+      keyword.C - method.C,
+      balance.keywordFunctionChromaDelta,
+      `Theme '${slug}' keyword/function chroma delta`
+    );
+    requireMetricRange(
+      keyword.C - type.C,
+      balance.keywordTypeChromaDelta,
+      `Theme '${slug}' keyword/type chroma delta`
+    );
+    requireMetricRange(
+      type.C - method.C,
+      balance.typeFunctionChromaDelta,
+      `Theme '${slug}' type/function chroma delta`
+    );
   }
 
   const canonicalTheme = themes.get(family.canonical);

@@ -44,6 +44,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   hueProfile: string;
  *   kind: 'historical-reference' | 'light-counterpart' | 'soft-focus';
  *   maximumSemanticHueDistance: number;
+ *   frozenPaletteSha256?: string;
  * }} ThemeBranchContract
  * @typedef {{
  *   branches: Record<string, ThemeBranchContract>;
@@ -55,8 +56,14 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   };
  *   hueProfiles: string[];
  *   pigmentHues: Record<string, Record<string, number | null>>;
- *   schemaVersion: 1;
+ *   schemaVersion: 2;
  *   semanticPigments: string[];
+ *   syntaxBalance: {
+ *     functionTypeLightnessDelta: NumericRange;
+ *     keywordFunctionChromaDelta: NumericRange;
+ *     keywordTypeChromaDelta: NumericRange;
+ *     typeFunctionChromaDelta: NumericRange;
+ *   };
  * }} ThemeFamilyContract
  */
 /**
@@ -72,7 +79,6 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   syntax: Record<string, string[]>;
  *   terminal: Record<string, string[]>;
  *   vscode: Record<string, string[]>;
- *   semanticTokenColors: Record<string, { role?: string; bold?: boolean; fontStyle?: string }>;
  *   tokenColors: Array<{ scope: string[]; role: string; fontStyle?: string }>;
  * }} VscodeProjection
  */
@@ -406,11 +412,12 @@ function validateThemeFamilyContract(value, requiredPigments) {
       'pigmentHues',
       'schemaVersion',
       'semanticPigments',
+      'syntaxBalance',
     ],
     'Theme family contract'
   );
-  if (contract.schemaVersion !== 1) {
-    throw new Error('Theme family contract must use schemaVersion 1.');
+  if (contract.schemaVersion !== 2) {
+    throw new Error('Theme family contract must use schemaVersion 2.');
   }
 
   const canonical = requireNonEmptyString(contract.canonical, 'Theme family canonical theme');
@@ -424,6 +431,47 @@ function validateThemeFamilyContract(value, requiredPigments) {
       throw new Error(`Theme family semantic pigment '${pigment}' is not owned by current themes.`);
     }
   }
+
+  const syntaxBalanceValue = requirePlainObject(
+    contract.syntaxBalance,
+    'Theme family syntax balance'
+  );
+  requireExactFields(
+    syntaxBalanceValue,
+    [
+      'functionTypeLightnessDelta',
+      'keywordFunctionChromaDelta',
+      'keywordTypeChromaDelta',
+      'typeFunctionChromaDelta',
+    ],
+    'Theme family syntax balance'
+  );
+  const syntaxBalance = {
+    functionTypeLightnessDelta: validateNumericRange(
+      syntaxBalanceValue.functionTypeLightnessDelta,
+      'Theme family function/type lightness delta',
+      -1,
+      1
+    ),
+    keywordFunctionChromaDelta: validateNumericRange(
+      syntaxBalanceValue.keywordFunctionChromaDelta,
+      'Theme family keyword/function chroma delta',
+      -0.5,
+      0.5
+    ),
+    keywordTypeChromaDelta: validateNumericRange(
+      syntaxBalanceValue.keywordTypeChromaDelta,
+      'Theme family keyword/type chroma delta',
+      -0.5,
+      0.5
+    ),
+    typeFunctionChromaDelta: validateNumericRange(
+      syntaxBalanceValue.typeFunctionChromaDelta,
+      'Theme family type/function chroma delta',
+      -0.5,
+      0.5
+    ),
+  };
 
   const hueProfiles = requireUniqueStrings(contract.hueProfiles, 'Theme family hue profiles');
   for (const profile of hueProfiles) {
@@ -523,11 +571,6 @@ function validateThemeFamilyContract(value, requiredPigments) {
   const branches = {};
   for (const [slug, branchValue] of Object.entries(branchesValue)) {
     const branch = requirePlainObject(branchValue, `Theme family branch '${slug}'`);
-    requireExactFields(
-      branch,
-      ['hueProfile', 'kind', 'maximumSemanticHueDistance'],
-      `Theme family branch '${slug}'`
-    );
     const kind =
       branch.kind === 'soft-focus' ||
       branch.kind === 'light-counterpart' ||
@@ -535,6 +578,13 @@ function validateThemeFamilyContract(value, requiredPigments) {
         ? branch.kind
         : undefined;
     if (!kind) throw new Error(`Theme family branch '${slug}' has an invalid kind.`);
+    requireExactFields(
+      branch,
+      kind === 'historical-reference'
+        ? ['frozenPaletteSha256', 'hueProfile', 'kind', 'maximumSemanticHueDistance']
+        : ['hueProfile', 'kind', 'maximumSemanticHueDistance'],
+      `Theme family branch '${slug}'`
+    );
     if (
       typeof branch.maximumSemanticHueDistance !== 'number' ||
       !Number.isFinite(branch.maximumSemanticHueDistance) ||
@@ -542,6 +592,16 @@ function validateThemeFamilyContract(value, requiredPigments) {
       branch.maximumSemanticHueDistance > 180
     ) {
       throw new Error(`Theme family branch '${slug}' has an invalid hue-distance limit.`);
+    }
+    const frozenPaletteSha256 =
+      kind === 'historical-reference'
+        ? requireNonEmptyString(
+            branch.frozenPaletteSha256,
+            `Theme family branch '${slug}' frozen palette digest`
+          )
+        : undefined;
+    if (frozenPaletteSha256 && !/^[a-f0-9]{64}$/u.test(frozenPaletteSha256)) {
+      throw new Error(`Theme family branch '${slug}' has an invalid frozen palette digest.`);
     }
     branches[slug] = {
       hueProfile: requireHueProfile(
@@ -551,6 +611,7 @@ function validateThemeFamilyContract(value, requiredPigments) {
       ),
       kind,
       maximumSemanticHueDistance: branch.maximumSemanticHueDistance,
+      ...(frozenPaletteSha256 ? { frozenPaletteSha256 } : {}),
     };
   }
 
@@ -573,8 +634,9 @@ function validateThemeFamilyContract(value, requiredPigments) {
     energyLine: { canvasLightnessOrder, hueProfile: energyHueProfile, variants },
     hueProfiles,
     pigmentHues,
-    schemaVersion: 1,
+    schemaVersion: 2,
     semanticPigments,
+    syntaxBalance,
   };
 }
 
@@ -935,7 +997,6 @@ function validateVscodeProjection(value, requiredThemeRoles) {
       'brackets',
       'contrastPairs',
       'schemaVersion',
-      'semanticTokenColors',
       'syntax',
       'terminal',
       'tokenColors',
@@ -944,8 +1005,8 @@ function validateVscodeProjection(value, requiredThemeRoles) {
     ],
     'VS Code projection'
   );
-  if (projection.schemaVersion !== 5) {
-    throw new Error('VS Code projection must use schemaVersion 5.');
+  if (projection.schemaVersion !== 6) {
+    throw new Error('VS Code projection must use schemaVersion 6.');
   }
 
   const consumerKeys = new Map();
@@ -1021,41 +1082,6 @@ function validateVscodeProjection(value, requiredThemeRoles) {
       throw new Error(`VS Code contrast pair ${index} duplicates an earlier pair.`);
     }
     contrastPairKeys.add(pairKey);
-  }
-
-  const semanticTokenColors = requirePlainObject(
-    projection.semanticTokenColors,
-    'VS Code semantic token projection'
-  );
-  for (const [selector, settingsValue] of Object.entries(semanticTokenColors)) {
-    requireNonEmptyString(selector, 'VS Code semantic token selector');
-    const settings = requirePlainObject(
-      settingsValue,
-      `VS Code semantic token selector '${selector}'`
-    );
-    requireAllowedFields(
-      settings,
-      ['bold', 'fontStyle', 'role'],
-      `VS Code semantic token selector '${selector}'`
-    );
-    if (Object.keys(settings).length === 0) {
-      throw new Error(`VS Code semantic token selector '${selector}' must define settings.`);
-    }
-    if (settings.bold !== undefined && typeof settings.bold !== 'boolean') {
-      throw new Error(`VS Code semantic token selector '${selector}' has a non-boolean bold flag.`);
-    }
-    if (settings.fontStyle !== undefined) {
-      validateFontStyle(settings.fontStyle, `VS Code semantic token selector '${selector}'`);
-    }
-    if (settings.role !== undefined) {
-      const role = requireNonEmptyString(
-        settings.role,
-        `VS Code semantic token selector '${selector}' role`
-      );
-      if (!requiredThemeRoles.syntax.includes(role)) {
-        throw new Error(`VS Code semantic projection references unknown syntax role '${role}'.`);
-      }
-    }
   }
 
   if (!Array.isArray(projection.tokenColors) || projection.tokenColors.length === 0) {

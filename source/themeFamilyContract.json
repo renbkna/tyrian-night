@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "canonical": "tyrian-nocturne",
   "semanticPigments": [
     "ui:accent.primary",
@@ -10,6 +10,24 @@
     "syntax:string",
     "syntax:regexp"
   ],
+  "syntaxBalance": {
+    "functionTypeLightnessDelta": {
+      "minimum": -0.05,
+      "maximum": 0.05
+    },
+    "keywordFunctionChromaDelta": {
+      "minimum": -0.005,
+      "maximum": 0.5
+    },
+    "keywordTypeChromaDelta": {
+      "minimum": -0.03,
+      "maximum": 0.03
+    },
+    "typeFunctionChromaDelta": {
+      "minimum": -0.005,
+      "maximum": 0.5
+    }
+  },
   "energyLine": {
     "hueProfile": "core",
     "canvasLightnessOrder": ["tyrian-abyss", "tyrian-nocturne", "tyrian-night"],
@@ -60,7 +78,8 @@
     "tyrian-night-old": {
       "hueProfile": "core",
       "kind": "historical-reference",
-      "maximumSemanticHueDistance": 0
+      "maximumSemanticHueDistance": 0,
+      "frozenPaletteSha256": "28f3736a9afd2536cc5667f0bec8684317155a759329c8148c574ea5e51fb789"
     }
   },
   "hueProfiles": ["core", "pastel", "dawn"],

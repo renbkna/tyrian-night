@@ -28,6 +28,8 @@ The color themes use the normal VS Code extension contract. Merely installing or
 
 The repository includes a [`settings.example.json`](settings.example.json) companion for typography and editor preferences. It is not applied automatically.
 
+Tyrian keeps VS Code semantic highlighting disabled by theme default so language-server overlays do not replace callable TextMate scopes with readonly-variable colors. The companion settings use `configuredByTheme`, preserving that choice for Tyrian without forcing it on other themes.
+
 ## Island UI
 
 Island UI is an optional Linux-only workbench patch. Apply and Repair refuse unsupported platforms before filesystem or desired-state admission.

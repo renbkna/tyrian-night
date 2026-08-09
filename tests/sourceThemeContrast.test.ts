@@ -54,13 +54,13 @@ test('VS Code projection owns selectors, scopes, and consumer keys', () => {
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
     for (const key of requiredKeys) expect(projected.colors[key]).toBeDefined();
+    expect(projected.semanticHighlighting).toBe(false);
+    expect(projected).not.toHaveProperty('semanticTokenColors');
     for (const [index, role] of REQUIRED_THEME_ROLES.brackets.entries()) {
       expect(projected.colors[`editorBracketHighlight.foreground${index + 1}`]).toBe(
         bracketColor(theme, role)
       );
     }
-    expect(projected.semanticTokenColors.parameter.foreground).toBe(syntaxColor(theme, 'data'));
-    expect(projected.semanticTokenColors.type.foreground).toBe(syntaxColor(theme, 'type'));
     expect(projected.colors['symbolIcon.constructorForeground']).toBe(syntaxColor(theme, 'type'));
     expect(projected.colors['terminal.ansiMagenta']).toBe(terminalColor(theme, 'ansi.magenta'));
   }
@@ -75,7 +75,6 @@ test('VS Code projection reserves italics for intended grammar surfaces', () => 
   expect(italicScopes).toContain('variable.language');
   expect(italicScopes).toContain('markup.italic');
   expect(italicScopes.some((scope: string) => scope.includes('deprecated'))).toBe(false);
-  expect(VSCODE_PROJECTION.semanticTokenColors['*.deprecated'].fontStyle).toBe('strikethrough');
 });
 
 test('shared color parser rejects malformed source hex colors', () => {

@@ -26,7 +26,7 @@ The six variants are intentionally different expressions of the same semantic sy
 | **Tyrian Pastel** | Velvet plum and soft-focus | Independent soft-focus branch with related categorical hues, gentle pigments, and layered plum surfaces |
 | **Tyrian Abyss** | Near-black cosmic nebula | Nocturne pushed darker and more chromatic, with stellar cobalt and ultraviolet structure on deep-space indigo |
 | **Tyrian Dawn** | Near-white and ink-dark | Light translation of Nocturne with the same categorical syntax, hierarchy, and interaction behavior |
-| **Tyrian Night Old** | Historical reference | Earlier low-chroma character translated onto the same schema-v5 roles, family hues, opacity policy, and safety gates |
+| **Tyrian Night Old** | Historical reference | Frozen earlier low-chroma palette translated through the current schema-v5 bindings, opacity policy, and safety gates |
 
 Purple owns identity, focus, keywords, and selected emphasis. It does not replace warm errors, amber warnings and regular expressions, green strings and success, dusty-blue functions, smoky-indigo structural types, cool-rose data, or blue information. Green-through-cyan hues are reserved for strings, success-derived states, hints, and ANSI green; they are excluded from other code and UI roles. Terminal ANSI names remain protocol slots; each theme owns their rendered material.
 
@@ -90,7 +90,7 @@ Read the desktop product contract before applying it. The full rice is not a gen
 - `source/themeOpacityContract.json` owns one family opacity policy, with explicit appearance-only overrides.
 - `source/themeFamilyContract.json` owns the canonical/default theme, semantic pigment vocabulary, hue profiles, variant appearance classifications, energy envelopes, and branch hue limits.
 - `source/themePigmentPolicy.json` owns the family-wide green-through-cyan reservation over resolved semantic roles: strings, success-derived states, hints, and ANSI green are allowed.
-- `source/themes/` owns explicit per-role OKLCH lightness and chroma for every schema-v5 variant, including the historical-reference Tyrian Night Old recipe.
+- `source/themes/` owns explicit per-role OKLCH lightness and chroma for every schema-v5 variant; the family contract freezes the Tyrian Night Old palette while current bindings continue to project it.
 - `source/themeSafetyContract.json` owns hard rendered-contrast and state-identity requirements and applies automatically to every catalog theme.
 - `scripts/colorScience.mjs` owns policy-free sRGB, contrast, OKLab/OKLCH, distance, and richness observations.
 - `examples/theme-preview/` owns the small real-editor inspection corpus and a generated production-family workbench; it is guidance, not a scored approval system.

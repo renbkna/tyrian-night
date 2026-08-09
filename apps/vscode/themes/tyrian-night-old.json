@@ -1,7 +1,7 @@
 {
   "name": "Tyrian Night Old",
   "type": "dark",
-  "semanticHighlighting": true,
+  "semanticHighlighting": false,
   "colors": {
     "editorBracketHighlight.foreground1": "#B9A3CC",
     "editorBracketHighlight.foreground2": "#C0A38C",
@@ -680,102 +680,6 @@
     "tab.unfocusedActiveForeground": "#807494",
     "tab.unfocusedInactiveForeground": "#807494",
     "titleBar.inactiveForeground": "#807494"
-  },
-  "semanticTokenColors": {
-    "*.declaration": {
-      "bold": true
-    },
-    "variable": {
-      "foreground": "#D2C7DF"
-    },
-    "parameter": {
-      "foreground": "#AF789A"
-    },
-    "variable.local": {
-      "foreground": "#D2C7DF"
-    },
-    "variable.defaultLibrary": {
-      "foreground": "#AF789A"
-    },
-    "variable.readonly": {
-      "foreground": "#AF789A"
-    },
-    "property.readonly": {
-      "foreground": "#AF789A"
-    },
-    "function": {
-      "foreground": "#7B93BF"
-    },
-    "function.defaultLibrary": {
-      "foreground": "#7B93BF"
-    },
-    "method": {
-      "foreground": "#7B93BF"
-    },
-    "class": {
-      "foreground": "#7574B2"
-    },
-    "class.defaultLibrary": {
-      "foreground": "#7574B2"
-    },
-    "interface": {
-      "foreground": "#7574B2"
-    },
-    "type": {
-      "foreground": "#7574B2"
-    },
-    "typeParameter": {
-      "foreground": "#7574B2"
-    },
-    "namespace": {
-      "foreground": "#7574B2"
-    },
-    "enum": {
-      "foreground": "#7574B2"
-    },
-    "enumMember": {
-      "foreground": "#AF789A"
-    },
-    "property": {
-      "foreground": "#D2C7DF"
-    },
-    "decorator": {
-      "foreground": "#7574B2"
-    },
-    "macro": {
-      "foreground": "#7574B2"
-    },
-    "regexp": {
-      "foreground": "#B18339"
-    },
-    "keyword": {
-      "foreground": "#98699F"
-    },
-    "operator": {
-      "foreground": "#98699F"
-    },
-    "string": {
-      "foreground": "#5B8B5E"
-    },
-    "number": {
-      "foreground": "#AF789A"
-    },
-    "comment": {
-      "foreground": "#867B9B"
-    },
-    "*.readonly": {
-      "foreground": "#AF789A"
-    },
-    "*.deprecated": {
-      "foreground": "#AF789A",
-      "fontStyle": "strikethrough"
-    },
-    "*.documentation": {
-      "foreground": "#968BAB"
-    },
-    "constructor": {
-      "foreground": "#7574B2"
-    }
   },
   "tokenColors": [
     {

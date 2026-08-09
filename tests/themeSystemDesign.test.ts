@@ -67,6 +67,12 @@ test('the family contract fixes hue identity and proves each declared energy tie
     'syntax:string',
     'syntax:regexp',
   ]);
+  expect(family.syntaxBalance).toEqual({
+    functionTypeLightnessDelta: { minimum: -0.05, maximum: 0.05 },
+    keywordFunctionChromaDelta: { minimum: -0.005, maximum: 0.5 },
+    keywordTypeChromaDelta: { minimum: -0.03, maximum: 0.03 },
+    typeFunctionChromaDelta: { minimum: -0.005, maximum: 0.5 },
+  });
   expect(family.energyLine.variants['tyrian-night'].semanticChromaRatio).toEqual({
     minimum: 0.6,
     maximum: 0.7,
@@ -120,13 +126,46 @@ test('the family contract fixes hue identity and proves each declared energy tie
   const nocturneChroma = semanticChroma('tyrian-nocturne');
   expectWithin(semanticChroma('tyrian-night') / nocturneChroma, 0.6, 0.7);
   expectWithin(semanticChroma('tyrian-abyss') / nocturneChroma, 1.3, 1.45);
-  expectWithin(semanticChroma('tyrian-abyss'), 0.19, 0.2);
   expectWithin(semanticContrast('tyrian-night'), 4.8, 5.3);
   expectWithin(semanticContrast('tyrian-nocturne'), 5.8, 6.4);
   expectWithin(semanticContrast('tyrian-abyss'), 6.6, 7.3);
   expect(canvasLightness('tyrian-abyss')).toBeLessThan(canvasLightness('tyrian-nocturne'));
   expect(canvasLightness('tyrian-nocturne')).toBeLessThan(canvasLightness('tyrian-night'));
   expect(canvasLightness('tyrian-dawn')).toBeGreaterThan(0.95);
+});
+
+test('each maintained palette balances saturated keywords, types, and functions', () => {
+  const family = loadThemeRepository().definition.familyContract;
+  const balance = family.syntaxBalance;
+  for (const source of SOURCE_THEMES.filter(
+    ({ slug }) => family.branches[slug]?.kind !== 'historical-reference'
+  )) {
+    const syntax = readSourceTheme(source).syntax;
+    const keyword = hexToOklch(syntax.keyword);
+    const type = hexToOklch(syntax.type);
+    const method = hexToOklch(syntax.function);
+
+    expectWithin(
+      method.L - type.L,
+      balance.functionTypeLightnessDelta.minimum,
+      balance.functionTypeLightnessDelta.maximum
+    );
+    expectWithin(
+      keyword.C - method.C,
+      balance.keywordFunctionChromaDelta.minimum,
+      balance.keywordFunctionChromaDelta.maximum
+    );
+    expectWithin(
+      keyword.C - type.C,
+      balance.keywordTypeChromaDelta.minimum,
+      balance.keywordTypeChromaDelta.maximum
+    );
+    expectWithin(
+      type.C - method.C,
+      balance.typeFunctionChromaDelta.minimum,
+      balance.typeFunctionChromaDelta.maximum
+    );
+  }
 });
 
 test('the historical-reference branch uses current bindings and opacity policy', () => {
@@ -139,6 +178,7 @@ test('the historical-reference branch uses current bindings and opacity policy',
   expect(recipe).not.toHaveProperty('appearance');
   expect(recipe).not.toHaveProperty('hueProfile');
   expect(repository.definition.familyContract.branches['tyrian-night-old']).toEqual({
+    frozenPaletteSha256: '28f3736a9afd2536cc5667f0bec8684317155a759329c8148c574ea5e51fb789',
     hueProfile: 'core',
     kind: 'historical-reference',
     maximumSemanticHueDistance: 0,

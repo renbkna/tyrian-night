@@ -33,6 +33,7 @@
   "editor.inlayHints.fontSize": 12,
   "editor.letterSpacing": 0,
   "editor.lineHeight": 1.5,
+  "editor.semanticHighlighting.enabled": "configuredByTheme",
   "markdown.preview.fontFamily": "'iA Writer Quattro', 'Inter Variable', Georgia, serif",
   "scm.inputFontFamily": "'Inter Variable', 'Inter', -apple-system, system-ui, sans-serif",
   "editor.bracketPairColorization.enabled": true,

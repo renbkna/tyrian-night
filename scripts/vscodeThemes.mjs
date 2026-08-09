@@ -30,16 +30,6 @@ export function buildVscodeTheme(theme, projection) {
   projectColors(colors, projection.vscode, (role) => vscodeColor(theme, role));
   enforceContrastContract(colors, projection.contrastPairs, theme.name);
 
-  const semanticTokenColors = Object.fromEntries(
-    Object.entries(projection.semanticTokenColors).map(([selector, settings]) => [
-      selector,
-      {
-        ...(settings.role ? { foreground: syntaxColor(theme, settings.role) } : {}),
-        ...(settings.bold ? { bold: true } : {}),
-        ...(settings.fontStyle ? { fontStyle: settings.fontStyle } : {}),
-      },
-    ])
-  );
   const tokenColors = projection.tokenColors.map((token) => ({
     scope: token.scope,
     settings: {
@@ -51,9 +41,8 @@ export function buildVscodeTheme(theme, projection) {
   return {
     name: theme.name,
     type: theme.appearance,
-    semanticHighlighting: true,
+    semanticHighlighting: false,
     colors,
-    semanticTokenColors,
     tokenColors,
   };
 }

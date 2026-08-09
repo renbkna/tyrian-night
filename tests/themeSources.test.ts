@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -214,14 +215,21 @@ test('injected repository role membership is validated by that repository contex
     family.pigmentHues['ui:injected.owner.role'] = Object.fromEntries(
       family.hueProfiles.map((profile: string) => [profile, 250])
     );
-    fs.writeFileSync(familyPath, `${JSON.stringify(family)}\n`);
-
     for (const fileName of fs.readdirSync(path.join(root, 'source/themes'))) {
       const themePath = path.join(root, 'source/themes', fileName);
       const theme = readJson<any>(themePath);
       theme.oklch['ui:injected.owner.role'] = [0.5, 0.02];
       fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+      if (fileName === 'tyrian-night-old.json') {
+        const palette = Object.entries(theme.oklch).toSorted(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0
+        );
+        family.branches['tyrian-night-old'].frozenPaletteSha256 = createHash('sha256')
+          .update(JSON.stringify(palette))
+          .digest('hex');
+      }
     }
+    fs.writeFileSync(familyPath, `${JSON.stringify(family)}\n`);
 
     const repository = loadThemeRepository(root);
     expect(repository.definition.requiredThemeRoles.ui).toContain('injected.owner.role');
@@ -312,8 +320,8 @@ test('theme source contracts reject non-current schema versions', () => {
     [
       'themeFamilyContract.json',
       'source/themeFamilyContract.json',
-      2,
-      'Theme family contract must use schemaVersion 1.',
+      1,
+      'Theme family contract must use schemaVersion 2.',
     ],
   ];
 
@@ -407,6 +415,40 @@ test('family relationship validation rejects palette energy drift', () => {
   }
 });
 
+test('family relationship validation rejects syntax balance drift', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-syntax-balance-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-night.json');
+    const theme = readJson<any>(themePath);
+    theme.oklch['syntax:type'][0] = 0.7;
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Theme 'tyrian-night' function/type lightness delta"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('historical-reference palette rejects drift', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-frozen-palette-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-night-old.json');
+    const theme = readJson<any>(themePath);
+    theme.oklch['syntax:function'][0] = 0.7;
+    fs.writeFileSync(themePath, `${JSON.stringify(theme)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Historical-reference theme 'tyrian-night-old' palette is frozen."
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('family relationship validation rejects undefined chroma ratios', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-zero-chroma-'));
   try {
@@ -451,6 +493,7 @@ test('family classification rejects absent and overlapping recipe classification
       'overlapping branch',
       (family) => {
         family.branches['tyrian-night'] = {
+          frozenPaletteSha256: '28f3736a9afd2536cc5667f0bec8684317155a759329c8148c574ea5e51fb789',
           hueProfile: 'core',
           kind: 'historical-reference',
           maximumSemanticHueDistance: 0,
@@ -585,7 +628,7 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
         (projection) => {
           projection.schemaVersion = 1;
         },
-        'schemaVersion 5',
+        'schemaVersion 6',
       ],
       [
         'top-level namespace',
@@ -600,20 +643,6 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
           projection.ui['accent.primary'] = 'focusBorder';
         },
         'non-empty string array',
-      ],
-      [
-        'semantic boolean',
-        (projection) => {
-          projection.semanticTokenColors['*.declaration'].bold = 'true';
-        },
-        'non-boolean bold flag',
-      ],
-      [
-        'semantic role',
-        (projection) => {
-          projection.semanticTokenColors.parameter.role = 42;
-        },
-        'must be a non-empty string',
       ],
       [
         'grammar scope array',
