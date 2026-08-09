@@ -454,20 +454,37 @@ test('exclusive lock records are complete before their names become visible', ()
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-exclusive-'));
   const lockPath = path.join(root, 'install.lock');
   const originalLink = fs.linkSync;
-  const originalFsync = fs.fsyncSync;
-  const syncedFiles = new Set<string>();
+  const originalWrite = fs.writeFileSync;
+  const durableWrites = new Map<string, fs.WriteFileOptions>();
   let ownerPublicationObserved = false;
 
-  fs.fsyncSync = ((descriptor: number) => {
-    const stats = fs.fstatSync(descriptor);
-    syncedFiles.add(`${stats.dev}:${stats.ino}`);
-    return originalFsync(descriptor);
-  }) as typeof fs.fsyncSync;
+  fs.writeFileSync = ((filePath: fs.PathLike | number, data, options) => {
+    const result = originalWrite(filePath, data, options);
+
+    if (
+      typeof filePath !== 'number' &&
+      typeof options === 'object' &&
+      options !== null &&
+      options.flag === 'wx' &&
+      options.flush === true
+    ) {
+      const stats = fs.statSync(filePath);
+      durableWrites.set(`${stats.dev}:${stats.ino}`, options);
+    }
+
+    return result;
+  }) as typeof fs.writeFileSync;
 
   fs.linkSync = ((existingPath: fs.PathLike, newPath: fs.PathLike) => {
     if (String(newPath).includes('.owner-')) {
       const sourceStats = fs.statSync(existingPath);
-      expect(syncedFiles.has(`${sourceStats.dev}:${sourceStats.ino}`)).toBe(true);
+      const writeOptions = durableWrites.get(`${sourceStats.dev}:${sourceStats.ino}`);
+      expect(writeOptions).toMatchObject({
+        encoding: 'utf8',
+        flag: 'wx',
+        flush: true,
+        mode: 0o600,
+      });
       expect(() => JSON.parse(fs.readFileSync(existingPath, 'utf8'))).not.toThrow();
       expect(fs.existsSync(newPath)).toBe(false);
       ownerPublicationObserved = true;
@@ -486,7 +503,7 @@ test('exclusive lock records are complete before their names become visible', ()
     );
   } finally {
     fs.linkSync = originalLink;
-    fs.fsyncSync = originalFsync;
+    fs.writeFileSync = originalWrite;
     fs.rmSync(root, { recursive: true, force: true });
   }
 

@@ -53,6 +53,14 @@ export function exists(filePath) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+export function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+/**
  * Directory generations require an atomic exchange primitive. Probe that
  * protocol capability before a transaction allocates evidence or mutates its
  * first owned target.
@@ -456,18 +464,12 @@ export function writeOwnedRecoveryCandidateRaw(ownerRoot, candidatePath, content
       removePathIfReachable(anchoredPath);
     }
 
-    const candidateDescriptor = fs.openSync(
-      anchoredPath,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
-      0o600
-    );
-
-    try {
-      fs.writeFileSync(candidateDescriptor, content, 'utf8');
-      fs.fsyncSync(candidateDescriptor);
-    } finally {
-      fs.closeSync(candidateDescriptor);
-    }
+    fs.writeFileSync(anchoredPath, content, {
+      encoding: 'utf8',
+      flag: 'wx',
+      flush: true,
+      mode: 0o600,
+    });
 
     fsyncDirectoryDescriptor(descriptor);
   });
@@ -1053,7 +1055,7 @@ function readValidatedSnapshotManifest(backupRoot, options) {
  * @param {string} candidate
  * @returns {boolean}
  */
-function isSameOrDescendant(ancestor, candidate) {
+export function isSameOrDescendant(ancestor, candidate) {
   const relativePath = path.relative(ancestor, candidate);
 
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
@@ -1655,14 +1657,12 @@ function writeExclusiveJson(filePath, value) {
   const temporaryPath = path.join(directory, `.${path.basename(filePath)}.${randomUUID()}.tmp`);
 
   try {
-    const descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
-
-    try {
-      fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-      fs.fsyncSync(descriptor);
-    } finally {
-      fs.closeSync(descriptor);
-    }
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      flush: true,
+      mode: 0o600,
+    });
 
     // Hard-link publication retains create-if-absent ownership without exposing
     // the record while it is being written.
@@ -1901,7 +1901,7 @@ function sleepSync(milliseconds) {
  * @param {string} directory
  * @returns {void}
  */
-function fsyncDirectory(directory) {
+export function fsyncDirectory(directory) {
   const descriptor = fs.openSync(directory, 'r');
 
   try {

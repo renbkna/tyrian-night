@@ -1,10 +1,11 @@
 // @ts-check
 
 import { execFileSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { hash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checkRequiredCommands, hasCommand } from './commandChecks.mjs';
 import {
@@ -19,8 +20,11 @@ import {
 } from './installLiveTyrian.mjs';
 import {
   admitOwnedPaths,
+  escapeRegExp,
   exists,
+  fsyncDirectory,
   installManagedPathRaw,
+  isSameOrDescendant,
   operation,
   publishStagedOwnedPathRaw,
   removeOwnedPathRaw,
@@ -36,7 +40,7 @@ import {
   WALLPAPER_ASSET_PATH,
 } from './portableAssets.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const home = os.homedir();
 
 export const RICE_ROOT = 'rice';
@@ -72,7 +76,6 @@ const PLASMA_KCONFIG_LOCATION_TO_SEMANTIC = new Map(PLASMA_KCONFIG_LOCATION_ENTR
 const PLASMA_SEMANTIC_LOCATION_TO_KCONFIG = new Map(
   PLASMA_KCONFIG_LOCATION_ENTRIES.map(([numeric, semantic]) => [semantic, numeric])
 );
-const PLASMA_PANEL_LOCATIONS = new Set(PLASMA_SEMANTIC_LOCATION_TO_KCONFIG.keys());
 const CAPTURE_LOCK_PATH = '.tyrian-rice-capture.lock';
 const CAPTURE_JOURNAL_PATH = '.tyrian-rice-capture-journal.json';
 const CAPTURE_JOURNAL_CANDIDATE_PATH = `${CAPTURE_JOURNAL_PATH}.next`;
@@ -286,7 +289,10 @@ function captureRiceLayoutOwned(
     const frozenDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
     const frozenPanels = readSnapshotPanelGenerationById(frozenDesktop);
 
-    if (!sameKeySet(beforeStopPanels, frozenPanels)) {
+    if (
+      beforeStopPanels.size !== frozenPanels.size ||
+      [...beforeStopPanels].some((panelId) => !frozenPanels.has(panelId))
+    ) {
       throw new Error('Plasma panel generation changed while the capture was being frozen');
     }
 
@@ -670,42 +676,12 @@ function readPlasmaLifecycle(userHome) {
   const previousWallpapers = Array.isArray(journal?.previousWallpapers)
     ? journal.previousWallpapers
     : [];
-  const wallpapersValid = previousWallpapers.every((candidate) => {
-    const wallpaper =
-      /** @type {{ activityId?: unknown; screen?: unknown; image?: unknown; wallpaperPlugin?: unknown }} */ (
-        candidate
-      );
-
-    return (
-      typeof wallpaper?.activityId === 'string' &&
-      Number.isSafeInteger(wallpaper.screen) &&
-      Number(wallpaper.screen) >= 0 &&
-      typeof wallpaper.image === 'string' &&
-      wallpaper.image.length > 0 &&
-      typeof wallpaper.wallpaperPlugin === 'string' &&
-      wallpaper.wallpaperPlugin.length > 0
-    );
-  });
+  const wallpapersValid = previousWallpapers.every(isWallpaperRuntimeState);
   /** @type {unknown[]} */
   const desiredWallpapers = Array.isArray(journal?.desiredWallpapers)
     ? journal.desiredWallpapers
     : [];
-  const desiredWallpapersValid = desiredWallpapers.every((candidate) => {
-    const wallpaper =
-      /** @type {{ activityId?: unknown; screen?: unknown; image?: unknown; wallpaperPlugin?: unknown }} */ (
-        candidate
-      );
-
-    return (
-      typeof wallpaper?.activityId === 'string' &&
-      Number.isSafeInteger(wallpaper.screen) &&
-      Number(wallpaper.screen) >= 0 &&
-      typeof wallpaper.image === 'string' &&
-      wallpaper.image.length > 0 &&
-      typeof wallpaper.wallpaperPlugin === 'string' &&
-      wallpaper.wallpaperPlugin.length > 0
-    );
-  });
+  const desiredWallpapersValid = desiredWallpapers.every(isWallpaperRuntimeState);
 
   if (
     journal?.version !== 3 ||
@@ -822,7 +798,6 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
     for (const entry of entries) {
       if (entry.existed) {
         installManagedPathRaw('copy', entry.targetPath, entry.backupPath, { ownerRoot: root });
-        fsyncFile(entry.backupPath);
 
         if (readCaptureFileGeneration(entry.backupPath) !== entry.originalChecksum) {
           throw new Error(`Rice capture backup verification failed for ${entry.targetPath}`);
@@ -832,7 +807,6 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
       const { content, message, stagedPath } = entry;
       console.log(message);
       writeBinaryFileRaw(stagedPath, content, { ownerRoot: root });
-      fsyncFile(stagedPath);
     }
 
     fsyncDirectory(path.join(transactionRoot, 'stage'));
@@ -850,8 +824,6 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
       const { stagedPath, targetPath, originalChecksum } = entries[index];
       assertCaptureFileGeneration(targetPath, originalChecksum, 'before publication');
       publishStagedOwnedPathRaw(root, stagedPath, targetPath);
-      fsyncFile(targetPath);
-      fsyncDirectory(path.dirname(targetPath));
 
       if (testInterruptPublicationAfter === index + 1) {
         throw new SimulatedCaptureInterruption();
@@ -899,7 +871,7 @@ class SimulatedCaptureInterruption extends Error {
  * @returns {string}
  */
 function captureChecksum(content) {
-  return createHash('sha256').update(content).digest('hex');
+  return hash('sha256', content, 'hex');
 }
 
 /**
@@ -1119,20 +1091,16 @@ function recoverCapturePublication(root) {
           installManagedPathRaw('copy', path.join(root, entry.backupPath), restorePath, {
             ownerRoot: root,
           });
-          fsyncFile(restorePath);
           if (readCaptureFileGeneration(restorePath) !== entry.originalChecksum) {
             throw new Error(`Rice capture recovery restore copy changed for ${entry.targetPath}`);
           }
 
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
           publishStagedOwnedPathRaw(root, restorePath, targetPath);
-          fsyncFile(targetPath);
         } else {
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
           removeOwnedPathRaw(root, targetPath);
         }
-
-        fsyncDirectory(path.dirname(targetPath));
       } catch (error) {
         failures.push(error);
       }
@@ -1237,34 +1205,6 @@ function finalizeCapturePublication(root, journalPath, transactionRoot) {
 }
 
 /**
- * @param {string} directory
- * @returns {void}
- */
-function fsyncDirectory(directory) {
-  const descriptor = fs.openSync(directory, 'r');
-
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-}
-
-/**
- * @param {string} filePath
- * @returns {void}
- */
-function fsyncFile(filePath) {
-  const descriptor = fs.openSync(filePath, 'r');
-
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-}
-
-/**
  * @param {string} leftRoot
  * @param {string} rightRoot
  * @param {string} owner
@@ -1277,17 +1217,6 @@ function assertIndependentRoots(leftRoot, rightRoot, owner) {
   if (isSameOrDescendant(left, right) || isSameOrDescendant(right, left)) {
     throw new Error(`${owner} must not overlap: ${leftRoot} <-> ${rightRoot}`);
   }
-}
-
-/**
- * @param {string} ancestor
- * @param {string} candidate
- * @returns {boolean}
- */
-function isSameOrDescendant(ancestor, candidate) {
-  const relativePath = path.relative(ancestor, candidate);
-
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
 /**
@@ -1329,46 +1258,27 @@ function assertPlasmaShellActive(runCommand, owner) {
 }
 
 /**
- * @param {Map<string, unknown>} left
- * @param {Map<string, unknown>} right
- * @returns {boolean}
- */
-function sameKeySet(left, right) {
-  return left.size === right.size && [...left.keys()].every((key) => right.has(key));
-}
-
-/**
  * @param {Map<string, PanelRuntimeState>} before
  * @param {Map<string, PanelRuntimeState>} after
  * @returns {boolean}
  */
 function samePanelRuntimeState(before, after) {
-  if (!sameKeySet(before, after)) {
-    return false;
-  }
+  return (
+    before.size === after.size &&
+    [...before].every(([panelId, expected]) => {
+      const actual = after.get(panelId);
 
-  return hasPanelRuntimeState(before, after);
-}
-
-/**
- * @param {Map<string, PanelRuntimeState>} expectedState
- * @param {Map<string, PanelRuntimeState>} actualState
- * @returns {boolean}
- */
-function hasPanelRuntimeState(expectedState, actualState) {
-  return [...expectedState].every(([panelId, expected]) => {
-    const actual = actualState.get(panelId);
-
-    return (
-      actual !== undefined &&
-      actual.hiding === expected.hiding &&
-      actual.alignment === expected.alignment &&
-      actual.screen === expected.screen &&
-      actual.location === expected.location &&
-      Math.abs((actual.lengthRatio ?? 0) - (expected.lengthRatio ?? 0)) <= 0.002 &&
-      Math.abs((actual.height ?? 0) - (expected.height ?? 0)) <= 0.5
-    );
-  });
+      return (
+        actual !== undefined &&
+        actual.hiding === expected.hiding &&
+        actual.alignment === expected.alignment &&
+        actual.screen === expected.screen &&
+        actual.location === expected.location &&
+        Math.abs((actual.lengthRatio ?? 0) - (expected.lengthRatio ?? 0)) <= 0.002 &&
+        Math.abs((actual.height ?? 0) - (expected.height ?? 0)) <= 0.5
+      );
+    })
+  );
 }
 
 /**
@@ -1405,7 +1315,7 @@ function buildDesiredPanelRuntimeState(panelStateById, screen) {
     [...panelStateById].map(([panelId, state]) => {
       const location = state.location;
 
-      if (!location || !PLASMA_PANEL_LOCATIONS.has(location)) {
+      if (!location || !PLASMA_SEMANTIC_LOCATION_TO_KCONFIG.has(location)) {
         throw new Error(`Plasma panel ${panelId} has no owned placement in the layout snapshot`);
       }
 
@@ -1579,7 +1489,12 @@ function installRiceOwned(options) {
         stagingRoot: livePlan?.stagingRoot,
       });
     } else if (withPlasmaLayout && !link) {
-      materializeRiceLayoutAssets(root, userHome, runtimeRoot, apply);
+      materializeRiceLayoutAsset(
+        path.join(root, RICE_WALLPAPER_PATH),
+        userHome,
+        path.join(runtimeRoot, RICE_WALLPAPER_PATH),
+        apply
+      );
     }
 
     if (testInterruptAfterStyle) {
@@ -1831,7 +1746,10 @@ function applyPlasmaLayoutInstall(plan) {
 
   try {
     for (const entry of preparedEntries) {
-      stageTextFile(plan.home, entry.stagedPath, entry.installedContent);
+      writeTextFileRaw(entry.stagedPath, entry.installedContent, {
+        finalNewline: true,
+        ownerRoot: plan.home,
+      });
     }
 
     console.log('apply: stop Plasma shell before restoring layout');
@@ -2299,7 +2217,7 @@ function parsePanelStateJson(output) {
       !PLASMA_PANEL_ALIGNMENTS.has(entry.alignment) ||
       !Number.isSafeInteger(entry.screen) ||
       entry.screen < 0 ||
-      !PLASMA_PANEL_LOCATIONS.has(entry.location) ||
+      !PLASMA_SEMANTIC_LOCATION_TO_KCONFIG.has(entry.location) ||
       !Number.isFinite(entry.lengthRatio) ||
       entry.lengthRatio <= 0 ||
       !Number.isFinite(entry.height) ||
@@ -2442,15 +2360,15 @@ function readSnapshotPanelStateById(desktopLayout) {
  * projected into it. At that boundary only panel identity is authoritative.
  *
  * @param {string} desktopLayout
- * @returns {Map<string, true>}
+ * @returns {Set<string>}
  */
 function readSnapshotPanelGenerationById(desktopLayout) {
-  const panels = new Map();
+  const panels = new Set();
 
   replaceContainmentSections(desktopLayout, (section, id) => {
     if (!/^plugin=org\.kde\.panel$/mu.test(section)) return section;
     assertUniqueSnapshotPanelIdentity(panels, id);
-    panels.set(id, true);
+    panels.add(id);
     return section;
   });
 
@@ -2458,7 +2376,7 @@ function readSnapshotPanelGenerationById(desktopLayout) {
 }
 
 /**
- * @param {Map<string, unknown>} panels
+ * @param {Map<string, unknown> | Set<string>} panels
  * @param {string} id
  * @returns {void}
  */
@@ -2624,14 +2542,6 @@ function stripAnsi(value) {
 }
 
 /**
- * @param {string} value
- * @returns {string}
- */
-function escapeRegExp(value) {
-  return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-}
-
-/**
  * @param {string} content
  * @param {(section: string, id: string) => string} replaceSection
  * @returns {string}
@@ -2658,20 +2568,6 @@ function upsertSectionKey(section, key, value) {
   }
 
   return section.endsWith('\n') ? `${section}${line}\n` : `${section}\n${line}\n`;
-}
-
-/**
- * @param {string} root
- * @param {string} ownerRoot
- * @param {string} runtimeRoot
- * @param {boolean} apply
- * @returns {void}
- */
-function materializeRiceLayoutAssets(root, ownerRoot, runtimeRoot, apply) {
-  const sourcePath = path.join(root, RICE_WALLPAPER_PATH);
-  const targetPath = path.join(runtimeRoot, RICE_WALLPAPER_PATH);
-
-  materializeRiceLayoutAsset(sourcePath, ownerRoot, targetPath, apply);
 }
 
 /**
@@ -2748,20 +2644,7 @@ function readLivePlasmaWallpaperState(runCommand) {
   );
   const parsed = parseJsonFromQdbusOutput(output);
 
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length === 0 ||
-    !parsed.every(
-      (wallpaper) =>
-        typeof wallpaper?.activityId === 'string' &&
-        Number.isSafeInteger(wallpaper.screen) &&
-        wallpaper.screen >= 0 &&
-        typeof wallpaper.image === 'string' &&
-        wallpaper.image.length > 0 &&
-        typeof wallpaper.wallpaperPlugin === 'string' &&
-        wallpaper.wallpaperPlugin.length > 0
-    )
-  ) {
+  if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isWallpaperRuntimeState)) {
     throw new Error('Could not read live Plasma wallpaper runtime state');
   }
 
@@ -2771,6 +2654,24 @@ function readLivePlasmaWallpaperState(runCommand) {
     image,
     wallpaperPlugin,
   }));
+}
+
+/** @param {unknown} candidate @returns {candidate is WallpaperRuntimeState} */
+function isWallpaperRuntimeState(candidate) {
+  const wallpaper =
+    /** @type {{ activityId?: unknown; screen?: unknown; image?: unknown; wallpaperPlugin?: unknown }} */ (
+      candidate
+    );
+
+  return (
+    typeof wallpaper?.activityId === 'string' &&
+    Number.isSafeInteger(wallpaper.screen) &&
+    Number(wallpaper.screen) >= 0 &&
+    typeof wallpaper.image === 'string' &&
+    wallpaper.image.length > 0 &&
+    typeof wallpaper.wallpaperPlugin === 'string' &&
+    wallpaper.wallpaperPlugin.length > 0
+  );
 }
 
 /**
@@ -3068,16 +2969,6 @@ function assertRiceManifest(manifest) {
 }
 
 /**
- * @param {string} ownerRoot
- * @param {string} stagedPath
- * @param {string} content
- * @returns {void}
- */
-function stageTextFile(ownerRoot, stagedPath, content) {
-  writeTextFileRaw(stagedPath, content, { finalNewline: true, ownerRoot });
-}
-
-/**
  * @param {string} targetPath
  * @returns {string}
  */
@@ -3137,18 +3028,23 @@ function ensurePlasmaShellActive(runCommand, owner) {
  * @returns {void}
  */
 function main() {
-  const args = parseFlags(process.argv.slice(2), [
-    '--apply',
-    '--capture-layout',
-    '--check',
-    '--layout-only',
-    '--link',
-    '--recover',
-    '--style-only',
-  ]);
+  const { values: args } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      apply: { type: 'boolean' },
+      'capture-layout': { type: 'boolean' },
+      check: { type: 'boolean' },
+      'layout-only': { type: 'boolean' },
+      link: { type: 'boolean' },
+      recover: { type: 'boolean' },
+      'style-only': { type: 'boolean' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
 
-  if (args.has('--recover')) {
-    if (args.size !== 1) {
+  if (args.recover) {
+    if (Object.values(args).filter(Boolean).length !== 1) {
       throw new Error('Tyrian rice recovery cannot be combined with another mode.');
     }
 
@@ -3156,56 +3052,36 @@ function main() {
     return;
   }
 
-  if (args.has('--layout-only') && args.has('--style-only')) {
+  if (args['layout-only'] && args['style-only']) {
     throw new Error('Tyrian rice flags --layout-only and --style-only are mutually exclusive.');
   }
 
-  if (args.has('--capture-layout')) {
+  if (args['capture-layout']) {
     captureRiceLayout({ hasCommand });
     return;
   }
 
-  if (args.has('--check')) {
+  if (args.check) {
     checkRiceSnapshot();
     return;
   }
 
-  if (args.has('--apply') && !args.has('--layout-only')) {
+  if (args.apply && !args['layout-only']) {
     prepareLiveInstallRepository(repoRoot, {
       home,
-      link: args.has('--link'),
+      link: args.link,
       target: 'plasma',
     });
   }
 
   installRice({
-    apply: args.has('--apply'),
-    withPlasmaLayout: !args.has('--style-only'),
-    layoutOnly: args.has('--layout-only'),
-    link: args.has('--link'),
+    apply: args.apply,
+    withPlasmaLayout: !args['style-only'],
+    layoutOnly: args['layout-only'],
+    link: args.link,
   });
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   main();
-}
-
-/**
- * @param {string[]} argv
- * @param {string[]} allowedFlags
- * @returns {Set<string>}
- */
-function parseFlags(argv, allowedFlags) {
-  const allowed = new Set(allowedFlags);
-  const parsed = new Set();
-
-  for (const flag of argv) {
-    if (!allowed.has(flag)) {
-      throw new Error(`Unknown Tyrian rice flag '${flag}'.`);
-    }
-
-    parsed.add(flag);
-  }
-
-  return parsed;
 }

@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   buildDesktopThemeAssets,
@@ -18,8 +17,10 @@ import {
   admitOwnedPaths,
   assertAtomicDirectoryExchangeAvailable,
   discardOwnedPathSnapshot,
+  escapeRegExp,
   exists,
   installManagedPathRaw as installManagedPathWithMode,
+  isSameOrDescendant,
   operation,
   publishStagedOwnedPathRaw,
   recordOwnedPathGeneration,
@@ -48,7 +49,7 @@ import {
 } from './terminalThemes.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const home = os.homedir();
 const LIVE_INSTALL_LOCK_RELATIVE_PATH = '.tyrian-night-live-install.lock';
 const LIVE_INSTALL_TRANSACTION_RELATIVE_PATH =
@@ -404,7 +405,7 @@ export function installLiveTyrian(options) {
   const plan = buildLiveInstallPlan(options);
 
   assertRepositoryIndependentOfTargets(plan.repoRoot, buildPlanMutationTargets(plan));
-  assertNoDestinationSymlinkAncestors(plan.home, [...buildPlanMutationTargets(plan)]);
+  canonicalizeOwnedHomePaths(plan.home, [...buildPlanMutationTargets(plan)]);
   admitOwnedDirectories(
     plan.home,
     [plan.stagingRoot, plan.backupRoot],
@@ -448,7 +449,7 @@ export function recoverLiveTyrian(options = {}) {
 export function withLiveInstallLock(requestedHome, action, options = {}) {
   const userHome = resolvePathIdentity(requestedHome);
   const lockPath = path.join(userHome, LIVE_INSTALL_LOCK_RELATIVE_PATH);
-  assertNoDestinationSymlinkAncestors(userHome, [
+  canonicalizeOwnedHomePaths(userHome, [
     lockPath,
     path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH),
   ]);
@@ -658,15 +659,6 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
       },
     };
   });
-}
-
-/**
- * @param {string} userHome
- * @param {string[]} targetPaths
- * @returns {void}
- */
-function assertNoDestinationSymlinkAncestors(userHome, targetPaths) {
-  canonicalizeOwnedHomePaths(userHome, targetPaths);
 }
 
 /**
@@ -1526,18 +1518,10 @@ function buildPlanMutationTargets(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
+ * @param {Set<string>} [generatedPaths]
  * @returns {void}
  */
-function validateInstallSources(plan) {
-  return validateInstallSourcesWithGenerated(plan, new Set());
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @param {Set<string>} generatedPaths
- * @returns {void}
- */
-function validateInstallSourcesWithGenerated(plan, generatedPaths) {
+function validateInstallSourcesWithGenerated(plan, generatedPaths = new Set()) {
   const relativeSourcePaths = [
     ...plan.materializedPaths,
     'source/themeCatalog.json',
@@ -1663,22 +1647,11 @@ function assertRepositoryIndependentOfTargets(repositoryRoot, targetPaths) {
 }
 
 /**
- * @param {string} ancestor
- * @param {string} candidate
- * @returns {boolean}
- */
-function isSameOrDescendant(ancestor, candidate) {
-  const relativePath = path.relative(ancestor, candidate);
-
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
-
-/**
  * @param {LiveInstallPlan} plan
  * @returns {PreparedLiveInstall}
  */
 function prepareLiveInstall(plan) {
-  validateInstallSources(plan);
+  validateInstallSourcesWithGenerated(plan);
 
   const common = {
     fishStartupConfig: buildFishStartupConfig({
@@ -1864,7 +1837,11 @@ function installTargetLayer(plan, prepared) {
  */
 function installPlasmaLayer(plan, prepared) {
   installManagedPath(plan, plan.sourcePaths.kdeTyrianScheme, plan.livePaths.kdeTyrianScheme);
-  installPlasmaDesktopTheme(plan);
+  installManagedPath(
+    plan,
+    plan.sourcePaths.plasmaTyrianThemeRoot,
+    plan.livePaths.plasmaTyrianTheme
+  );
   installLookAndFeelPackage(plan);
   writeFile(plan, plan.livePaths.kdeglobals, prepared.kdeglobals);
   writeFile(plan, plan.livePaths.plasmarc, prepared.plasmarc);
@@ -1896,7 +1873,7 @@ function installManagedPath(plan, sourcePath, targetPath) {
   const verb = plan.mode === 'link' ? 'link' : 'copy';
 
   operation(plan.apply, `${verb} ${sourcePath} -> ${targetPath}`, () => {
-    installManagedPathRaw(plan, sourcePath, targetPath);
+    installManagedPathWithMode(plan.mode, sourcePath, targetPath, { ownerRoot: plan.home });
   });
 }
 
@@ -1911,28 +1888,6 @@ function publishRuntimeFile(plan, sourcePath, targetPath) {
   operation(plan.apply, `publish ${sourcePath} -> ${targetPath}`, () => {
     installManagedPathWithMode('copy', sourcePath, targetPath, { ownerRoot: plan.home });
   });
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @param {string} sourcePath
- * @param {string} targetPath
- * @returns {void}
- */
-function installManagedPathRaw(plan, sourcePath, targetPath) {
-  installManagedPathWithMode(plan.mode, sourcePath, targetPath, { ownerRoot: plan.home });
-}
-
-/**
- * @param {LiveInstallPlan} plan
- * @returns {void}
- */
-function installPlasmaDesktopTheme(plan) {
-  installManagedPath(
-    plan,
-    plan.sourcePaths.plasmaTyrianThemeRoot,
-    plan.livePaths.plasmaTyrianTheme
-  );
 }
 
 /**
@@ -2063,14 +2018,6 @@ function installSourceLabel(plan, sourcePath) {
 }
 
 /**
- * @param {string} value
- * @returns {string}
- */
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-}
-
-/**
  * @returns {void}
  */
 function main() {
@@ -2098,7 +2045,7 @@ function main() {
   installLiveTyrian(installOptions);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   main();
 }
 
