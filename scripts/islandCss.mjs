@@ -2,7 +2,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
@@ -10,7 +9,7 @@ import { themeColor } from './themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme, readThemeSources } from './themeSources.mjs';
 
 const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @typedef {{
@@ -298,18 +297,10 @@ ${baseCss}`;
  * @returns {Array<{ outputPath: string; css: string }>}
  */
 export function buildAllIslandCss(repoRoot = defaultRepoRoot) {
-  return islandCssThemes(repoRoot).map((theme) => ({
+  return projectIslandCssThemes(readThemeSources(repoRoot)).map((theme) => ({
     outputPath: theme.outputPath,
     css: renderIslandCss(theme, repoRoot),
   }));
-}
-
-/**
- * @param {string} repoRoot
- * @returns {typeof ISLAND_CSS_THEMES}
- */
-function islandCssThemes(repoRoot) {
-  return projectIslandCssThemes(readThemeSources(repoRoot));
 }
 
 /**
@@ -323,27 +314,6 @@ function projectIslandCssThemes(sourceThemes) {
     source,
     tokens: requireIslandThemeTokens(source.slug),
   }));
-}
-
-/**
- * @param {string} [repoRoot]
- * @returns {void}
- */
-export function writeIslandCss(repoRoot = defaultRepoRoot) {
-  syncGeneratedAssets(islandCssAssets(repoRoot), repoRoot, {
-    ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
-  });
-}
-
-/**
- * @param {string} [repoRoot]
- * @returns {string[]}
- */
-export function checkIslandCss(repoRoot = defaultRepoRoot) {
-  return syncGeneratedAssets(islandCssAssets(repoRoot), repoRoot, {
-    check: true,
-    ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
-  });
 }
 
 /**
@@ -405,10 +375,7 @@ function sourcePaletteTokens(theme) {
     '--islands-hover-rgb': rgbChannels(themeColor(theme, 'ui:surface.hover')),
     '--islands-selection-rgb': rgbChannels(themeColor(theme, 'ui:selection.active')),
     '--islands-selection-inactive-rgb': rgbChannels(themeColor(theme, 'ui:selection.inactive')),
-    '--islands-status-text': lowerHex(themeColor(theme, 'ui:text.status')),
     '--islands-terminal-black-rgb': rgbChannels(themeColor(theme, 'terminal:ansi.black')),
-    '--islands-text-primary': lowerHex(themeColor(theme, 'ui:text.primary')),
-    '--islands-text-secondary': lowerHex(themeColor(theme, 'ui:text.secondary')),
   };
 }
 
@@ -444,14 +411,14 @@ function requireIslandThemeTokens(slug) {
   return tokens;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (process.argv.includes('--check')) {
-    const staleFiles = checkIslandCss();
-    if (staleFiles.length > 0) {
-      console.error(`Island CSS is stale: ${staleFiles.join(', ')}`);
-      process.exit(1);
-    }
-  } else {
-    writeIslandCss();
+if (process.argv[1] === import.meta.filename) {
+  const staleFiles = syncGeneratedAssets(islandCssAssets(defaultRepoRoot), defaultRepoRoot, {
+    check: process.argv.includes('--check'),
+    ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
+  });
+
+  if (staleFiles.length > 0) {
+    console.error(`Island CSS is stale: ${staleFiles.join(', ')}`);
+    process.exit(1);
   }
 }

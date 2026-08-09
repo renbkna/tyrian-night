@@ -1,13 +1,12 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import {
-  loadVscodeProjectionContext,
+  loadVscodeProjection,
   bracketColor,
   syntaxColor,
   terminalColor,
@@ -15,7 +14,7 @@ import {
   vscodeColor,
 } from './themeDefinition.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
@@ -87,7 +86,7 @@ function enforceContrastContract(colors, pairs, themeName) {
 
 export function collectVscodeThemeAssets(root = repoRoot) {
   const repository = loadThemeRepository(root);
-  const projection = loadVscodeProjectionContext(root, repository.definition).vscodeProjection;
+  const projection = loadVscodeProjection(root, repository.definition);
 
   return repository.sources.map((source) => ({
     path: source.vscodeThemePath,
@@ -115,10 +114,9 @@ function projectColors(target, projection, resolve) {
   }
 }
 
-const args = new Set(process.argv.slice(2));
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   const stale = syncGeneratedAssets(collectVscodeThemeAssets(repoRoot), repoRoot, {
-    check: args.has('--check'),
+    check: process.argv.includes('--check'),
     ownership: [{ directory: 'apps/vscode/themes', match: /\.json$/u }],
   });
   if (stale.length > 0) {

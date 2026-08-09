@@ -2,10 +2,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { oklchToHex } from './colorScience.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 
 /** @typedef {'dark' | 'light'} ThemeAppearance */
 /**
@@ -88,22 +87,31 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  *   requiredThemeRoles: Readonly<{ brackets: readonly string[]; ui: readonly string[]; syntax: readonly string[]; terminal: readonly string[]; vscode: readonly string[] }>;
  * }} ThemeDefinitionContext
  */
-/**
- * @typedef {{
- *   definition: ThemeDefinitionContext;
- *   root: string;
- *   vscodeProjection: Readonly<VscodeProjection>;
- * }} VscodeProjectionContext
- */
-
 const defaultDefinitionContext = loadThemeDefinitionContext(repoRoot);
-const defaultVscodeProjectionContext = loadVscodeProjectionContext(
-  repoRoot,
-  defaultDefinitionContext
-);
+const defaultVscodeProjection = loadVscodeProjection(repoRoot, defaultDefinitionContext);
 
 export const REQUIRED_THEME_ROLES = defaultDefinitionContext.requiredThemeRoles;
-export const VSCODE_PROJECTION = defaultVscodeProjectionContext.vscodeProjection;
+export const VSCODE_PROJECTION = defaultVscodeProjection;
+
+/** Canonical ANSI palette order shared by terminal-compatible projections. */
+export const TERMINAL_ANSI_ROLES = Object.freeze([
+  'terminal:ansi.black',
+  'terminal:ansi.red',
+  'terminal:ansi.green',
+  'terminal:ansi.yellow',
+  'terminal:ansi.blue',
+  'terminal:ansi.magenta',
+  'terminal:ansi.cyan',
+  'terminal:ansi.white',
+  'terminal:ansi.brightBlack',
+  'terminal:ansi.brightRed',
+  'terminal:ansi.brightGreen',
+  'terminal:ansi.brightYellow',
+  'terminal:ansi.brightBlue',
+  'terminal:ansi.brightMagenta',
+  'terminal:ansi.brightCyan',
+  'terminal:ansi.brightWhite',
+]);
 
 /**
  * Loads the role-membership authority for one repository root.
@@ -158,9 +166,9 @@ export function loadThemeDefinitionContext(root = repoRoot) {
  * Loads the VS Code consumer projection against the role authority from the same root.
  * @param {string} [root]
  * @param {ThemeDefinitionContext} [definition]
- * @returns {VscodeProjectionContext}
+ * @returns {Readonly<VscodeProjection>}
  */
-export function loadVscodeProjectionContext(
+export function loadVscodeProjection(
   root = repoRoot,
   definition = loadThemeDefinitionContext(root)
 ) {
@@ -176,17 +184,7 @@ export function loadVscodeProjectionContext(
     definition.requiredThemeRoles
   );
 
-  return Object.freeze({ definition, root: resolvedRoot, vscodeProjection });
-}
-
-/**
- * @param {unknown} value
- * @param {string} sourceName
- * @param {ThemeDefinitionContext} [context]
- * @returns {ThemeDefinition}
- */
-export function validateThemeDefinition(value, sourceName, context = defaultDefinitionContext) {
-  return resolveThemeRecipe(validateThemeRecipe(value, sourceName, context), sourceName, context);
+  return vscodeProjection;
 }
 
 /**
@@ -197,11 +195,7 @@ export function validateThemeDefinition(value, sourceName, context = defaultDefi
  * @returns {ThemeRecipe}
  */
 export function validateThemeRecipe(value, sourceName, context = defaultDefinitionContext) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`Theme recipe '${sourceName}' must be an object.`);
-  }
-
-  const recipe = /** @type {Record<string, unknown>} */ (value);
+  const recipe = requirePlainObject(value, `Theme recipe '${sourceName}'`);
   if (recipe.schemaVersion !== 5) {
     throw new Error(`Theme recipe '${sourceName}' must use schemaVersion 5.`);
   }
@@ -711,10 +705,9 @@ function requireRole(roles, role, themeName, namespace) {
 
 /** @param {unknown} value @returns {ThemeRoleContract} */
 function validateThemeRoleContract(value) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Theme role contract must be an object.');
-  }
-  const contract = /** @type {Partial<ThemeRoleContract> & Record<string, unknown>} */ (value);
+  const contract = /** @type {Partial<ThemeRoleContract> & Record<string, unknown>} */ (
+    requirePlainObject(value, 'Theme role contract')
+  );
   if (contract.schemaVersion !== 2)
     throw new Error('Theme role contract must use schemaVersion 2.');
   const fields = Object.keys(contract).toSorted();
@@ -741,11 +734,10 @@ function validateThemeRoleContract(value) {
  * @returns {ThemeColorBindingContract}
  */
 function validateThemeColorBindingContract(value, requiredThemeRoles) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Theme color binding contract must be an object.');
-  }
   const contract =
-    /** @type {Partial<ThemeColorBindingContractSource> & Record<string, unknown>} */ (value);
+    /** @type {Partial<ThemeColorBindingContractSource> & Record<string, unknown>} */ (
+      requirePlainObject(value, 'Theme color binding contract')
+    );
   requireExactFields(
     contract,
     ['aliases', 'derived', 'schemaVersion'],
@@ -810,11 +802,8 @@ function validateThemeColorBindingContract(value, requiredThemeRoles) {
  * @returns {ThemeOpacityPolicy}
  */
 function validateThemeOpacityContract(value, colorBindings) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Theme opacity contract must be an object.');
-  }
   const contract = /** @type {Partial<ThemeOpacityContractSource> & Record<string, unknown>} */ (
-    value
+    requirePlainObject(value, 'Theme opacity contract')
   );
   requireExactFields(
     contract,

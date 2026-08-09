@@ -2,11 +2,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   colorMetrics,
   compareColors,
+  contrastRatio,
   gamutRelativeRichness,
   quantizeDiagnosticNumber,
 } from './colorScience.mjs';
@@ -14,7 +14,7 @@ import { opaqueHex } from './colorUtils.mjs';
 import { COLOR_VISION_MODES, simulateColorVision } from './colorVision.mjs';
 import { loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = path.resolve(import.meta.dirname, '..');
 export const THEME_SAFETY_CONTRACT_PATH = path.join(ROOT, 'source', 'themeSafetyContract.json');
 const PAIRINGS = new Set(['adjacent', 'adjacent-cycle', 'all']);
 
@@ -104,7 +104,8 @@ export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
   const violations = [];
   for (const constraint of contract.contrast) {
     for (const role of constraint.roles) {
-      const actual = colorMetrics(themeColor(theme, role), canvas).contrast ?? 0;
+      const foreground = opaqueHex(themeColor(theme, role), canvas);
+      const actual = contrastRatio(foreground, canvas);
       if (actual < constraint.minimum) {
         violations.push({
           actual,
@@ -119,7 +120,7 @@ export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
   for (const constraint of contract.contrastPairs) {
     const background = opaqueHex(themeColor(theme, constraint.background), canvas);
     const foreground = opaqueHex(themeColor(theme, constraint.foreground), background);
-    const actual = colorMetrics(foreground, background).contrast ?? 0;
+    const actual = contrastRatio(foreground, background);
     if (actual < constraint.minimum) {
       violations.push({
         actual,

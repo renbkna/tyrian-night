@@ -47,7 +47,7 @@
     "ui:effect.focusSurface": [0.3038512, 0.08519688],
     "ui:effect.activeSurface": [0.33530555, 0.10208148],
     "ui:effect.checkedSurface": [0.27153735, 0.07752854],
-    "syntax:data": [0.63802583, 0.16019289],
+    "syntax:data": [0.63802583, 0.12],
     "syntax:function": [0.70998364, 0.11268825],
     "syntax:type": [0.62418477, 0.15988654],
     "syntax:regexp": [0.64528832, 0.10732928],

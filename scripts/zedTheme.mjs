@@ -1,7 +1,6 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { contrastRatio } from './colorScience.mjs';
 import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
@@ -15,7 +14,7 @@ import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
  */
 
 const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const ZED_FUNCTION_FONT_WEIGHT = 500;
 
 /**
@@ -425,7 +424,7 @@ function zedBracketMatchBackground(theme) {
   return withHexAlpha(border, alpha);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   const staleFiles = writeZedThemeFamily(defaultRepoRoot, {
     check: process.argv.includes('--check'),
   });

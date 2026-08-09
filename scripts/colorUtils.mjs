@@ -88,10 +88,7 @@ function blendChannel(foreground, background, alpha) {
   return Math.round(foreground * alpha + background * (1 - alpha));
 }
 
-/**
- * @param {number} value
- * @returns {string}
- */
-function toHexByte(value) {
-  return value.toString(16).toUpperCase().padStart(2, '0');
+/** @param {number} value @returns {string} */
+export function toHexByte(value) {
+  return Math.round(value).toString(16).toUpperCase().padStart(2, '0');
 }

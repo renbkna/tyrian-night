@@ -13,7 +13,7 @@ const unsupported = args.find(
   (entry) => entry !== '--diagnostics' && !entry.startsWith('--theme=')
 );
 if (unsupported) throw new Error(`Unknown color audit option '${unsupported}'.`);
-const requestedTheme = argument(args, 'theme');
+const requestedTheme = args.find((entry) => entry.startsWith('--theme='))?.slice('--theme='.length);
 const showDiagnostics = args.includes('--diagnostics');
 const repository = loadThemeRepository();
 const contract = readThemeSafetyContract();
@@ -44,9 +44,3 @@ for (const source of sources) {
 }
 
 if (failed) process.exitCode = 1;
-
-/** @param {string[]} values @param {string} name */
-function argument(values, name) {
-  const prefix = `--${name}=`;
-  return values.find((entry) => entry.startsWith(prefix))?.slice(prefix.length);
-}

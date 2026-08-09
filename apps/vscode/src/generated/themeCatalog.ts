@@ -60,14 +60,10 @@ export type TyrianThemeLabel = TyrianThemeCatalogEntry['label'];
 
 export const DEFAULT_TYRIAN_THEME_LABEL = 'Tyrian Nocturne';
 
-export const TYRIAN_THEME_CSS: Record<string, string> = Object.fromEntries(
-  TYRIAN_THEME_CATALOG.map((theme) => [theme.label, theme.islandCssFile])
-);
-
 export function isTyrianThemeLabel(theme: string | undefined): theme is TyrianThemeLabel {
-  return theme !== undefined && Object.hasOwn(TYRIAN_THEME_CSS, theme);
+  return theme !== undefined && TYRIAN_THEME_CATALOG.some(({ label }) => label === theme);
 }
 
 export function getIslandCssFileForTheme(theme: string): string | undefined {
-  return TYRIAN_THEME_CSS[theme];
+  return TYRIAN_THEME_CATALOG.find(({ label }) => label === theme)?.islandCssFile;
 }

@@ -106,9 +106,9 @@
       "dawn": 331.054347
     },
     "syntax:data": {
-      "core": 352.945971,
-      "pastel": 347.787458,
-      "dawn": 353.457014
+      "core": 342,
+      "pastel": 342,
+      "dawn": 342
     },
     "syntax:documentation": {
       "core": 300.41481,
@@ -261,9 +261,9 @@
       "dawn": 316.414778
     },
     "ui:editor.gutter.background": {
-      "core": 305.827066,
-      "pastel": 298.014003,
-      "dawn": 320.546824
+      "core": 290,
+      "pastel": 290,
+      "dawn": 290
     },
     "ui:editor.indentGuide.active": {
       "core": 310.216615,
@@ -331,44 +331,44 @@
       "dawn": 76.403063
     },
     "ui:surface.canvas": {
-      "core": 307.006976,
-      "pastel": 299.460562,
-      "dawn": 312.303105
+      "core": 290,
+      "pastel": 290,
+      "dawn": 296
     },
     "ui:surface.chrome": {
-      "core": 309.068763,
-      "pastel": 307.020809,
-      "dawn": 318.696334
+      "core": 294,
+      "pastel": 294,
+      "dawn": 294
     },
     "ui:surface.field": {
-      "core": 305.361842,
-      "pastel": 306.975736,
-      "dawn": 325.614673
+      "core": 292,
+      "pastel": 292,
+      "dawn": 292
     },
     "ui:surface.hover": {
-      "core": 308.470328,
-      "pastel": 308.453003,
-      "dawn": 313.346527
+      "core": 294,
+      "pastel": 294,
+      "dawn": 294
     },
     "ui:surface.navigation": {
-      "core": 309.544329,
-      "pastel": 305.51799,
-      "dawn": 314.734088
+      "core": 294,
+      "pastel": 294,
+      "dawn": 294
     },
     "ui:surface.raised": {
-      "core": 310.3866,
-      "pastel": 305.013498,
-      "dawn": 321.320304
+      "core": 292,
+      "pastel": 292,
+      "dawn": 292
     },
     "ui:surface.sidebar": {
-      "core": 306.728591,
-      "pastel": 305.720247,
-      "dawn": 312.7958
+      "core": 292,
+      "pastel": 292,
+      "dawn": 292
     },
     "ui:surface.tab.inactive": {
-      "core": 309.544329,
-      "pastel": 301.891624,
-      "dawn": 319.448977
+      "core": 294,
+      "pastel": 294,
+      "dawn": 294
     },
     "ui:text.chrome": {
       "core": 306.907809,

@@ -5,7 +5,7 @@
     {
       "id": "readable-primary",
       "minimum": 4.5,
-      "roles": ["ui:text.primary", "syntax:variable", "terminal:foreground"]
+      "roles": ["ui:text.primary", "terminal:foreground"]
     },
     {
       "id": "readable-supporting-ui",

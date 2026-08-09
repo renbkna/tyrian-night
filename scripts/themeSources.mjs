@@ -2,18 +2,16 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   loadThemeDefinitionContext,
   resolveThemeRecipe,
   themeFamilyClassification,
   themeColor,
-  validateThemeDefinition,
   validateThemeRecipe,
 } from './themeDefinition.mjs';
 import { contrastRatio, hexToOklch, hueDistance } from './colorScience.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @typedef {'dark' | 'light'} ThemeAppearance
@@ -44,12 +42,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
  * }} ThemeRepository
  */
 
-const defaultThemeRepository = loadThemeRepository(repoRoot);
-
-/** @type {ReadonlyArray<ThemeSource>} */
-export const SOURCE_THEMES = Object.freeze(
-  defaultThemeRepository.sources.map((theme) => Object.freeze(theme))
-);
+export const SOURCE_THEMES = loadThemeRepository(repoRoot).sources;
 
 /**
  * Loads one role-membership context and every catalog member for a repository root.
@@ -113,7 +106,7 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
  * @param {string} filePath
  * @returns {T}
  */
-export function readJson(filePath) {
+function readJson(filePath) {
   return /** @type {T} */ (JSON.parse(fs.readFileSync(filePath, 'utf8')));
 }
 
@@ -129,8 +122,12 @@ export function readSourceTheme(
   definition = loadThemeDefinitionContext(root)
 ) {
   const resolvedRoot = requireContextRoot(root, definition);
-  return validateThemeDefinition(
-    readJson(path.join(resolvedRoot, source.sourcePath)),
+  return resolveThemeRecipe(
+    validateThemeRecipe(
+      readJson(path.join(resolvedRoot, source.sourcePath)),
+      source.slug,
+      definition
+    ),
     source.slug,
     definition
   );
@@ -440,7 +437,11 @@ function mean(values) {
  */
 function requireMetricRange(value, range, owner) {
   const tolerance = 1e-9;
-  if (value < range.minimum - tolerance || value > range.maximum + tolerance) {
+  if (
+    !Number.isFinite(value) ||
+    value < range.minimum - tolerance ||
+    value > range.maximum + tolerance
+  ) {
     throw new Error(`${owner} ${value.toFixed(4)} is outside ${range.minimum}..${range.maximum}.`);
   }
 }

@@ -1,14 +1,13 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { contrastRatio, hexToOklch } from './colorScience.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { themeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const OUTPUT_PATH = 'examples/theme-preview/generated/production-family.js';
 
 /**
@@ -93,7 +92,7 @@ export function writeProductionFamilyPreview(repoRoot = defaultRepoRoot, options
   });
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   const staleFiles = writeProductionFamilyPreview(defaultRepoRoot, {
     check: process.argv.includes('--check'),
   });

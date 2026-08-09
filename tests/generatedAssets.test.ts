@@ -90,8 +90,6 @@ test('VS Code lane generator entrypoints resolve the repository independently of
   }
 
   const vscodeGenerator = fs.readFileSync('scripts/vscodeThemes.mjs', 'utf8');
-  expect(vscodeGenerator).toContain(
-    'fileURLToPath(import.meta.url) === path.resolve(process.argv[1])'
-  );
+  expect(vscodeGenerator).toContain('import.meta.filename === path.resolve(process.argv[1])');
   expect(vscodeGenerator).not.toContain('if (import.meta.main)');
 });

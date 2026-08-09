@@ -1,6 +1,6 @@
 // @ts-check
 
-import { opaqueHex } from './colorUtils.mjs';
+import { opaqueHex, toHexByte } from './colorUtils.mjs';
 
 const GAMUT_EPSILON = 1e-7;
 const DIAGNOSTIC_SIGNIFICANT_DIGITS = 9;
@@ -12,16 +12,10 @@ const DIAGNOSTIC_SIGNIFICANT_DIGITS = 9;
  * @typedef {{
  *   contrastLeft?: number;
  *   contrastRight?: number;
- *   deltaChroma: number;
- *   deltaHue: number;
- *   deltaLightness: number;
- *   left: ColorMetrics;
  *   oklabDelta: number;
- *   right: ColorMetrics;
  * }} ColorComparison
  * @typedef {{
  *   contrast?: number;
- *   hex: string;
  *   oklab: Oklab;
  *   oklch: Oklch;
  * }} ColorMetrics
@@ -39,7 +33,6 @@ export function colorMetrics(color, background) {
 
   return {
     contrast: background ? contrastRatio(hex, opaqueHex(background)) : undefined,
-    hex,
     oklab: hexToOklab(hex),
     oklch: hexToOklch(hex),
   };
@@ -53,12 +46,7 @@ export function compareColors(input) {
   return {
     contrastLeft: left.contrast,
     contrastRight: right.contrast,
-    deltaChroma: Math.abs(left.oklch.C - right.oklch.C),
-    deltaHue: hueDistance(left.oklch.h, right.oklch.h),
-    deltaLightness: Math.abs(left.oklch.L - right.oklch.L),
-    left,
     oklabDelta: oklabDelta(left.oklab, right.oklab),
-    right,
   };
 }
 
@@ -108,7 +96,7 @@ export function oklchToHex(color) {
   }
 
   return `#${channels
-    .map((channel) => toHexByte(encodeLinearChannel(Math.min(1, Math.max(0, channel))) * 255))
+    .map((channel) => toHexByte(linearToSrgbChannel(Math.min(1, Math.max(0, channel))) * 255))
     .join('')}`;
 }
 
@@ -131,7 +119,7 @@ export function oklabDelta(left, right) {
 }
 
 /** @param {string} color */
-export function relativeLuminance(color) {
+function relativeLuminance(color) {
   const [red, green, blue] = hexToLinearRgb(opaqueHex(color));
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
@@ -198,25 +186,20 @@ function oklchToLinearRgb(color) {
 /** @param {string} color @returns {[number, number, number]} */
 function hexToLinearRgb(color) {
   return [
-    linearize(Number.parseInt(color.slice(1, 3), 16) / 255),
-    linearize(Number.parseInt(color.slice(3, 5), 16) / 255),
-    linearize(Number.parseInt(color.slice(5, 7), 16) / 255),
+    srgbToLinearChannel(Number.parseInt(color.slice(1, 3), 16) / 255),
+    srgbToLinearChannel(Number.parseInt(color.slice(3, 5), 16) / 255),
+    srgbToLinearChannel(Number.parseInt(color.slice(5, 7), 16) / 255),
   ];
 }
 
 /** @param {number} value */
-function linearize(value) {
+export function srgbToLinearChannel(value) {
   return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
 }
 
 /** @param {number} value */
-function encodeLinearChannel(value) {
+export function linearToSrgbChannel(value) {
   return value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
-}
-
-/** @param {number} value */
-function toHexByte(value) {
-  return Math.round(value).toString(16).toUpperCase().padStart(2, '0');
 }
 
 /** @param {number} degrees */

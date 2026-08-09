@@ -2,12 +2,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { hexToOklch, hueInsideRange } from './colorScience.mjs';
 import { loadThemeDefinitionContext } from './themeDefinition.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = path.resolve(import.meta.dirname, '..');
 export const THEME_PIGMENT_POLICY_PATH = path.join(ROOT, 'source/themePigmentPolicy.json');
 
 /** @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation */

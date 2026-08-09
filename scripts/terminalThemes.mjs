@@ -1,43 +1,23 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { FASTFETCH_IMAGE_CONFIG_PATH } from './portableAssets.mjs';
-import { themeColor as requireThemeColor } from './themeDefinition.mjs';
+import { TERMINAL_ANSI_ROLES, themeColor as requireThemeColor } from './themeDefinition.mjs';
 import {
   getTerminalDefaultThemeSource,
   loadThemeRepository,
   readSourceTheme,
 } from './themeSources.mjs';
 
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
-
-const TERMINAL_ANSI_ROLES = [
-  'terminal:ansi.black',
-  'terminal:ansi.red',
-  'terminal:ansi.green',
-  'terminal:ansi.yellow',
-  'terminal:ansi.blue',
-  'terminal:ansi.magenta',
-  'terminal:ansi.cyan',
-  'terminal:ansi.white',
-  'terminal:ansi.brightBlack',
-  'terminal:ansi.brightRed',
-  'terminal:ansi.brightGreen',
-  'terminal:ansi.brightYellow',
-  'terminal:ansi.brightBlue',
-  'terminal:ansi.brightMagenta',
-  'terminal:ansi.brightCyan',
-  'terminal:ansi.brightWhite',
-];
 
 const TERMINAL_GENERATED_OWNERSHIP = [
   { directory: 'terminal/ghostty/themes' },
@@ -760,6 +740,6 @@ function fishEscape(value) {
   return value.replace(/([$"\\])/gu, '\\$1');
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   writeTerminalThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }

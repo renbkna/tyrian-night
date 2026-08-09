@@ -7,7 +7,6 @@
  */
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   SOURCE_THEMES,
@@ -201,7 +200,7 @@ export async function renderPreview(mode: ThemeMode, signal?: AbortSignal): Prom
   console.info(controller.summarize(mode));
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   void renderPreview(ThemePreviewController.defaultMode).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error({

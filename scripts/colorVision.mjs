@@ -1,6 +1,7 @@
 // @ts-check
 
-import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { opaqueHex, parseHexColor, toHexByte } from './colorUtils.mjs';
+import { linearToSrgbChannel, srgbToLinearChannel } from './colorScience.mjs';
 
 /** @typedef {'protan' | 'deutan' | 'tritan'} ColorVisionMode */
 
@@ -24,7 +25,7 @@ const MATRICES = Object.freeze({
 });
 
 export const COLOR_VISION_MODES = Object.freeze(
-  /** @type {ColorVisionMode[]} */ (['protan', 'deutan', 'tritan'])
+  /** @type {ColorVisionMode[]} */ (Object.keys(MATRICES))
 );
 
 /**
@@ -42,36 +43,18 @@ export function simulateColorVision(color, mode, background) {
 
   const parsed = parseHexColor(opaqueHex(color, background));
   const linear = [parsed.red, parsed.green, parsed.blue].map((channel) =>
-    srgbToLinear(channel / 255)
+    srgbToLinearChannel(channel / 255)
   );
   const simulated = matrix.map((row) =>
-    linearToSrgb(
+    linearToSrgbChannel(
       clamp(row.reduce((total, coefficient, index) => total + coefficient * linear[index], 0))
     )
   );
 
-  return `#${simulated.map((channel) => toHexByte(channel * 255)).join('')}`;
-}
-
-/** @param {number} value */
-function srgbToLinear(value) {
-  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-}
-
-/** @param {number} value */
-function linearToSrgb(value) {
-  return value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+  return `#${simulated.map((channel) => toHexByte(clamp(channel) * 255)).join('')}`;
 }
 
 /** @param {number} value */
 function clamp(value) {
   return Math.min(1, Math.max(0, value));
-}
-
-/** @param {number} value */
-function toHexByte(value) {
-  return Math.round(clamp(value / 255) * 255)
-    .toString(16)
-    .toUpperCase()
-    .padStart(2, '0');
 }

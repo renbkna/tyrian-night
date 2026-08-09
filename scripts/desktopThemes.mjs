@@ -2,17 +2,16 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex, parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { themeColor as readThemeColor } from './themeDefinition.mjs';
-import { readSourceTheme, readThemeSources } from './themeSources.mjs';
+import { TERMINAL_ANSI_ROLES, themeColor as readThemeColor } from './themeDefinition.mjs';
+import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import { flattenCssFile } from './union/flattenCss.mjs';
 import { lintUnionCss } from './union/lintUnionCss.mjs';
 
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 // Stable package identity for the PascalCase result of a valid
 // `tyrian-<segment>...` source slug. Installers use this to decode persisted
 // ownership after a source family has been retired from the current catalog.
@@ -185,25 +184,6 @@ const CAELESTIA_COLOUR_ORDER = [
   'onSuccessContainer',
 ];
 
-const ANSI_ROLES = [
-  'terminal:ansi.black',
-  'terminal:ansi.red',
-  'terminal:ansi.green',
-  'terminal:ansi.yellow',
-  'terminal:ansi.blue',
-  'terminal:ansi.magenta',
-  'terminal:ansi.cyan',
-  'terminal:ansi.white',
-  'terminal:ansi.brightBlack',
-  'terminal:ansi.brightRed',
-  'terminal:ansi.brightGreen',
-  'terminal:ansi.brightYellow',
-  'terminal:ansi.brightBlue',
-  'terminal:ansi.brightMagenta',
-  'terminal:ansi.brightCyan',
-  'terminal:ansi.brightWhite',
-];
-
 const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/kde/color-schemes' },
   { directory: 'desktop/kde/plasma/desktoptheme' },
@@ -220,9 +200,13 @@ const DESKTOP_GENERATED_OWNERSHIP = [
  */
 export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const packageVersion = readPackageVersion(repoRoot);
+  const repository = loadThemeRepository(repoRoot);
+  const unionCssTemplate = readUnionCssTemplate(repoRoot);
 
-  return readThemeSources(repoRoot).flatMap((source) => {
-    const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot));
+  return repository.sources.flatMap((source) => {
+    const theme = /** @type {ThemeDefinition} */ (
+      readSourceTheme(source, repository.root, repository.definition)
+    );
     const palette = buildDesktopPalette(theme);
     const desktopAssets = desktopThemeAssetPaths(source.slug);
     const kdeFileName = desktopAssets.themeId;
@@ -236,18 +220,27 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildKdeColorScheme(kdeFileName, theme.name, palette, { includeEffects: true }),
       },
       {
-        path: `desktop/kde/plasma/desktoptheme/${kdeFileName}/colors`,
+        path: `${desktopAssets.plasmaDesktopTheme}/colors`,
         content: buildKdeColorScheme(kdeFileName, theme.name, palette, { includeEffects: false }),
       },
-      ...buildPlasmaDesktopThemePackageAssets(kdeFileName, theme.name, packageVersion),
-      ...buildPlasmaWidgetSkinAssets(kdeFileName, palette),
+      ...buildPlasmaDesktopThemePackageAssets(
+        desktopAssets.plasmaDesktopTheme,
+        kdeFileName,
+        theme.name,
+        packageVersion
+      ),
+      ...buildPlasmaWidgetSkinAssets(desktopAssets.plasmaDesktopTheme, palette),
       ...buildPlasmaLookAndFeelPackageAssets(
+        desktopAssets.plasmaLookAndFeel,
         kdeFileName,
         theme.name,
         packageVersion,
         theme.appearance
       ),
-      ...buildUnionCssStylePackageAssets(repoRoot, kdeFileName, theme.name, palette),
+      {
+        path: `desktop/kde/union/css/styles/${kdeFileName}/style.css`,
+        content: buildUnionCssStyle(unionCssTemplate, theme.name, palette),
+      },
       {
         path: `desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`,
         content: buildCaelestiaSchemeText(caelestiaColours),
@@ -349,7 +342,7 @@ function buildDesktopPalette(theme) {
     brightYellow: desktopColor(theme, 'terminal:ansi.brightYellow'),
     brightRed: desktopColor(theme, 'terminal:ansi.brightRed'),
     brightWhite: desktopColor(theme, 'terminal:ansi.brightWhite'),
-    ansi: ANSI_ROLES.map((role) => desktopColor(theme, role, background)),
+    ansi: TERMINAL_ANSI_ROLES.map((role) => desktopColor(theme, role, background)),
   };
 }
 
@@ -460,13 +453,11 @@ function buildKdeColorScheme(schemeId, schemeName, palette, options) {
 }
 
 /**
- * @param {string} schemeId
+ * @param {string} themeRoot
  * @param {DesktopPalette} palette
  * @returns {GeneratedAsset[]}
  */
-function buildPlasmaWidgetSkinAssets(schemeId, palette) {
-  const themeRoot = `desktop/kde/plasma/desktoptheme/${schemeId}`;
-
+function buildPlasmaWidgetSkinAssets(themeRoot, palette) {
   return [
     {
       path: `${themeRoot}/dialogs/background.svg`,
@@ -496,14 +487,13 @@ function buildPlasmaWidgetSkinAssets(schemeId, palette) {
 }
 
 /**
+ * @param {string} themeRoot
  * @param {string} schemeId
  * @param {string} schemeName
  * @param {string} packageVersion
  * @returns {GeneratedAsset[]}
  */
-function buildPlasmaDesktopThemePackageAssets(schemeId, schemeName, packageVersion) {
-  const themeRoot = `desktop/kde/plasma/desktoptheme/${schemeId}`;
-
+function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName, packageVersion) {
   return [
     {
       path: `${themeRoot}/metadata.json`,
@@ -541,15 +531,20 @@ function buildPlasmaDesktopThemePackageAssets(schemeId, schemeName, packageVersi
 }
 
 /**
+ * @param {string} packageRoot
  * @param {string} schemeId
  * @param {string} schemeName
  * @param {string} packageVersion
  * @param {'dark' | 'light'} appearance
  * @returns {GeneratedAsset[]}
  */
-function buildPlasmaLookAndFeelPackageAssets(schemeId, schemeName, packageVersion, appearance) {
-  const packageRoot = `desktop/kde/plasma/look-and-feel/${schemeId}`;
-
+function buildPlasmaLookAndFeelPackageAssets(
+  packageRoot,
+  schemeId,
+  schemeName,
+  packageVersion,
+  appearance
+) {
   return [
     {
       path: `${packageRoot}/metadata.json`,
@@ -615,29 +610,13 @@ function buildLookAndFeelDefaults(schemeId, appearance) {
 }
 
 /**
- * @param {string} repoRoot
- * @param {string} schemeId
- * @param {string} schemeName
- * @param {DesktopPalette} palette
- * @returns {GeneratedAsset[]}
- */
-function buildUnionCssStylePackageAssets(repoRoot, schemeId, schemeName, palette) {
-  return [
-    {
-      path: `desktop/kde/union/css/styles/${schemeId}/style.css`,
-      content: buildUnionCssStyle(repoRoot, schemeName, palette),
-    },
-  ];
-}
-
-/**
- * @param {string} repoRoot
+ * @param {string} cssTemplate
  * @param {string} schemeName
  * @param {DesktopPalette} palette
  * @returns {string}
  */
-function buildUnionCssStyle(repoRoot, schemeName, palette) {
-  return readUnionCssTemplate(repoRoot)
+function buildUnionCssStyle(cssTemplate, schemeName, palette) {
+  return cssTemplate
     .replaceAll('{{schemeName}}', schemeName)
     .replaceAll('  /* TYRIAN_GENERATED_TOKENS */', buildUnionCssTokens(palette));
 }
@@ -654,21 +633,14 @@ function readUnionCssTemplate(repoRoot) {
 
   if (issues.length > 0) {
     throw new Error(
-      ['Union CSS source failed generation lint:', ...issues.map(formatUnionCssIssue)].join('\n')
+      [
+        'Union CSS source failed generation lint:',
+        ...issues.map(({ message, line }) => `- ${message}${line === undefined ? '' : `:${line}`}`),
+      ].join('\n')
     );
   }
 
   return css;
-}
-
-/**
- * @param {{ message: string; line?: number }} issue
- * @returns {string}
- */
-function formatUnionCssIssue(issue) {
-  const location = issue.line === undefined ? '' : `:${issue.line}`;
-
-  return `- ${issue.message}${location}`;
 }
 
 /**
@@ -1421,6 +1393,6 @@ function desktopColor(theme, qualifiedRole, background) {
   );
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
   writeDesktopThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }

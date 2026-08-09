@@ -14,7 +14,7 @@ import {
 } from '../scripts/themeSources.mjs';
 import {
   loadThemeDefinitionContext,
-  loadVscodeProjectionContext,
+  loadVscodeProjection,
   themeColor,
   themePigmentOwner,
   validateThemeRecipe,
@@ -407,6 +407,35 @@ test('family relationship validation rejects palette energy drift', () => {
   }
 });
 
+test('family relationship validation rejects undefined chroma ratios', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-zero-chroma-'));
+  try {
+    fs.mkdirSync(path.join(root, 'source/themes'), { recursive: true });
+    copyThemeContracts(root);
+    fs.writeFileSync(
+      path.join(root, 'source/themeCatalog.json'),
+      `${JSON.stringify(VALID_CATALOG)}\n`
+    );
+    const family = readJson<any>(path.join(root, 'source/themeFamilyContract.json'));
+
+    for (const [slug, identity] of Object.entries(VALID_IDENTITIES)) {
+      const definition = definitionFor(identity, readClassification(slug).appearance);
+      if (slug === family.canonical) {
+        for (const pigment of family.semanticPigments as string[]) {
+          definition.oklch[pigment] = [0, 0];
+        }
+      }
+      fs.writeFileSync(path.join(root, `source/themes/${slug}.json`), JSON.stringify(definition));
+    }
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Energy variant 'tyrian-test-dark' semantic chroma ratio"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('family classification rejects absent and overlapping recipe classifications', () => {
   const cases: Array<[string, (family: any) => void, string]> = [
     [
@@ -648,7 +677,7 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
       const projection = structuredClone(validProjection);
       mutate(projection);
       fs.writeFileSync(projectionPath, `${JSON.stringify(projection)}\n`);
-      expect(() => loadVscodeProjectionContext(root)).toThrow(message);
+      expect(() => loadVscodeProjection(root)).toThrow(message);
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

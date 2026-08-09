@@ -1,12 +1,11 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { readOwnedGeneratedFile, syncGeneratedAssets } from './generatedAssets.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 
-const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const themeCatalogOutputPath = 'apps/vscode/src/generated/themeCatalog.ts';
 const vscodePackagePath = 'apps/vscode/package.json';
 const GENERATED_CONTRACT_OWNERSHIP = [{ directory: 'apps/vscode/src/generated' }];
@@ -53,16 +52,12 @@ export type TyrianThemeLabel = TyrianThemeCatalogEntry['label'];
 
 export const DEFAULT_TYRIAN_THEME_LABEL = ${formatTsString(defaultSourceTheme.label)};
 
-export const TYRIAN_THEME_CSS: Record<string, string> = Object.fromEntries(
-  TYRIAN_THEME_CATALOG.map((theme) => [theme.label, theme.islandCssFile])
-);
-
 export function isTyrianThemeLabel(theme: string | undefined): theme is TyrianThemeLabel {
-  return theme !== undefined && Object.hasOwn(TYRIAN_THEME_CSS, theme);
+  return theme !== undefined && TYRIAN_THEME_CATALOG.some(({ label }) => label === theme);
 }
 
 export function getIslandCssFileForTheme(theme: string): string | undefined {
-  return TYRIAN_THEME_CSS[theme];
+  return TYRIAN_THEME_CATALOG.find(({ label }) => label === theme)?.islandCssFile;
 }
 `;
 }
@@ -137,7 +132,7 @@ export function syncGeneratedContracts(root = defaultRepoRoot, options = {}) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === import.meta.filename) {
   const staleSurfaces = syncGeneratedContracts(defaultRepoRoot, {
     check: process.argv.includes('--check'),
   });
