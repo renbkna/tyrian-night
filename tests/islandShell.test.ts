@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
@@ -866,6 +867,87 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
   await expect(readAllIslandShellStatuses({ registryHome })).resolves.toEqual([]);
 });
 
+test('missing-root cleanup does not pair parsed registry content with a newer generation', async () => {
+  const missingAppRoot = path.join(testRoot, 'missing-root-generation');
+  const recordPath = await writeManagedRootRecord(missingAppRoot);
+  const replacementContent = JSON.stringify(
+    { version: 2, appRoot: missingAppRoot, desiredThemeId: 'replacement.css' },
+    null,
+    2
+  ).concat('\n');
+  const originalReadFile = fs.readFile;
+  let injected = false;
+
+  fs.readFile = (async (filePath, ...argumentsList: unknown[]) => {
+    const content = await (originalReadFile as any)(filePath, ...argumentsList);
+    if (!injected && String(filePath) === recordPath) {
+      injected = true;
+      await fs.writeFile(recordPath, replacementContent, 'utf8');
+    }
+    return content;
+  }) as typeof fs.readFile;
+
+  let result: Awaited<ReturnType<typeof restoreAllIslandShells>>;
+  try {
+    result = await restoreAllIslandShells({ registryHome });
+  } finally {
+    fs.readFile = originalReadFile;
+  }
+
+  expect(injected).toBe(true);
+  expect(result.failedAppRoots).toEqual([
+    expect.objectContaining({
+      appRoot: missingAppRoot,
+      reason: expect.stringContaining('changed during restore'),
+    }),
+  ]);
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(replacementContent);
+});
+
+test('missing-root cleanup preserves a replacement registry generation at retirement', async () => {
+  const missingAppRoot = path.join(testRoot, 'missing-root-replacement');
+  const recordPath = await writeManagedRootRecord(missingAppRoot);
+  const content = await fs.readFile(recordPath, 'utf8');
+  const originalStats = await fs.lstat(recordPath);
+  const originalRename = fs.rename;
+  let injected = false;
+
+  fs.rename = (async (sourcePath, targetPath) => {
+    if (
+      !injected &&
+      String(sourcePath) === recordPath &&
+      path.basename(String(targetPath)).includes('-retired-')
+    ) {
+      injected = true;
+      const replacementPath = path.join(path.dirname(recordPath), 'missing-root-replacement.tmp');
+      await fs.writeFile(replacementPath, content, 'utf8');
+      await originalRename(replacementPath, recordPath);
+    }
+    return originalRename(sourcePath, targetPath);
+  }) as typeof fs.rename;
+
+  let result: Awaited<ReturnType<typeof restoreAllIslandShells>>;
+  try {
+    result = await restoreAllIslandShells({ registryHome });
+  } finally {
+    fs.rename = originalRename;
+  }
+
+  const replacementStats = await fs.lstat(recordPath);
+  expect(injected).toBe(true);
+  expect(result.failedAppRoots).toEqual([
+    expect.objectContaining({
+      appRoot: missingAppRoot,
+      code: 'blocked',
+      reason: expect.stringContaining('changed across retirement'),
+    }),
+  ]);
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(content);
+  expect(`${replacementStats.dev}:${replacementStats.ino}`).not.toBe(
+    `${originalStats.dev}:${originalStats.ino}`
+  );
+});
+
 test('Restore quarantines an identifiable corrupt record for a missing root by generation', async () => {
   const missingAppRoot = path.join(testRoot, 'missing-corrupt-root');
   const recordPath = buildManagedRootRecordPath(missingAppRoot, registryHome);
@@ -1353,6 +1435,22 @@ test('restore validates and uses a complete backup pair before deleting managed 
   });
 });
 
+test('apply and restore preserve upstream workbench bytes outside the owned block', async () => {
+  const appRoot = await createAppRoot('exact-upstream-workbench');
+  const cssSource = path.join(testRoot, 'exact-upstream-workbench.css');
+  const { backupHtmlPath, productJsonPath, workbenchHtmlPath } = buildIslandPatchPaths(appRoot);
+  const upstreamHtml = `${cleanWorkbenchHtml()} \t\n\n`;
+  await fs.writeFile(cssSource, '.monaco-workbench { color: blue; }\n', 'utf8');
+  await fs.writeFile(workbenchHtmlPath, upstreamHtml, 'utf8');
+  await fs.writeFile(productJsonPath, productJson(sha256Base64(upstreamHtml)), 'utf8');
+
+  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
+  expect(await fs.readFile(backupHtmlPath, 'utf8')).toBe(upstreamHtml);
+
+  await restoreIslandShell({ appRoot, registryHome });
+  expect(await fs.readFile(workbenchHtmlPath, 'utf8')).toBe(upstreamHtml);
+});
+
 test('restore refuses incomplete manifest ownership proof before trusting backup sidecars', async () => {
   const appRoot = await createAppRoot('incomplete-restore-proof');
   const cssSource = path.join(testRoot, 'theme.css');
@@ -1717,11 +1815,7 @@ function productJson(checksum: string, indent: number | string = '\t'): string {
 }
 
 function sha256Base64(content: string): string {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }
 
 async function expectRestoredAppRoot(appRoot: string): Promise<void> {

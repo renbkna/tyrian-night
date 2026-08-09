@@ -90,7 +90,7 @@ export function buildQuarantinedRootsDirectoryPath(registryHome = os.homedir()):
 }
 
 export function buildManagedRootRecordPath(appRoot: string, registryHome = os.homedir()): string {
-  const recordName = crypto.createHash('sha256').update(appRoot, 'utf8').digest('hex');
+  const recordName = crypto.hash('sha256', appRoot, 'hex');
 
   return path.join(buildManagedRootsDirectoryPath(registryHome), `${recordName}.json`);
 }
@@ -100,7 +100,7 @@ export function buildIslandRootLockPath(appRoot: string): string {
 }
 
 export function buildIslandRegistryLockPath(registryHome = os.homedir()): string {
-  const identity = crypto.createHash('sha256').update(registryHome, 'utf8').digest('hex');
+  const identity = crypto.hash('sha256', registryHome, 'hex');
   return path.join(os.tmpdir(), `.${ISLAND_REGISTRY_LOCK_NAME}-${identity}.lock`);
 }
 

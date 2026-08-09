@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { readIslandMutationFacts } from './islandSupervisorCore.js';
 
@@ -193,7 +194,7 @@ async function acquireClaim(
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
   const retryMs = options.retryMs ?? DEFAULT_LOCK_RETRY_MS;
 
-  await writeOwnerCandidate(candidatePath, owner);
+  await writeDurableCandidate(candidatePath, owner);
 
   try {
     while (true) {
@@ -328,10 +329,11 @@ async function settleReaperGeneration(
     reaper: createLockOwner(),
     predecessorToken: tip.record.reaper.token,
   };
-  const successorPath = `${claimPath}.reap-${generationId}-${crypto
-    .createHash('sha256')
-    .update(tip.record.reaper.token, 'utf8')
-    .digest('hex')}`;
+  const successorPath = `${claimPath}.reap-${generationId}-${crypto.hash(
+    'sha256',
+    tip.record.reaper.token,
+    'hex'
+  )}`;
 
   if (!(await publishElection(successorPath, successor))) return true;
   await finishReaperElection(claimPath, generationId, successor, options);
@@ -547,13 +549,11 @@ function matchesSerializedGeneration(
 }
 
 function serializedGenerationId(generation: SerializedClaimGeneration): string {
-  return crypto
-    .createHash('sha256')
-    .update(
-      `${generation.dev}:${generation.ino}:${generation.contentHash}:${generation.ownerToken}`,
-      'utf8'
-    )
-    .digest('hex');
+  return crypto.hash(
+    'sha256',
+    `${generation.dev}:${generation.ino}:${generation.contentHash}:${generation.ownerToken}`,
+    'hex'
+  );
 }
 
 function createLockOwner(): LockOwner {
@@ -620,10 +620,6 @@ function readReaperOwnerValue(value: unknown): LockOwner | undefined {
   return parseLockOwnerValue(value.reaper);
 }
 
-async function writeOwnerCandidate(candidatePath: string, owner: LockOwner): Promise<void> {
-  return writeDurableCandidate(candidatePath, owner);
-}
-
 async function writeDurableCandidate(candidatePath: string, value: unknown): Promise<void> {
   const handle = await fs.open(candidatePath, 'wx');
 
@@ -660,10 +656,7 @@ async function inspectClaim(
     return {
       dev: after.dev,
       ino: after.ino,
-      contentHash:
-        content === undefined
-          ? undefined
-          : crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
+      contentHash: content === undefined ? undefined : crypto.hash('sha256', content, 'hex'),
       owner: content === undefined ? undefined : parseLockOwner(content),
     };
   }
@@ -872,8 +865,4 @@ function readLinuxProcessIdentity(pid: number): string | undefined {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error;
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, expect, test } from 'bun:test';
@@ -332,16 +333,14 @@ test('a v1 reaper election is rejected without touching its claim', async () => 
   const expected = {
     dev: String(claimStats.dev),
     ino: String(claimStats.ino),
-    contentHash: crypto.createHash('sha256').update(claimContent, 'utf8').digest('hex'),
+    contentHash: crypto.hash('sha256', claimContent, 'hex'),
     ownerToken: claimOwner.token,
   };
-  const generationId = crypto
-    .createHash('sha256')
-    .update(
-      `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
-      'utf8'
-    )
-    .digest('hex');
+  const generationId = crypto.hash(
+    'sha256',
+    `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
+    'hex'
+  );
   const electionPath = `${lockKey}.reap-${generationId}`;
   const electionContent = JSON.stringify({
     version: 1,
@@ -391,16 +390,14 @@ test('cyclic persisted reaper metadata fails within the acquisition bound', asyn
   const expected = {
     dev: String(stats.dev),
     ino: String(stats.ino),
-    contentHash: crypto.createHash('sha256').update(claimContent, 'utf8').digest('hex'),
+    contentHash: crypto.hash('sha256', claimContent, 'hex'),
     ownerToken: owner.token,
   };
-  const generationId = crypto
-    .createHash('sha256')
-    .update(
-      `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
-      'utf8'
-    )
-    .digest('hex');
+  const generationId = crypto.hash(
+    'sha256',
+    `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
+    'hex'
+  );
   const firstToken = crypto.randomUUID();
   const secondToken = crypto.randomUUID();
   const records = [
@@ -411,9 +408,7 @@ test('cyclic persisted reaper metadata fails within the acquisition bound', asyn
 
   for (const [index, record] of records.entries()) {
     const suffix =
-      index === 0
-        ? ''
-        : `-${crypto.createHash('sha256').update(String(record.predecessorToken), 'utf8').digest('hex')}`;
+      index === 0 ? '' : `-${crypto.hash('sha256', String(record.predecessorToken), 'hex')}`;
     await fs.writeFile(
       `${lockKey}.reap-${generationId}${suffix}`,
       JSON.stringify({
@@ -445,16 +440,14 @@ test('a crashed parseable reaper generation is resumed without stealing a replac
   const expected = {
     dev: String(claimStats.dev),
     ino: String(claimStats.ino),
-    contentHash: crypto.createHash('sha256').update(claimContent, 'utf8').digest('hex'),
+    contentHash: crypto.hash('sha256', claimContent, 'hex'),
     ownerToken: claimOwner.token,
   };
-  const generationId = crypto
-    .createHash('sha256')
-    .update(
-      `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
-      'utf8'
-    )
-    .digest('hex');
+  const generationId = crypto.hash(
+    'sha256',
+    `${expected.dev}:${expected.ino}:${expected.contentHash}:${expected.ownerToken}`,
+    'hex'
+  );
   const electionPath = `${lockKey}.reap-${generationId}`;
   await fs.writeFile(
     electionPath,
@@ -785,8 +778,4 @@ function previousLockOwnerV2(): {
     createdAt: new Date().toISOString(),
     processIdentity: 'previous-process-generation',
   };
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

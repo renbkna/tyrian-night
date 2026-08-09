@@ -12,7 +12,7 @@ import {
 } from '../apps/vscode/src/islandFileTransactionCore';
 import { IslandRegistryQuarantineError } from '../apps/vscode/src/islandRegistryMutationCore';
 import { withIslandProcessLock } from '../apps/vscode/src/islandProcessLock';
-import { didIslandMutationChange } from '../apps/vscode/src/islandSupervisorCore';
+import { readIslandMutationFacts } from '../apps/vscode/src/islandSupervisorCore';
 import {
   applyIslandUiSupervised,
   readIslandUiSupervisorStatuses,
@@ -269,17 +269,17 @@ test('typed core partial failures preserve supervisor changed classification', a
   }
 
   expect(transactionFailure).toBeInstanceOf(IslandFileTransactionPartialMutationError);
-  expect(didIslandMutationChange(transactionFailure)).toBe(true);
+  expect(readIslandMutationFacts(transactionFailure).changed).toBe(true);
   expect(
-    didIslandMutationChange(
+    readIslandMutationFacts(
       new IslandRegistryQuarantineError('/quarantine/record.json', new Error('sync failed'))
-    )
+    ).changed
   ).toBe(true);
-  expect(didIslandMutationChange(new Error('unchanged failure'))).toBe(false);
+  expect(readIslandMutationFacts(new Error('unchanged failure')).changed).toBe(false);
   expect(
-    didIslandMutationChange(
+    readIslandMutationFacts(
       new AggregateError([Object.assign(new Error('nested mutation'), { physicalChanged: true })])
-    )
+    ).changed
   ).toBe(true);
 });
 
@@ -701,7 +701,7 @@ function transactionTemporaryPath(
 }
 
 function sha256Base64(content: string): string {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
+  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }
 
 async function waitForPath(filePath: string): Promise<void> {

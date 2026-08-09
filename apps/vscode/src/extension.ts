@@ -78,10 +78,6 @@ const RESTORE_RESULT_KINDS: {
   blocked: 'blocked',
 };
 
-function isTyrianTheme(theme: string | undefined): theme is string {
-  return isTyrianThemeLabel(theme);
-}
-
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
 
@@ -193,11 +189,11 @@ async function reconcileIslandUi(): Promise<void> {
   );
 }
 
-async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promise<boolean> {
+async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promise<void> {
   const promptShown = extContext.globalState.get<boolean>(THEME_PROMPT_KEY, false);
 
-  if (promptShown || isTyrianTheme(activeTheme)) {
-    return false;
+  if (promptShown || isTyrianThemeLabel(activeTheme)) {
+    return;
   }
 
   await extContext.globalState.update(THEME_PROMPT_KEY, true);
@@ -209,20 +205,18 @@ async function maybePromptToSwitchTheme(activeTheme: string | undefined): Promis
   );
 
   if (action !== 'Switch Theme') {
-    return false;
+    return;
   }
 
   await vscode.workspace
     .getConfiguration('workbench')
     .update('colorTheme', DEFAULT_TYRIAN_THEME_LABEL, vscode.ConfigurationTarget.Global);
-
-  return true;
 }
 
 async function applyIslandUiCommand(): Promise<void> {
   if (!(await admitIslandApplyCommand())) return;
 
-  if (!isTyrianTheme(getActiveTheme())) {
+  if (!isTyrianThemeLabel(getActiveTheme())) {
     const action = await vscode.window.showInformationMessage(
       'Tyrian Night: Apply Island UI with a Tyrian theme?',
       'Switch Theme',
@@ -240,7 +234,7 @@ async function applyIslandUiCommand(): Promise<void> {
 
   const theme = getActiveTheme();
 
-  if (!isTyrianTheme(theme) || !(await ensureUninstallWarningAcknowledged({ interactive: true }))) {
+  if (!isTyrianThemeLabel(theme) || !(await ensureUninstallWarningAcknowledged())) {
     return;
   }
 
@@ -268,7 +262,7 @@ async function repairIslandUi(): Promise<void> {
     status.registration.kind === 'valid' ? status.registration.desiredThemeId : undefined;
   const configuredCssFile = resolveDesiredCssFile(desiredThemeId);
   const activeTheme = getActiveTheme();
-  const theme = isTyrianTheme(activeTheme) ? activeTheme : undefined;
+  const theme = isTyrianThemeLabel(activeTheme) ? activeTheme : undefined;
 
   if (typeof desiredThemeId === 'string' && configuredCssFile === undefined) {
     vscode.window.showErrorMessage(
@@ -282,7 +276,7 @@ async function repairIslandUi(): Promise<void> {
     return;
   }
 
-  if (!(await ensureUninstallWarningAcknowledged({ interactive: true }))) {
+  if (!(await ensureUninstallWarningAcknowledged())) {
     return;
   }
 
@@ -419,13 +413,7 @@ async function showIslandPermissionRequired(
 }
 
 async function restoreClassicUi(): Promise<void> {
-  await runIslandCommand(async () => {
-    await restoreIslandUi({
-      interactive: true,
-      notifyWhenUnchanged: true,
-      reloadMessage: 'Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.',
-    });
-  }, 'Classic UI restore');
+  await runIslandCommand(restoreIslandUi, 'Classic UI restore');
 }
 
 async function doctorIslandUi(): Promise<void> {
@@ -529,20 +517,14 @@ async function doctorIslandUi(): Promise<void> {
   }
 }
 
-async function restoreIslandUi(options: {
-  interactive: boolean;
-  notifyWhenUnchanged: boolean;
-  reloadMessage: string;
-}): Promise<IslandRestoreResult> {
+async function restoreIslandUi(): Promise<void> {
   const result = await runIslandCli(
     ['restore-supervised', '--app-root', vscode.env.appRoot],
     validateRestoreResult
   );
 
   if (result.kind === 'permission-required') {
-    if (options.interactive) {
-      await showIslandRestorePermissionRequired(result);
-    }
+    await showIslandRestorePermissionRequired(result);
 
     if (result.physicalChanged) {
       await promptForReload(
@@ -550,28 +532,28 @@ async function restoreIslandUi(options: {
       );
     }
 
-    return result;
+    return;
   }
 
   if (result.kind === 'blocked') {
+    await vscode.window.showErrorMessage(
+      `Tyrian Night: Classic UI restore is blocked. ${result.reason}`
+    );
     if (result.physicalChanged) {
       await promptForReload(
         'Tyrian Night: Island UI cleanup changed some installations but remains incomplete. Reload VS Code after resolving the reported failures.'
       );
     }
 
-    throw new Error(`Tyrian Night cleanup is incomplete. ${result.reason}`);
+    return;
   }
 
   if (!result.physicalChanged) {
-    if (options.notifyWhenUnchanged) {
-      vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
-    }
-    return result;
+    vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
+    return;
   }
 
-  await promptForReload(options.reloadMessage);
-  return result;
+  await promptForReload('Tyrian Night: Classic UI restored. Reload VS Code to finish reverting.');
 }
 
 async function showIslandRestorePermissionRequired(
@@ -797,18 +779,7 @@ function getActiveTheme(): string | undefined {
   return vscode.workspace.getConfiguration('workbench').get<string>('colorTheme');
 }
 
-function formatDoctorClassification(
-  classification:
-    | 'clean'
-    | 'patched'
-    | 'managed-only'
-    | 'transaction-pending'
-    | 'transaction-blocked'
-    | 'missing'
-    | 'permission-denied'
-    | 'broken-backup'
-    | 'checksum-mismatch'
-): string {
+function formatDoctorClassification(classification: IslandDoctorStatus['classification']): string {
   switch (classification) {
     case 'clean':
       return 'Clean';
@@ -899,15 +870,9 @@ async function promptForReload(message: string): Promise<void> {
   }
 }
 
-async function ensureUninstallWarningAcknowledged(options: {
-  interactive: boolean;
-}): Promise<boolean> {
+async function ensureUninstallWarningAcknowledged(): Promise<boolean> {
   if (extContext.globalState.get<boolean>(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, false)) {
     return true;
-  }
-
-  if (!options.interactive) {
-    return false;
   }
 
   const action = await vscode.window.showWarningMessage(

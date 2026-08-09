@@ -333,7 +333,7 @@ type RegistryRecordGeneration = {
   dev: number | bigint;
   ino: number | bigint;
   mode: number;
-  contentHash: string | undefined;
+  content: string | undefined;
   corrupt: boolean;
 };
 
@@ -462,7 +462,7 @@ export async function applyIslandShellForPlatform(
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   await assertPatchPathAncestorsOwned(appRoot);
-  await fs.access(getPatchPaths(appRoot).workbenchDirPath);
+  await fs.access(buildIslandPatchPaths(appRoot).workbenchDirPath);
 
   return withIslandRootLock(
     appRoot,
@@ -611,7 +611,7 @@ async function readIslandShellApplyReadinessUnlocked(options: {
     const changed =
       status.registrationState !== 'valid' ||
       status.desiredThemeId !== payload.desiredThemeId ||
-      (await wouldApplyPayloadChange(payload));
+      wouldApplyPayloadChange(payload);
 
     if (!writeAccess.writable && changed) {
       return {
@@ -694,7 +694,7 @@ export async function readIslandShellWriteAccess(options: {
 }): Promise<IslandShellWriteAccess> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   await assertPatchPathAncestorsOwned(appRoot);
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   const managedRootsDirectoryPath = getManagedRootsDirectoryPath(options);
   const stateDirectoryPath = path.dirname(managedRootsDirectoryPath);
   const requirements: Array<{
@@ -787,7 +787,7 @@ export async function restoreIslandShell(options: {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   await assertPatchPathAncestorsOwned(appRoot);
-  await fs.access(getPatchPaths(appRoot).workbenchDirPath);
+  await fs.access(buildIslandPatchPaths(appRoot).workbenchDirPath);
 
   return withIslandRootLock(
     appRoot,
@@ -918,16 +918,18 @@ async function removeMissingManagedAppRoot(
 ): Promise<{ changed: boolean; quarantinePath?: string }> {
   return withRegistryLock(environment, async () => {
     const recordPath = getManagedRootRecordPath(candidate.appRoot, environment);
-    const content = await readTextFileIfExists(recordPath);
-    if (content === undefined) {
-      return { changed: false };
+    let current: RegistryRecordGeneration;
+    try {
+      current = await readRegistryRecordGeneration(
+        recordPath,
+        candidate.recordGeneration?.corrupt ?? false
+      );
+    } catch (error) {
+      if (isNodeError(error) && error.code === 'ENOENT') return { changed: false };
+      throw error;
     }
 
     if (candidate.recordGeneration !== undefined) {
-      const current = await readRegistryRecordGeneration(
-        recordPath,
-        candidate.recordGeneration.corrupt
-      );
       if (!sameRegistryRecordGeneration(current, candidate.recordGeneration)) {
         throw new Error(
           `Tyrian managed app root record changed during restore at '${recordPath}'.`
@@ -942,16 +944,30 @@ async function removeMissingManagedAppRoot(
         );
         return { changed: true, quarantinePath };
       } else {
-        await removeFileDurably(recordPath, { registryChanged: true });
+        await removeFileDurably(
+          recordPath,
+          { registryChanged: true },
+          regularFileGenerationFromRegistry(current)
+        );
       }
       return { changed: true };
     }
 
+    const content = current.content;
+    if (content === undefined) {
+      throw new Error(
+        `Tyrian managed app root record is not a readable regular file at '${recordPath}'.`
+      );
+    }
     const record = parseManagedRootRecord(content, recordPath);
     if (record.appRoot !== candidate.appRoot) {
       throw new Error(`Tyrian managed app root record does not own '${candidate.appRoot}'.`);
     }
-    await removeFileDurably(recordPath, { registryChanged: true });
+    await removeFileDurably(
+      recordPath,
+      { registryChanged: true },
+      regularFileGenerationFromRegistry(current)
+    );
     return { changed: true };
   });
 }
@@ -977,7 +993,7 @@ async function readIslandShellStatusUnlocked(
 
   try {
     registration = await readManagedAppRootRegistration(options.appRoot, options);
-    const journalPath = getPatchPaths(options.appRoot).transactionJournalPath;
+    const journalPath = buildIslandPatchPaths(options.appRoot).transactionJournalPath;
     transaction = await inspectIslandTransactionHealth(journalPath, options.appRoot, fileSystem);
     return (await inspectIslandRoot(options.appRoot, registration, transaction, fileSystem)).status;
   } catch (error) {
@@ -997,7 +1013,7 @@ async function readIslandShellStatusUnlocked(
         transaction: transaction ?? {
           kind: 'unavailable',
           recoverability: 'manual',
-          journalPath: getPatchPaths(options.appRoot).transactionJournalPath,
+          journalPath: buildIslandPatchPaths(options.appRoot).transactionJournalPath,
           reason: 'Tyrian could not inspect transaction evidence due to permissions.',
         },
         restoreProof: 'none',
@@ -1092,7 +1108,7 @@ async function inspectIslandRoot(
 ): Promise<IslandRootState> {
   const registered = isCurrentManagedRootRegistration(registration);
   const desiredThemeId = readDesiredThemeId(registration);
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   const transaction =
     knownTransaction ??
     (await inspectIslandTransactionHealth(paths.transactionJournalPath, appRoot));
@@ -1315,7 +1331,7 @@ async function buildApplyPayload(
   },
   fileSystem?: IslandPatchFileSystem
 ): Promise<ApplyPayload> {
-  const paths = getPatchPaths(options.appRoot);
+  const paths = buildIslandPatchPaths(options.appRoot);
   const [
     currentHtml,
     currentProductJson,
@@ -1406,7 +1422,7 @@ function buildApplyMutation(
   };
 }
 
-async function wouldApplyPayloadChange(payload: ApplyPayload): Promise<boolean> {
+function wouldApplyPayloadChange(payload: ApplyPayload): boolean {
   return (
     payload.expectedContents.get(payload.paths.backupHtmlPath) !== payload.baseHtml ||
     payload.expectedContents.get(payload.paths.backupProductJsonPath) !== payload.baseProductJson ||
@@ -1471,18 +1487,8 @@ async function listIslandShellRoots(
     candidates.set(root.appRoot, root);
   }
 
-  const existingRoots: RootCandidate[] = [];
-
-  for (const candidate of candidates.values()) {
-    if (!candidate.appRoot) {
-      continue;
-    }
-
-    existingRoots.push(candidate);
-  }
-
   return {
-    roots: existingRoots,
+    roots: [...candidates.values()],
     registryDiagnostics,
     registryChanged: initializationChanged || quarantinedRecords.length > 0,
     quarantinedRecords,
@@ -1710,10 +1716,6 @@ async function verifyManagedStateRemoved(
   }
 }
 
-function getPatchPaths(appRoot: string): IslandPatchPaths {
-  return buildIslandPatchPaths(appRoot);
-}
-
 function getManagedRootsDirectoryPath(environment?: IslandShellEnvironment): string {
   return buildManagedRootsDirectoryPath(environment?.registryHome);
 }
@@ -1735,9 +1737,7 @@ function stripTyrianBlock(html: string): string {
   return html
     .replace(markerStartPattern, '')
     .replace(TYRIAN_STYLESHEET_PATTERN, '')
-    .replace(markerEndPattern, '')
-    .trimEnd()
-    .concat('\n');
+    .replace(markerEndPattern, '');
 }
 
 function readTyrianBlockState(html: string): 'absent' | 'valid' | 'malformed' {
@@ -1929,7 +1929,7 @@ function parseManifest(content: string | undefined): IslandManifestV3 | undefine
 }
 
 function sha256Base64(content: string): string {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('base64').replace(/=+$/, '');
+  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }
 
 async function readManagedAppRootRegistration(
@@ -2147,9 +2147,9 @@ async function readManagedRootRecordsFromDirectory(
       throw new Error(reason);
     }
 
-    let content: string;
+    let recordGeneration: RegistryRecordGeneration;
     try {
-      content = await fs.readFile(recordPath, 'utf8');
+      recordGeneration = await readRegistryRecordGeneration(recordPath, false);
     } catch (error) {
       const reason = `${recordPath}: ${error instanceof Error ? error.message : String(error)}`;
       if (mode === 'diagnostic') {
@@ -2167,6 +2167,10 @@ async function readManagedRootRecordsFromDirectory(
         continue;
       }
       throw error;
+    }
+    const content = recordGeneration.content;
+    if (content === undefined) {
+      throw new Error(`Tyrian managed app root record is not readable at '${recordPath}'.`);
     }
 
     let appRoot: string;
@@ -2186,11 +2190,10 @@ async function readManagedRootRecordsFromDirectory(
         continue;
       }
       if (mode === 'restore') {
-        const generation = await readRegistryRecordGeneration(recordPath, true);
         await quarantineManagedRootRecordAndRecord(
           recordPath,
           environment,
-          generation,
+          { ...recordGeneration, corrupt: true },
           accumulator
         );
         continue;
@@ -2230,7 +2233,7 @@ async function readManagedRootRecordsFromDirectory(
 
     accumulator.roots.push({
       appRoot,
-      recordGeneration: await readRegistryRecordGeneration(recordPath, corrupt),
+      recordGeneration: { ...recordGeneration, corrupt },
     });
   }
 
@@ -2251,10 +2254,14 @@ async function readRegistryRecordGeneration(
   identityPath = recordPath
 ): Promise<RegistryRecordGeneration> {
   const before = await fs.lstat(recordPath);
-  const content =
-    before.isFile() && !before.isSymbolicLink()
-      ? await fs.readFile(recordPath, 'utf8').catch(() => undefined)
-      : undefined;
+  let content: string | undefined;
+  if (before.isFile() && !before.isSymbolicLink()) {
+    try {
+      content = await fs.readFile(recordPath, 'utf8');
+    } catch (error) {
+      if (!corrupt) throw error;
+    }
+  }
   const after = await lstatIfExists(recordPath);
   if (
     after === undefined ||
@@ -2282,10 +2289,7 @@ function registryRecordGenerationFromStats(
     dev: stats.dev,
     ino: stats.ino,
     mode: Number(stats.mode),
-    contentHash:
-      content === undefined
-        ? undefined
-        : crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
+    content,
     corrupt,
   };
 }
@@ -2299,8 +2303,25 @@ function sameRegistryRecordGeneration(
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.mode === right.mode &&
-    left.contentHash === right.contentHash
+    left.content === right.content
   );
+}
+
+function regularFileGenerationFromRegistry(
+  generation: RegistryRecordGeneration
+): Extract<RegularFileGeneration, { kind: 'present' }> {
+  if (generation.content === undefined) {
+    throw new Error(
+      `Tyrian managed app root record is not a readable regular file at '${generation.recordPath}'.`
+    );
+  }
+  return {
+    kind: 'present',
+    device: String(generation.dev),
+    inode: String(generation.ino),
+    mode: generation.mode,
+    content: generation.content,
+  };
 }
 
 async function quarantineManagedRootRecordAndRecord(
@@ -2633,7 +2654,7 @@ async function commitFileTransactionWithFileSystem(
   }
 
   try {
-    await finishVerifiedFileTransaction(journalPath, journal, fileSystem);
+    await removeTemporaryFilesBeforeJournal(journalPath, journal, fileSystem);
   } catch (error) {
     throw new IslandPartialMutationError(
       `Tyrian file transaction verified its app-file changes, but cleanup remains incomplete: ${error instanceof Error ? error.message : String(error)}`,
@@ -3056,14 +3077,6 @@ async function removeTemporaryFilesBeforeJournal(
   await removeFileDurably(journalOperationPath, { incompleteRecovery: true }, journalGeneration);
 }
 
-async function finishVerifiedFileTransaction(
-  journalPath: string,
-  journal: FileTransactionJournal,
-  fileSystem?: IslandPatchFileSystem
-): Promise<void> {
-  await removeTemporaryFilesBeforeJournal(journalPath, journal, fileSystem);
-}
-
 function transactionCleanupOperationPath(
   targetPath: string,
   temporaryPath: string,
@@ -3201,7 +3214,7 @@ async function recoverRootFileTransactions(
   appRoot: string,
   fileSystem?: IslandPatchFileSystem
 ): Promise<boolean> {
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   return recoverFileTransaction(
     paths.transactionJournalPath,
     islandTransactionAllowedTargets(appRoot),
@@ -3211,7 +3224,7 @@ async function recoverRootFileTransactions(
 }
 
 function islandTransactionAllowedTargets(appRoot: string): Set<string> {
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   return new Set([
     paths.workbenchHtmlPath,
     paths.productJsonPath,
@@ -3255,7 +3268,7 @@ async function recoverFileTransaction(
   }
 
   if (journal.phase === 'verified') {
-    await finishVerifiedFileTransaction(journalPath, journal, fileSystem);
+    await removeTemporaryFilesBeforeJournal(journalPath, journal, fileSystem);
     return false;
   }
 
@@ -3481,7 +3494,7 @@ async function canonicalizeAppRoot(appRoot: string): Promise<string> {
 }
 
 async function assertPatchPathAncestorsOwned(appRoot: string): Promise<void> {
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   const targetPaths = [
     paths.workbenchHtmlPath,
     paths.productJsonPath,
@@ -3555,7 +3568,7 @@ async function openIslandPatchFileSystem(appRoot: string): Promise<IslandPatchFi
   }
 
   await assertPatchPathAncestorsOwned(appRoot);
-  const paths = getPatchPaths(appRoot);
+  const paths = buildIslandPatchPaths(appRoot);
   const directoryFlags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
   const appRootHandle = await fs.open(appRoot, directoryFlags);
   let currentHandle: FileHandle | undefined;
@@ -3961,7 +3974,13 @@ async function writeIfChanged(
   try {
     await writeDurableTextFile(filePath, content, currentGeneration);
   } catch (error) {
-    if (!didDurablePublicationChange(error)) throw error;
+    if (
+      findNestedError(error, (candidate) =>
+        candidate instanceof IslandDurablePublicationFailure ? candidate : undefined
+      ) === undefined
+    ) {
+      throw error;
+    }
     throw new IslandPartialMutationError(
       `Tyrian durable publication changed '${filePath}' but did not complete cleanly.`,
       mutation,
@@ -3969,22 +3988,6 @@ async function writeIfChanged(
     );
   }
   return true;
-}
-
-function didDurablePublicationChange(value: unknown): boolean {
-  const pending = [value];
-  const visited = new Set<unknown>();
-
-  while (pending.length > 0) {
-    const candidate = pending.shift();
-    if (candidate === undefined || visited.has(candidate)) continue;
-    visited.add(candidate);
-    if (candidate instanceof IslandDurablePublicationFailure) return true;
-    if (candidate instanceof AggregateError) pending.push(...candidate.errors);
-    if (candidate instanceof Error && candidate.cause !== undefined) pending.push(candidate.cause);
-  }
-
-  return false;
 }
 
 async function readTextFileIfExists(filePath: string): Promise<string | undefined> {

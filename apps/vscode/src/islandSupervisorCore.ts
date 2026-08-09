@@ -70,7 +70,3 @@ export function readIslandMutationFacts(
 
   return mergeIslandMutationFacts(...collected);
 }
-
-export function didIslandMutationChange(value: unknown): boolean {
-  return readIslandMutationFacts(value).changed;
-}

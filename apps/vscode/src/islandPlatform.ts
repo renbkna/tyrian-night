@@ -17,9 +17,3 @@ export function readIslandApplyPlatformSupport(
     reason: `Island UI apply is unsupported on '${platform}'. Tyrian only patches VS Code on Linux because its durable file transaction is proved there. Doctor and Classic UI restore remain available for current managed installations.`,
   };
 }
-
-export function isIslandApplyPlatformSupported(
-  platform: NodeJS.Platform = process.platform
-): platform is 'linux' {
-  return readIslandApplyPlatformSupport(platform).supported;
-}

@@ -205,7 +205,9 @@ export async function readIslandUiSupervisorStatuses(options?: {
     } catch (error) {
       accessInspection = {
         kind: 'failed',
-        reason: describeInspectionFailure(error),
+        reason:
+          (error instanceof Error ? error.message : String(error)) ||
+          'Unknown Island write-access inspection failure.',
       };
     }
 
@@ -273,9 +275,4 @@ function recommendIslandUiAction(
   return status.managed || status.active || status.classification === 'transaction-pending'
     ? 'restore'
     : 'none';
-}
-
-function describeInspectionFailure(error: unknown): string {
-  const reason = error instanceof Error ? error.message : String(error);
-  return reason.length > 0 ? reason : 'Unknown Island write-access inspection failure.';
 }

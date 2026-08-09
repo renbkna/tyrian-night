@@ -404,7 +404,6 @@ test('activation surfaces a typed incomplete reconciliation result', async () =>
 test('restore completes through the supervisor without extra prompts', async () => {
   const { activate } = await import('../apps/vscode/src/extension');
   await activate(createExtensionContext());
-  await waitForRegisteredCommand('tyrianNight.restoreClassicUi');
 
   const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
   expect(restoreCommand).toBeFunction();
@@ -439,6 +438,30 @@ test('restore does not request reload for desired-state and registry changes wit
 
   expect(informationMessages.at(-1)?.[0]).toBe('Tyrian Night: Classic UI is already active.');
   expect(informationMessages.some((message) => message.includes('Reload Window'))).toBe(false);
+});
+
+test('restore reports a structured blocked result without rejecting the command', async () => {
+  const { activate } = await import('../apps/vscode/src/extension');
+  await activate(createExtensionContext());
+  const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
+  resetObservations();
+  queuedSpawnResponses.push({
+    kind: 'blocked',
+    ...mutationFacts(),
+    reason: 'pending transaction requires manual recovery',
+    failedAppRoots: [
+      {
+        appRoot: '/test-vscode-app-root',
+        reason: 'pending transaction requires manual recovery',
+      },
+    ],
+  });
+
+  await expect(restoreCommand?.()).resolves.toBeUndefined();
+
+  expect(spawnCalls.map((call) => call.args[1])).toEqual(['restore-supervised']);
+  expect(informationMessages.at(-1)?.[0]).toContain('Classic UI restore is blocked');
+  expect(informationMessages.at(-1)?.[0]).toContain('manual recovery');
 });
 
 test('repair Island UI handles permission-required supervisor result through Doctor', async () => {
@@ -514,7 +537,6 @@ test('permission-required Island UI prompt can open the public setup guidance', 
 test('permission-required restore routes only to setup guidance, Doctor, or dismissal', async () => {
   const { activate } = await import('../apps/vscode/src/extension');
   await activate(createExtensionContext());
-  await waitForRegisteredCommand('tyrianNight.restoreClassicUi');
 
   const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
   expect(restoreCommand).toBeFunction();
@@ -671,16 +693,6 @@ function resetObservations(): void {
   queuedWarningResponses.length = 0;
   queuedSpawnResponses.length = 0;
   openedDocuments.length = 0;
-}
-
-async function waitForRegisteredCommand(command: string): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (registeredCommands.has(command)) {
-      return;
-    }
-
-    await Promise.resolve();
-  }
 }
 
 async function waitForSpawnCount(count: number): Promise<void> {
