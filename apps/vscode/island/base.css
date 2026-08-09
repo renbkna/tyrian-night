@@ -556,11 +556,6 @@
   opacity: 1 !important;
 }
 
-.tab .monaco-icon-label.file-icon::before {
-  filter: var(--islands-file-icon-filter);
-  opacity: 1 !important;
-}
-
 .letterpress {
   opacity: var(--islands-letterpress-opacity) !important;
   filter: var(--islands-letterpress-filter) !important;
