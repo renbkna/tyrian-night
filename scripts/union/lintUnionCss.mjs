@@ -1,7 +1,6 @@
 // @ts-check
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { extractCssRules, selectorElementNames } from './extractSelectors.mjs';
 import { flattenCssFile } from './flattenCss.mjs';
@@ -187,7 +186,7 @@ function normalizeSelector(selector) {
     .trim();
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === import.meta.filename) {
   const repoRoot = process.cwd();
   const css = readUnionSourceCss(repoRoot);
   const issues = lintUnionCss(css, { generated: true });

@@ -6,11 +6,6 @@ applicationwindow.inactive,
   color: var(--tyrian-muted);
 }
 
-toolbar.header,
-applicationheader.with-separator {
-  border-bottom: 1px solid var(--tyrian-border-color);
-}
-
 toolbar.footer {
   border-top: 1px solid var(--tyrian-border-color);
 }

@@ -133,9 +133,5 @@ dialogbuttonbox button[role="no"] {
 tooltip {
   width: var(--tyrian-medium-element);
   height: var(--tyrian-medium-element);
-  padding: var(--tyrian-large-spacing);
   color: var(--tyrian-foreground);
-  background-color: var(--tyrian-panel-raised-bg);
-  border-radius: var(--tyrian-radius-large);
-  border: 1px solid var(--tyrian-border-color);
 }

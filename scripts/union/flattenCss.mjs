@@ -2,7 +2,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const LOCAL_IMPORT_RE = /^\s*@import\s+(?:"([^"]+)"|'([^']+)')\s*;\s*$/u;
 
@@ -106,7 +105,7 @@ function isInsidePath(candidatePath, rootPath) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === import.meta.filename) {
   const entryPath = process.argv[2] ?? 'source/union-css/index.css';
   process.stdout.write(flattenCssFile(entryPath));
 }

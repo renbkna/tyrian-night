@@ -25,24 +25,16 @@ export function extractCssRules(css) {
 
     rules.push({
       selector,
-      selectors: splitSelectorList(selector),
+      selectors: selector
+        .split(',')
+        .map((selector) => selector.trim().replace(/\s+/gu, ' '))
+        .filter(Boolean),
       body: match[2],
       line: lineNumberAt(withoutComments, match.index),
     });
   }
 
   return rules;
-}
-
-/**
- * @param {string} selectorList
- * @returns {string[]}
- */
-export function splitSelectorList(selectorList) {
-  return selectorList
-    .split(',')
-    .map((selector) => selector.trim().replace(/\s+/gu, ' '))
-    .filter(Boolean);
 }
 
 /**
@@ -58,14 +50,6 @@ export function selectorElementNames(selector) {
     .filter((name) => /^[a-z][a-z0-9-]*$/u.test(name));
 }
 
-/**
- * @param {string} selector
- * @returns {string[]}
- */
-/**
- * @param {string} selector
- * @returns {string[]}
- */
 /**
  * @param {string} text
  * @param {number} index
