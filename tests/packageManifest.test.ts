@@ -49,7 +49,7 @@ type WorkspacePackage = {
 };
 
 const VSCODE_ROOT = 'apps/vscode';
-const VSCODE_PACKAGE_PATH = `${VSCODE_ROOT}/package.json`;
+const VSCODE_PACKAGE_PATH = path.join(VSCODE_ROOT, 'package.json');
 
 test('manifest declares the VS Code host and contribution contracts this extension depends on', () => {
   const manifest = readJson<ExtensionPackage>(VSCODE_PACKAGE_PATH);
@@ -365,7 +365,6 @@ test('workspace and product manifests have non-competing release ownership', () 
   }>('apps/desktop/package.json');
   const ciWorkflow = fs.readFileSync('.github/workflows/ci.yml', 'utf8');
   const lockfile = fs.readFileSync('bun.lock', 'utf8');
-  const tsupConfig = fs.readFileSync('apps/vscode/tsup.config.ts', 'utf8');
   const vscodeTsconfig = readJson<{ include: string[] }>('apps/vscode/tsconfig.json');
   const desktopTsconfig = readJson<{ include: string[] }>('apps/desktop/tsconfig.json');
   const tsconfig = readJson<{
@@ -387,7 +386,13 @@ test('workspace and product manifests have non-competing release ownership', () 
     'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme && bun run check:theme-preview'
   );
   expect(workspace.scripts['test:isolated']).toBe('bun test --isolate');
-  for (const scriptName of ['test', 'verify:vscode', 'verify:vscode-portable', 'verify:desktop']) {
+  for (const scriptName of [
+    'test',
+    'verify',
+    'verify:vscode',
+    'verify:vscode-portable',
+    'verify:desktop',
+  ]) {
     expect(workspace.scripts[scriptName]).toContain('bun run test:isolated');
     expect(workspace.scripts[scriptName]).not.toContain('bun test ');
   }
@@ -432,10 +437,16 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.scripts['build:generated']).toContain('bun run build:theme-preview');
   expect(workspace.scripts['check:generated']).toContain('bun run check:vscode-package-assets');
   expect(workspace.scripts['check:generated']).toContain('bun run check:theme-preview');
-  expect(workspace.scripts.build).toBe('bun run build:generated && bun run build:vscode');
+  expect(workspace.scripts.build).toBe(
+    'bun run build:generated && bun run --cwd apps/vscode bundle'
+  );
+  expect(workspace.scripts.watch).toBe('bun run --cwd apps/vscode watch');
   expect(workspace.scripts.package).toBe('bun run package:vscode');
+  expect(workspace.scripts['package:check']).toBeUndefined();
+  expect(workspace.scripts['build:vscode']).toBeUndefined();
+  expect(workspace.scripts['watch:vscode']).toBeUndefined();
   expect(workspace.scripts['package:vscode']).toBe(
-    'bun run verify:vscode && bun run --cwd apps/vscode package'
+    'bun run verify:vscode && bun run --cwd apps/vscode package:artifact'
   );
   expect(workspace.scripts['verify:vscode']).not.toContain('verify:desktop');
   expect(workspace.scripts['verify:vscode']).not.toContain('liveInstall.test.ts');
@@ -465,14 +476,25 @@ test('workspace and product manifests have non-competing release ownership', () 
 
   expect(extension.scripts['vscode:prepublish']).toBeUndefined();
   expect(extension.scripts.check).toBe('tsc --noEmit --project tsconfig.json');
-  expect(extension.scripts.lint).toBe('oxlint -c ../../.oxlintrc.json src/ tsup.config.ts');
-  expect(extension.scripts.build).toContain('tsup');
-  expect(extension.scripts.package).toContain('bun run check');
-  expect(extension.scripts.package).toContain("mkdirSync('../../dist', { recursive: true })");
-  expect(extension.scripts.package).toContain('vsce package --no-dependencies');
-  expect(extension.scripts.package).toContain('--out ../../dist/tyrian-night.vsix');
+  expect(extension.scripts.lint).toBe('oxlint -c ../../.oxlintrc.json src/');
+  expect(extension.scripts.bundle).toContain('bun build --target=node');
+  expect(extension.scripts.bundle).toContain('--format=esm');
+  expect(extension.scripts.bundle).toContain('--external=vscode');
+  expect(extension.scripts.bundle).toContain('--sourcemap=none');
+  expect(extension.scripts.bundle).toContain("rmSync('out', { recursive: true, force: true })");
+  expect(extension.scripts.watch).toBe('bun run bundle -- --watch');
+  expect(extension.scripts.build).toEndWith('bun run bundle');
+  expect(extension.scripts.package).toBe(
+    'bun run check && bun run build && bun run package:artifact'
+  );
+  expect(extension.scripts['package:artifact']).toContain(
+    "mkdirSync('../../dist', { recursive: true })"
+  );
+  expect(extension.scripts['package:artifact']).toContain('vsce package --no-dependencies');
+  expect(extension.scripts['package:artifact']).toContain('--out ../../dist/tyrian-night.vsix');
+  expect(extension.scripts['package:verified']).toBeUndefined();
   expect(extension.devDependencies['@vscode/vsce']).toBe('^3.9.1');
-  expect(extension.devDependencies.tsup).toBe('^8.5.1');
+  expect(extension.devDependencies.tsup).toBeUndefined();
   expect(extension).not.toHaveProperty('dependencies');
   expect(extension).not.toHaveProperty('simple-git-hooks');
   expect(lockfile).toMatch(/"":\s*\{\s*"name":\s*"tyrian-night-workspace"/u);
@@ -480,6 +502,7 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(lockfile).not.toContain('packages/umbra');
   expect(lockfile).not.toContain('@tyrian-night/umbra');
   expect(lockfile).not.toContain('simple-git-hooks');
+  expect(lockfile).not.toContain('tsup');
 
   expect(desktop.tyrianNight.supportedPlatforms).toEqual(['linux']);
   expect(desktop.version).toBe('3.0.0');
@@ -502,13 +525,11 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(tsconfig.include).toContain('apps/vscode/src');
   expect(tsconfig.include).toContain('scripts');
   expect(tsconfig.include).not.toContain('packages/umbra/src');
-  expect(tsupConfig).toContain("VSCODE_EXTENSION_HOST_NODE_TARGET = 'node22'");
-  expect(tsupConfig).toContain("entry: ['src/extension.ts', 'src/islandCli.ts']");
-  expect(tsupConfig).not.toContain("target: 'esnext'");
   expect(ciWorkflow).toContain('bun-version: 1.3.11');
   expect(ciWorkflow).toContain('node-version: 22.19.0');
   expect(ciWorkflow).toContain('run: bun install --frozen-lockfile');
   expect(ciWorkflow).toContain('run: bun run package:vscode');
+  expect(ciWorkflow).toContain('run: bun run --cwd apps/vscode package:artifact');
   expect(ciWorkflow).toContain('run: bun run verify:desktop');
   expect(ciWorkflow).toContain('windows-latest');
   expect(ciWorkflow).toContain('macos-latest');
@@ -571,11 +592,11 @@ function readJson<T>(filePath: string): T {
 }
 
 function resolveVscodePackagePath(filePath: string): string {
-  return path.join(VSCODE_ROOT, filePath.replace(/^\.\//, ''));
+  return path.join(VSCODE_ROOT, filePath);
 }
 
 function pathBasename(filePath: string, extension: string): string {
-  return filePath.replace(/^\.\//, '').split('/').at(-1)!.slice(0, -extension.length);
+  return path.basename(filePath, extension);
 }
 
 function numberWord(value: number): string {

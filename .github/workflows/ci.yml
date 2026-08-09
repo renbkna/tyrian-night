@@ -43,7 +43,7 @@ jobs:
           bun-version: 1.3.11
       - run: bun install --frozen-lockfile
       - run: bun run verify:vscode-portable
-      - run: bun run --cwd apps/vscode package
+      - run: bun run --cwd apps/vscode package:artifact
 
   desktop-linux:
     name: Desktop installer (Linux)

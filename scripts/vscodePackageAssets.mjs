@@ -2,10 +2,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const PACKAGE_ASSETS = [
   { source: 'LICENSE', target: 'apps/vscode/LICENSE' },
   { source: 'assets/icon.png', target: 'apps/vscode/assets/icon.png' },
@@ -27,7 +26,7 @@ export function syncVscodePackageAssets(root = repoRoot, options = {}) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === import.meta.filename) {
   const stale = syncVscodePackageAssets(repoRoot, {
     check: process.argv.includes('--check'),
   });

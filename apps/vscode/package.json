@@ -102,17 +102,18 @@
   },
   "scripts": {
     "check": "tsc --noEmit --project tsconfig.json",
-    "lint": "oxlint -c ../../.oxlintrc.json src/ tsup.config.ts",
-    "build": "node ../../scripts/islandCss.mjs && node ../../scripts/vscodePackageAssets.mjs && tsup",
-    "watch": "tsup --watch",
-    "package": "bun run check && bun run build && node -e \"require('node:fs').mkdirSync('../../dist', { recursive: true })\" && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"
+    "lint": "oxlint -c ../../.oxlintrc.json src/",
+    "bundle": "node -e \"require('node:fs').rmSync('out', { recursive: true, force: true })\" && bun build --target=node --format=esm --outdir=out --sourcemap=none --external=vscode --minify src/extension.ts src/islandCli.ts",
+    "build": "node ../../scripts/islandCss.mjs && node ../../scripts/vscodePackageAssets.mjs && bun run bundle",
+    "watch": "bun run bundle -- --watch",
+    "package": "bun run check && bun run build && bun run package:artifact",
+    "package:artifact": "node -e \"require('node:fs').mkdirSync('../../dist', { recursive: true })\" && vsce package --no-dependencies --out ../../dist/tyrian-night.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
     "@types/vscode": "^1.118.0",
     "@vscode/vsce": "^3.9.1",
     "oxlint": "^1.63.0",
-    "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }
 }
