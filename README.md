@@ -15,6 +15,13 @@ Tyrian Night is one visual system exported to independently supported editor, te
 
 The workspace requires Bun 1.3.11 and Node.js 22.19 or newer. Product manifests own narrower runtime requirements.
 
+### Safety Before Apply
+
+- Installing or selecting the VS Code and Zed color themes uses the editors' normal extension mechanisms. It does not patch application or desktop files.
+- Island UI is a separate, opt-in Linux feature that modifies VS Code application files. Doctor and the restore-before-uninstall warning are part of its product contract; macOS and Windows reject apply before filesystem admission.
+- Desktop preview commands are read-only. Desktop apply commands are Linux-only, user-scoped, transactional replacements of the paths listed by the preview, with backups and explicit recovery. They never request administrator privileges.
+- The full rice is the high-impact path: it is KDE Plasma 6-only and replaces panel, wallpaper, and shell state. Do not run it on another desktop or operating system.
+
 ## Family
 
 The six variants are intentionally different expressions of the same semantic system rather than near-duplicate palettes.
@@ -34,7 +41,7 @@ Bracket nesting uses a dedicated six-depth palette rather than borrowing syntax 
 
 ## Palette
 
-Tyrian Nocturne is the selected default and semantic base. Night, Nocturne, and Abyss share one exact hue profile; their recipes author explicit per-role OKLCH lightness and chroma. Night stays within 60–70% of Nocturne's mean semantic chroma, Nocturne is the 100% center, and Abyss stays within 130–145% with roughly 0.19–0.20 mean semantic chroma and higher syntax contrast. Pastel and Dawn use related branch hue profiles. The shared opacity contract owns role alpha. WCAG contrast is a hard minimum readability gate, and independent states may not resolve to the same rendered color. These rules catch real failures without pretending to choose a beautiful palette.
+Tyrian Nocturne is the selected default and semantic base. Night, Nocturne, and Abyss share one exact hue profile; their recipes author explicit per-role OKLCH lightness and chroma. Night stays within 60–70% of Nocturne's mean semantic chroma, Nocturne is the 100% center, and Abyss stays within 130–145% with higher syntax contrast. Pastel and Dawn use related branch hue profiles. The shared opacity contract owns role alpha. WCAG contrast is a hard minimum readability gate, and independent states may not resolve to the same rendered color. These rules catch real failures without pretending to choose a beautiful palette.
 
 OKLCH, OKLab distance, color-vision simulation, and gamut-relative pigment richness are author diagnostics. Richness is `rho = C / Cmax(L, h, sRGB)`, which distinguishes an intentionally deep pigment from an accidentally gray one at the same lightness and hue. None of these observations is an attention, comfort, harmony, or quality score. The green-through-cyan reservation is explicit Tyrian brand policy, not a scientific law.
 
