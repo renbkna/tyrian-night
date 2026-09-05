@@ -21,19 +21,14 @@ import {
 import { resolveDesktopXdgConfigPath, resolveDesktopXdgRoots } from './desktopPaths.mjs';
 import {
   admitOwnedPaths,
+  createOwnedFilesystemMaintenance,
   escapeRegExp,
   exists,
   fsyncDirectory,
-  installManagedPathRaw,
   isSameOrDescendant,
   operation,
-  publishStagedOwnedPathRaw,
-  removeOwnedPathRaw,
   resolvePathIdentity,
   withTokenFileLock,
-  writeBinaryFileRaw,
-  writeOwnedRecoveryCandidateRaw,
-  writeTextFileRaw,
 } from './installOps.mjs';
 import {
   buildTyrianBackupRoot,
@@ -689,16 +684,13 @@ function markPlasmaLifecycleRuntimeApplied(userHome, desiredPanelState, desiredW
 function writePlasmaLifecycle(userHome, journal) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
   const temporaryPath = path.join(userHome, PLASMA_LIFECYCLE_CANDIDATE_PATH);
+  const maintenance = createPlasmaLifecycleMaintenance(userHome);
 
   try {
-    writeOwnedRecoveryCandidateRaw(
-      userHome,
-      temporaryPath,
-      `${JSON.stringify(journal, null, 2)}\n`
-    );
-    publishStagedOwnedPathRaw(userHome, temporaryPath, journalPath);
+    maintenance.writeRecoveryCandidate(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
+    maintenance.publishStaged(temporaryPath, journalPath);
   } finally {
-    if (exists(temporaryPath)) removeOwnedPathRaw(userHome, temporaryPath);
+    if (exists(temporaryPath)) maintenance.remove(temporaryPath);
   }
 }
 
@@ -758,7 +750,7 @@ function readPlasmaLifecycle(userHome) {
  */
 function finishPlasmaLifecycle(userHome) {
   const journalPath = path.join(userHome, PLASMA_LIFECYCLE_PATH);
-  if (exists(journalPath)) removeOwnedPathRaw(userHome, journalPath);
+  if (exists(journalPath)) createPlasmaLifecycleMaintenance(userHome).remove(journalPath);
   removePlasmaLifecycleCandidate(userHome);
 }
 
@@ -768,7 +760,21 @@ function finishPlasmaLifecycle(userHome) {
  */
 function removePlasmaLifecycleCandidate(userHome) {
   const candidatePath = path.join(userHome, PLASMA_LIFECYCLE_CANDIDATE_PATH);
-  if (exists(candidatePath)) removeOwnedPathRaw(userHome, candidatePath);
+  if (exists(candidatePath)) createPlasmaLifecycleMaintenance(userHome).remove(candidatePath);
+}
+
+/** @param {string} userHome */
+function createPlasmaLifecycleMaintenance(userHome) {
+  return createOwnedFilesystemMaintenance(
+    userHome,
+    {
+      paths: [
+        path.join(userHome, PLASMA_LIFECYCLE_PATH),
+        path.join(userHome, PLASMA_LIFECYCLE_CANDIDATE_PATH),
+      ],
+    },
+    'Plasma lifecycle metadata'
+  );
 }
 
 /**
@@ -817,20 +823,10 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
     };
   });
   const allocatingJournal = buildCaptureJournal(root, token, 'allocating', entries);
-
-  admitOwnedPaths(
+  const maintenance = createRiceCaptureMaintenance(
     root,
-    [
-      journalPath,
-      path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH),
-      transactionRoot,
-      ...entries.flatMap(({ targetPath, backupPath, stagedPath }) => [
-        targetPath,
-        backupPath,
-        stagedPath,
-      ]),
-    ],
-    'Rice capture destination'
+    transactionRoot,
+    entries.map(({ targetPath }) => targetPath)
   );
 
   try {
@@ -838,7 +834,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
 
     for (const entry of entries) {
       if (entry.existed) {
-        installManagedPathRaw('copy', entry.targetPath, entry.backupPath, { ownerRoot: root });
+        maintenance.installManagedPath('copy', entry.targetPath, entry.backupPath);
 
         if (readCaptureFileGeneration(entry.backupPath) !== entry.originalChecksum) {
           throw new Error(`Rice capture backup verification failed for ${entry.targetPath}`);
@@ -847,7 +843,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
 
       const { content, message, stagedPath } = entry;
       console.log(message);
-      writeBinaryFileRaw(stagedPath, content, { ownerRoot: root });
+      maintenance.writeBinary(stagedPath, content);
     }
 
     fsyncDirectory(path.join(transactionRoot, 'stage'));
@@ -864,7 +860,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
     for (let index = 0; index < entries.length; index += 1) {
       const { stagedPath, targetPath, originalChecksum } = entries[index];
       assertCaptureFileGeneration(targetPath, originalChecksum, 'before publication');
-      publishStagedOwnedPathRaw(root, stagedPath, targetPath);
+      maintenance.publishStaged(stagedPath, targetPath);
 
       if (testInterruptPublicationAfter === index + 1) {
         throw new SimulatedCaptureInterruption();
@@ -888,7 +884,7 @@ function publishCapturedRiceSnapshot(root, capturedFiles, testInterruptPublicati
       if (exists(journalPath)) {
         recoverCapturePublication(root);
       } else {
-        if (exists(transactionRoot)) removeOwnedPathRaw(root, transactionRoot);
+        if (exists(transactionRoot)) maintenance.remove(transactionRoot);
       }
     } catch (rollbackError) {
       throw new AggregateError(
@@ -1038,12 +1034,17 @@ function buildCaptureJournal(root, token, phase, entries) {
 function writeCaptureJournal(root, journal) {
   const journalPath = path.join(root, CAPTURE_JOURNAL_PATH);
   const temporaryPath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
+  const maintenance = createRiceCaptureMaintenance(
+    root,
+    path.join(root, journal.transactionRoot),
+    journal.entries.map((entry) => path.join(root, entry.targetPath))
+  );
 
   try {
-    writeOwnedRecoveryCandidateRaw(root, temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
-    publishStagedOwnedPathRaw(root, temporaryPath, journalPath);
+    maintenance.writeRecoveryCandidate(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`);
+    maintenance.publishStaged(temporaryPath, journalPath);
   } finally {
-    if (exists(temporaryPath)) removeOwnedPathRaw(root, temporaryPath);
+    if (exists(temporaryPath)) maintenance.remove(temporaryPath);
   }
 }
 
@@ -1056,7 +1057,7 @@ function recoverCapturePublication(root) {
   const candidatePath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
 
   if (exists(candidatePath)) {
-    removeOwnedPathRaw(root, candidatePath);
+    createRiceCaptureMaintenance(root).remove(candidatePath);
   }
 
   if (!exists(journalPath)) {
@@ -1079,21 +1080,12 @@ function recoverCapturePublication(root) {
 
   const journal = validateCaptureJournal(root, candidate);
   const transactionRoot = path.join(root, journal.transactionRoot);
-  admitOwnedPaths(
+  const maintenance = createRiceCaptureMaintenance(
     root,
-    [
-      journalPath,
-      candidatePath,
-      transactionRoot,
-      ...journal.entries.flatMap((entry) => [
-        path.join(root, entry.targetPath),
-        path.join(root, entry.backupPath),
-        path.join(root, entry.stagedPath),
-      ]),
-    ],
+    transactionRoot,
+    journal.entries.map((entry) => path.join(root, entry.targetPath)),
     'Rice capture recovery'
   );
-
   if (journal.phase === 'allocating') {
     finalizeCapturePublication(root, journalPath, transactionRoot);
     return;
@@ -1129,18 +1121,16 @@ function recoverCapturePublication(root) {
 
         if (entry.existed) {
           const restorePath = path.join(transactionRoot, 'restore', String(index));
-          installManagedPathRaw('copy', path.join(root, entry.backupPath), restorePath, {
-            ownerRoot: root,
-          });
+          maintenance.installManagedPath('copy', path.join(root, entry.backupPath), restorePath);
           if (readCaptureFileGeneration(restorePath) !== entry.originalChecksum) {
             throw new Error(`Rice capture recovery restore copy changed for ${entry.targetPath}`);
           }
 
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
-          publishStagedOwnedPathRaw(root, restorePath, targetPath);
+          maintenance.publishStaged(restorePath, targetPath);
         } else {
           assertCaptureFileGeneration(targetPath, entry.desiredChecksum, 'before rollback');
-          removeOwnedPathRaw(root, targetPath);
+          maintenance.remove(targetPath);
         }
       } catch (error) {
         failures.push(error);
@@ -1239,10 +1229,43 @@ function finalizeCapturePublication(root, journalPath, transactionRoot) {
     throw new Error('Rice capture transaction root escapes its repository');
   }
 
-  if (exists(transactionRoot)) removeOwnedPathRaw(root, transactionRoot);
-  if (exists(journalPath)) removeOwnedPathRaw(root, journalPath);
+  const maintenance = createRiceCaptureMaintenance(root, transactionRoot);
+  if (exists(transactionRoot)) maintenance.remove(transactionRoot);
+  if (exists(journalPath)) maintenance.remove(journalPath);
   const candidatePath = path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH);
-  if (exists(candidatePath)) removeOwnedPathRaw(root, candidatePath);
+  if (exists(candidatePath)) maintenance.remove(candidatePath);
+}
+
+/**
+ * Capture owns repository snapshot files and one bounded transaction directory.
+ * It is a maintainer-data operation, separate from live home transactions.
+ *
+ * @param {string} root
+ * @param {string | undefined} [transactionRoot]
+ * @param {string[]} [targetPaths]
+ * @param {string} [ownerLabel]
+ */
+function createRiceCaptureMaintenance(
+  root,
+  transactionRoot = undefined,
+  targetPaths = [],
+  ownerLabel = 'Rice capture maintenance'
+) {
+  return createOwnedFilesystemMaintenance(
+    root,
+    {
+      paths: [
+        path.join(root, CAPTURE_JOURNAL_PATH),
+        path.join(root, CAPTURE_JOURNAL_CANDIDATE_PATH),
+        ...targetPaths,
+      ],
+      directories: [
+        path.join(root, RICE_ROOT),
+        ...(transactionRoot === undefined ? [] : [transactionRoot]),
+      ],
+    },
+    ownerLabel
+  );
 }
 
 /**
@@ -1418,7 +1441,8 @@ export function installRice(options = {}) {
           testInterruptAfterRuntime: options.testInterruptAfterRuntime,
         })
       : undefined;
-    const runInstall = () =>
+    /** @param {import('./installLiveTyrian.mjs').HomeFilesystemCapability | undefined} parentTransaction */
+    const runInstall = (parentTransaction = undefined) =>
       installRiceOwned({
         root,
         userHome,
@@ -1431,6 +1455,7 @@ export function installRice(options = {}) {
         livePlan,
         preparedLayout,
         testInterruptAfterStyle: options.testInterruptAfterStyle,
+        parentTransaction,
       });
 
     if (!apply || !withPlasmaLayout) {
@@ -1478,7 +1503,7 @@ export function installRice(options = {}) {
           finishPlasmaLifecycle(userHome);
         },
       },
-      runInstall
+      (filesystem) => runInstall(filesystem)
     );
     console.log(`Tyrian rice install complete. Backup: ${backupRoot}`);
   };
@@ -1504,7 +1529,7 @@ export function installRice(options = {}) {
 }
 
 /**
- * @param {{ root: string; userHome: string; apply: boolean; withPlasmaLayout: boolean; layoutOnly: boolean; link: boolean; environment?: NodeJS.ProcessEnv; runtimeRoot: string; livePlan?: ReturnType<typeof buildLiveInstallPlan>; preparedLayout?: PreparedPlasmaLayoutInstall; testInterruptAfterStyle?: boolean }} options
+ * @param {{ root: string; userHome: string; apply: boolean; withPlasmaLayout: boolean; layoutOnly: boolean; link: boolean; environment?: NodeJS.ProcessEnv; runtimeRoot: string; livePlan?: ReturnType<typeof buildLiveInstallPlan>; preparedLayout?: PreparedPlasmaLayoutInstall; testInterruptAfterStyle?: boolean; parentTransaction?: import('./installLiveTyrian.mjs').HomeFilesystemCapability }} options
  * @returns {void}
  */
 function installRiceOwned(options) {
@@ -1520,55 +1545,39 @@ function installRiceOwned(options) {
     livePlan,
     preparedLayout,
     testInterruptAfterStyle,
+    parentTransaction,
   } = options;
 
-  /** @type {{ backupRoot: string; rollback: () => void } | undefined} */
-  let filesystemReceipt;
+  if (!layoutOnly) {
+    installLiveTyrian({
+      repoRoot: root,
+      home: userHome,
+      apply,
+      link,
+      target: 'plasma',
+      environment,
+      stagingRoot: livePlan?.stagingRoot,
+      parentTransaction,
+    });
+  } else if (withPlasmaLayout && !link) {
+    materializeRiceLayoutAsset(
+      path.join(root, RICE_WALLPAPER_PATH),
+      path.join(runtimeRoot, RICE_WALLPAPER_PATH),
+      apply,
+      parentTransaction
+    );
+  }
 
-  try {
-    if (!layoutOnly) {
-      filesystemReceipt = installLiveTyrian({
-        repoRoot: root,
-        home: userHome,
-        apply,
-        link,
-        target: 'plasma',
-        environment,
-        stagingRoot: livePlan?.stagingRoot,
-      });
-    } else if (withPlasmaLayout && !link) {
-      materializeRiceLayoutAsset(
-        path.join(root, RICE_WALLPAPER_PATH),
-        userHome,
-        path.join(runtimeRoot, RICE_WALLPAPER_PATH),
-        apply
-      );
-    }
+  if (testInterruptAfterStyle) {
+    throw new SimulatedRiceInterruption();
+  }
 
-    if (testInterruptAfterStyle) {
-      throw new SimulatedRiceInterruption();
-    }
-
-    if (preparedLayout) {
-      installPreparedPlasmaLayout(preparedLayout);
-    } else {
-      console.log(
-        `${apply ? 'apply' : 'dry-run'}: Plasma layout restore skipped by explicit partial install mode`
-      );
-    }
-  } catch (error) {
-    if (filesystemReceipt) {
-      try {
-        filesystemReceipt.rollback();
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          'Tyrian rice install and style rollback both failed'
-        );
-      }
-    }
-
-    throw error;
+  if (preparedLayout) {
+    installPreparedPlasmaLayout(preparedLayout, parentTransaction);
+  } else {
+    console.log(
+      `${apply ? 'apply' : 'dry-run'}: Plasma layout restore skipped by explicit partial install mode`
+    );
   }
 }
 
@@ -1728,14 +1737,15 @@ function preparePlasmaLayoutInstallOwned(options) {
 
 /**
  * @param {PreparedPlasmaLayoutInstall} plan
+ * @param {import('./installLiveTyrian.mjs').HomeFilesystemCapability | undefined} [parentTransaction]
  * @returns {void}
  */
-function installPreparedPlasmaLayout(plan) {
+function installPreparedPlasmaLayout(plan, parentTransaction = undefined) {
   if (!plan.apply) {
     if (plan.materializeWallpaper) {
-      materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.home, plan.wallpaperPath, false);
+      materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.wallpaperPath, false);
     }
-    applyPlasmaLayoutInstall(plan);
+    applyPlasmaLayoutInstall(plan, undefined);
     return;
   }
 
@@ -1748,6 +1758,7 @@ function installPreparedPlasmaLayout(plan) {
       temporaryPaths: plan.installEntries.map(({ stagedPath }) => stagedPath),
       backupRoot: plan.backupRoot,
       owner: 'layout',
+      parent: parentTransaction,
       shouldLeavePrepared: (error) =>
         error instanceof SimulatedPlasmaStopInterruption ||
         error instanceof SimulatedPlasmaRuntimeInterruption,
@@ -1760,11 +1771,11 @@ function installPreparedPlasmaLayout(plan) {
         finishPlasmaLifecycle(plan.home);
       },
     },
-    () => {
+    (filesystem) => {
       if (plan.materializeWallpaper) {
-        materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.home, plan.wallpaperPath, true);
+        materializeRiceLayoutAsset(plan.wallpaperSourcePath, plan.wallpaperPath, true, filesystem);
       }
-      applyPlasmaLayoutInstall(plan);
+      applyPlasmaLayoutInstall(plan, filesystem);
     }
   );
 
@@ -1775,9 +1786,10 @@ function installPreparedPlasmaLayout(plan) {
 
 /**
  * @param {PreparedPlasmaLayoutInstall} plan
+ * @param {import('./installLiveTyrian.mjs').HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function applyPlasmaLayoutInstall(plan) {
+function applyPlasmaLayoutInstall(plan, filesystem) {
   if (!plan.apply) {
     operation(false, 'would stop Plasma shell before restoring layout', () => {});
 
@@ -1799,10 +1811,13 @@ function applyPlasmaLayoutInstall(plan) {
 
   try {
     for (const entry of preparedEntries) {
-      writeTextFileRaw(entry.stagedPath, entry.installedContent, {
-        finalNewline: true,
-        ownerRoot: plan.home,
-      });
+      requireRiceFilesystemCapability(filesystem).writeText(
+        entry.stagedPath,
+        entry.installedContent,
+        {
+          finalNewline: true,
+        }
+      );
     }
 
     console.log('apply: stop Plasma shell before restoring layout');
@@ -1819,7 +1834,7 @@ function applyPlasmaLayoutInstall(plan) {
 
     for (const entry of preparedEntries) {
       console.log(`apply: restore ${entry.targetPath}`);
-      publishStagedOwnedPathRaw(plan.home, entry.stagedPath, entry.targetPath);
+      requireRiceFilesystemCapability(filesystem).publishStaged(entry.stagedPath, entry.targetPath);
     }
 
     console.log('apply: start Plasma shell');
@@ -1849,7 +1864,7 @@ function applyPlasmaLayoutInstall(plan) {
     }
   } finally {
     for (const { stagedPath } of preparedEntries) {
-      if (exists(stagedPath)) removeOwnedPathRaw(plan.home, stagedPath);
+      if (exists(stagedPath)) requireRiceFilesystemCapability(filesystem).remove(stagedPath);
     }
   }
 }
@@ -2625,12 +2640,12 @@ function upsertSectionKey(section, key, value) {
 
 /**
  * @param {string} sourcePath
- * @param {string} ownerRoot
  * @param {string} targetPath
  * @param {boolean} apply
+ * @param {import('./installLiveTyrian.mjs').HomeFilesystemCapability | undefined} [filesystem]
  * @returns {void}
  */
-function materializeRiceLayoutAsset(sourcePath, ownerRoot, targetPath, apply) {
+function materializeRiceLayoutAsset(sourcePath, targetPath, apply, filesystem = undefined) {
   if (path.resolve(sourcePath) === path.resolve(targetPath)) {
     return;
   }
@@ -2641,8 +2656,19 @@ function materializeRiceLayoutAsset(sourcePath, ownerRoot, targetPath, apply) {
   }
 
   operation(true, `copy ${sourcePath} -> ${targetPath}`, () => {
-    installManagedPathRaw('copy', sourcePath, targetPath, { ownerRoot });
+    requireRiceFilesystemCapability(filesystem).installManagedPath('copy', sourcePath, targetPath);
   });
+}
+
+/**
+ * @param {import('./installLiveTyrian.mjs').HomeFilesystemCapability | undefined} filesystem
+ * @returns {import('./installLiveTyrian.mjs').HomeFilesystemCapability}
+ */
+function requireRiceFilesystemCapability(filesystem) {
+  if (filesystem === undefined) {
+    throw new Error('A rice live mutation requires its home filesystem capability');
+  }
+  return filesystem;
 }
 
 /**

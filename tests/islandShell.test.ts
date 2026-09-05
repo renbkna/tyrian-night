@@ -29,10 +29,7 @@ import {
   buildManagedRootRecordPath,
   buildManagedRootsDirectoryPath,
 } from '../apps/vscode/src/islandPatchContract';
-import {
-  IslandRegistryQuarantineError,
-  moveRegistryRecordToQuarantineCore,
-} from '../apps/vscode/src/islandRegistryMutationCore';
+import { publishManagedRootRecord } from '../apps/vscode/src/islandRegistry';
 import { applyIslandUiSupervised } from '../apps/vscode/src/islandSupervisor';
 
 let previousHome: string | undefined;
@@ -396,6 +393,8 @@ test('unidentifiable unsupported desired records remain untouched by bulk restor
   expect(await fs.readFile(recordPath, 'utf8')).toBe(unsupportedRecord);
 });
 
+// Sixteen durable apply/restore lifecycles may outlast the default five-second
+// test budget; each contended lock alone permits up to ten seconds to acquire.
 test('concurrent app roots register and unregister without overwriting each other', async () => {
   const appRoots = await Promise.all(
     Array.from({ length: 16 }, (_, index) => createAppRoot(`concurrent-${index}`))
@@ -424,7 +423,7 @@ test('concurrent app roots register and unregister without overwriting each othe
     )
   );
   expect((await fs.stat(buildManagedRootsDirectoryPath(registryHome))).isDirectory()).toBe(true);
-});
+}, 30_000);
 
 test('registry enumeration observes stable snapshots during concurrent publication', async () => {
   const appRoots = await Promise.all(
@@ -922,34 +921,47 @@ test('registry mutation facts survive a later enumeration failure', async () => 
   });
 });
 
-test('quarantine sync failure preserves the post-rename changed fact and path', async () => {
-  const recordDirectory = path.join(testRoot, 'registry');
-  const quarantineDirectory = path.join(testRoot, 'quarantine');
-  const recordPath = path.join(recordDirectory, 'record.json');
-  const quarantinePath = path.join(quarantineDirectory, 'record.json');
-  await fs.mkdir(recordDirectory, { recursive: true });
-  await fs.mkdir(quarantineDirectory, { recursive: true });
-  await fs.writeFile(recordPath, '{ broken\n', 'utf8');
+test('registry publication rejects invalid desired state before creating persistence', async () => {
+  const appRoot = path.join(testRoot, 'invalid-desired-owner');
+  await expect(
+    publishManagedRootRecord(appRoot, '../escape.css', { registryHome })
+  ).rejects.toThrow('requires a CSS asset desiredThemeId');
+  await expect(fs.stat(buildManagedRootsDirectoryPath(registryHome))).rejects.toThrow();
+});
 
-  try {
-    await moveRegistryRecordToQuarantineCore({
-      recordPath,
-      recordDirectory,
-      quarantinePath,
-      quarantineDirectory,
-      rename: fs.rename,
-      verifyMovedGeneration: async () => {},
-      syncDirectories: async () => {
+test('quarantine sync failure preserves the post-rename changed fact and path', async () => {
+  const recordDirectory = buildManagedRootsDirectoryPath(registryHome);
+  const recordPath = buildManagedRootRecordPath(
+    path.join(testRoot, 'quarantine-sync-root'),
+    registryHome
+  );
+  await fs.mkdir(recordDirectory, { recursive: true });
+  await fs.writeFile(recordPath, '{ broken\n', 'utf8');
+  const originalOpen = fs.open;
+  let injected = false;
+  fs.open = (async (filePath, ...args: unknown[]) => {
+    const handle = await (originalOpen as any)(filePath, ...args);
+    if (path.basename(String(filePath)) === 'quarantined-managed-app-roots') {
+      handle.sync = async () => {
+        injected = true;
         throw new Error('injected directory sync failure');
-      },
-    });
-    throw new Error('Expected quarantine durability sync to fail.');
-  } catch (error) {
-    expect(error).toBeInstanceOf(IslandRegistryQuarantineError);
-    expect(error).toMatchObject({ changed: true, quarantinePath });
+      };
+    }
+    return handle;
+  }) as typeof fs.open;
+
+  let result: Awaited<ReturnType<typeof restoreAllIslandShells>>;
+  try {
+    result = await restoreAllIslandShells({ registryHome });
+  } finally {
+    fs.open = originalOpen;
   }
+  expect(injected).toBe(true);
+  expect(result).toMatchObject({ changed: true, registryChanged: true, incompleteRecovery: true });
+  expect(result.quarantinedRecords).toHaveLength(1);
+  expect(result.enumerationFailure?.reason).toContain('injected directory sync failure');
   await expect(fs.stat(recordPath)).rejects.toThrow();
-  expect((await fs.stat(quarantinePath)).isFile()).toBe(true);
+  expect(await fs.readFile(result.quarantinedRecords[0]!, 'utf8')).toBe('{ broken\n');
 });
 
 test('restore-all prunes registered missing roots as an explicit cleanup action', async () => {
@@ -970,6 +982,18 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
     quarantinedRecords: [],
   });
   await expect(readAllIslandShellStatuses({ registryHome })).resolves.toEqual([]);
+});
+
+test('missing-root cleanup preserves desired state for an existing incomplete installation', async () => {
+  const appRoot = path.join(testRoot, 'incomplete-existing-root');
+  await fs.mkdir(appRoot);
+  const recordPath = await writeManagedRootRecord(appRoot);
+  const originalRecord = await fs.readFile(recordPath, 'utf8');
+  const result = await restoreAllIslandShells({ registryHome });
+  expect(result.failedAppRoots).toEqual([
+    expect.objectContaining({ appRoot, reason: expect.stringContaining('existing app root') }),
+  ]);
+  expect(await fs.readFile(recordPath, 'utf8')).toBe(originalRecord);
 });
 
 test('missing-root cleanup does not pair parsed registry content with a newer generation', async () => {

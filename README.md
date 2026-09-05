@@ -110,6 +110,10 @@ Read the desktop product contract before applying it. The full rice is not a gen
 
 Generated consumers never become palette inputs.
 
+Installation has separate owners from theme generation. Desktop transactions in `scripts/installOps.mjs` admit paths and issue mutation capabilities; `installLiveTyrian.mjs` coordinates durable home transactions, and rice explicitly joins that owner when files and Plasma lifecycle must roll back together. Recovery and capture use separately scoped maintenance capabilities.
+
+Island command orchestration stays in `islandShell.ts`. `islandPatchPlan.ts` derives changes and verifies patch invariants through read-only file access. `islandFileTransaction.ts` owns the application lock, admitted files, descriptor lifetime, journals, and recovery. `islandRegistry.ts` owns desired state, discovery, and quarantine; `islandFileSystem.ts` supplies the shared durable metadata publication mechanism. Journal parsing, recovery decisions, and writable descriptors stay inside the file owner. The root transition admits recovery support before initializing its registry, recovers pending files, then publishes desired intent and applies the physical plan.
+
 ## Development
 
 ```sh

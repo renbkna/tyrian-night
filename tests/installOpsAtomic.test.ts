@@ -4,14 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  installManagedPathRaw,
+  beginOwnedFilesystemTransaction,
+  createOwnedFilesystemMaintenance,
   restoreOwnedPathSnapshot,
-  snapshotOwnedPaths,
   withTokenFileLock,
-  writeBinaryFileRaw,
-  writeOwnedRecoveryCandidateRaw,
-  writeTextFileRaw,
 } from '../scripts/installOps.mjs';
+
+function maintain(root: string, paths: string[], directories: string[] = []) {
+  return createOwnedFilesystemMaintenance(root, { paths, directories }, 'Atomic-test maintenance');
+}
 
 test('text and binary writes publish complete files and preserve replacement permissions', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-write-'));
@@ -21,13 +22,14 @@ test('text and binary writes publish complete files and preserve replacement per
   try {
     fs.writeFileSync(textPath, 'old generation\n');
     fs.chmodSync(textPath, 0o660);
+    const maintenance = maintain(root, [textPath, binaryPath]);
 
     traceAtomicReplacement(textPath, 'old generation\n', 'new generation\n', () => {
-      writeTextFileRaw(textPath, 'new generation', { finalNewline: true, ownerRoot: root });
+      maintenance.writeText(textPath, 'new generation', { finalNewline: true });
     });
 
     expect(fs.statSync(textPath).mode & 0o7777).toBe(0o660);
-    writeBinaryFileRaw(binaryPath, Buffer.from([0, 1, 2, 255]), { ownerRoot: root });
+    maintenance.writeBinary(binaryPath, Buffer.from([0, 1, 2, 255]));
     expect(fs.readFileSync(binaryPath)).toEqual(Buffer.from([0, 1, 2, 255]));
     expect(temporaryFilesBeside(textPath)).toEqual([]);
     expect(temporaryFilesBeside(binaryPath)).toEqual([]);
@@ -41,11 +43,12 @@ test('recovery candidates have one fixed crash-recoverable name', () => {
   const candidatePath = path.join(root, 'journal.json.next');
 
   try {
-    writeOwnedRecoveryCandidateRaw(root, candidatePath, 'first candidate\n');
+    const maintenance = maintain(root, [candidatePath]);
+    maintenance.writeRecoveryCandidate(candidatePath, 'first candidate\n');
     expect(fs.readdirSync(root)).toEqual(['journal.json.next']);
     expect(fs.readFileSync(candidatePath, 'utf8')).toBe('first candidate\n');
 
-    writeOwnedRecoveryCandidateRaw(root, candidatePath, 'replacement candidate\n');
+    maintenance.writeRecoveryCandidate(candidatePath, 'replacement candidate\n');
     expect(fs.readdirSync(root)).toEqual(['journal.json.next']);
     expect(fs.readFileSync(candidatePath, 'utf8')).toBe('replacement candidate\n');
   } finally {
@@ -62,12 +65,13 @@ test('managed regular-file copies atomically replace the old generation', () => 
     fs.writeFileSync(sourcePath, 'complete copied generation\n');
     fs.chmodSync(sourcePath, 0o751);
     fs.writeFileSync(targetPath, 'old copied generation\n');
+    const maintenance = maintain(root, [targetPath]);
 
     traceAtomicReplacement(
       targetPath,
       'old copied generation\n',
       'complete copied generation\n',
-      () => installManagedPathRaw('copy', sourcePath, targetPath, { ownerRoot: root })
+      () => maintenance.installManagedPath('copy', sourcePath, targetPath)
     );
 
     expect(fs.statSync(targetPath).mode & 0o7777).toBe(0o751);
@@ -84,6 +88,7 @@ test('failed publication retains the old generation and removes its staging file
 
   try {
     fs.writeFileSync(targetPath, 'old valid generation\n');
+    const maintenance = maintain(root, [targetPath]);
     fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
       if (resolveMutationPath(newPath) === targetPath) {
         throw new Error('injected publication failure');
@@ -92,9 +97,9 @@ test('failed publication retains the old generation and removes its staging file
       return originalRename(oldPath, newPath);
     }) as typeof fs.renameSync;
 
-    expect(() =>
-      writeTextFileRaw(targetPath, 'unpublished generation\n', { ownerRoot: root })
-    ).toThrow('injected publication failure');
+    expect(() => maintenance.writeText(targetPath, 'unpublished generation\n')).toThrow(
+      'injected publication failure'
+    );
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('old valid generation\n');
     expect(temporaryFilesBeside(targetPath)).toEqual([]);
   } finally {
@@ -110,20 +115,29 @@ test('regular-file rollback and persisted recovery atomically restore their snap
   try {
     fs.writeFileSync(targetPath, 'snapshot generation\n');
     fs.chmodSync(targetPath, 0o600);
-    const rollbackReceipt = snapshotOwnedPaths([targetPath], path.join(root, 'backups/rollback'), {
-      ownerRoot: root,
-    });
-    writeTextFileRaw(targetPath, 'mutated generation\n', { ownerRoot: root });
+    const rollbackReceipt = beginOwnedFilesystemTransaction(
+      [targetPath],
+      path.join(root, 'backups/rollback'),
+      {
+        ownerRoot: root,
+      }
+    );
+    rollbackReceipt.writeText(targetPath, 'mutated generation\n');
 
     traceAtomicReplacement(targetPath, 'mutated generation\n', 'snapshot generation\n', () =>
       rollbackReceipt.rollback()
     );
     expect(fs.statSync(targetPath).mode & 0o7777).toBe(0o600);
 
-    const recoveryReceipt = snapshotOwnedPaths([targetPath], path.join(root, 'backups/recovery'), {
-      ownerRoot: root,
-    });
-    writeTextFileRaw(targetPath, 'interrupted generation\n', { ownerRoot: root });
+    const recoveryReceipt = beginOwnedFilesystemTransaction(
+      [targetPath],
+      path.join(root, 'backups/recovery'),
+      {
+        ownerRoot: root,
+      }
+    );
+    recoveryReceipt.writeText(targetPath, 'interrupted generation\n');
+    recoveryReceipt.seal();
 
     traceAtomicReplacement(targetPath, 'interrupted generation\n', 'snapshot generation\n', () =>
       restoreOwnedPathSnapshot(recoveryReceipt.backupRoot, {
@@ -147,8 +161,8 @@ test('rollback refuses external drift and retains its recovery evidence', () => 
 
   try {
     fs.writeFileSync(targetPath, 'original generation\n');
-    const receipt = snapshotOwnedPaths([targetPath], backupRoot, { ownerRoot: root });
-    writeTextFileRaw(targetPath, 'owned mutation\n', { ownerRoot: root });
+    const receipt = beginOwnedFilesystemTransaction([targetPath], backupRoot, { ownerRoot: root });
+    receipt.writeText(targetPath, 'owned mutation\n');
     fs.writeFileSync(targetPath, 'external generation\n');
 
     let failure: unknown;
@@ -162,7 +176,7 @@ test('rollback refuses external drift and retains its recovery evidence', () => 
     expect((failure as AggregateError).errors.map(String).join('\n')).toContain('external drift');
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('external generation\n');
     expect(fs.existsSync(backupRoot)).toBe(true);
-    receipt.seal();
+    expect(() => receipt.writeText(targetPath, 'late generation\n')).toThrow('is revoked');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -176,16 +190,90 @@ test('a directory snapshot rejects incremental child mutation before creating an
   try {
     fs.mkdirSync(target);
     fs.writeFileSync(path.join(target, 'original'), 'original');
-    const receipt = snapshotOwnedPaths([target], backup, { ownerRoot: root });
+    const receipt = beginOwnedFilesystemTransaction([target], backup, { ownerRoot: root });
     try {
-      expect(() =>
-        writeTextFileRaw(path.join(target, 'new/child'), 'partial', { ownerRoot: root })
-      ).toThrow('complete-generation replacement');
+      expect(() => receipt.writeText(path.join(target, 'new/child'), 'partial')).toThrow(
+        'complete-generation replacement'
+      );
       expect(fs.readdirSync(target)).toEqual(['original']);
       expect(fs.readFileSync(path.join(target, 'original'), 'utf8')).toBe('original');
     } finally {
       receipt.discard();
     }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('transaction capabilities admit only declared generations, disposable stages, and live link referents', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-transaction-capability-'));
+  const targetPath = path.join(root, 'owned.conf');
+  const stageRoot = path.join(root, 'stage');
+  const outsidePath = path.join(root, 'outside.conf');
+  const linkPath = path.join(root, 'owned-link.conf');
+  const referentPath = path.join(root, 'unadmitted-referent.conf');
+
+  try {
+    fs.writeFileSync(targetPath, 'original\n');
+    fs.writeFileSync(referentPath, 'referent original\n');
+    fs.symlinkSync(path.basename(referentPath), linkPath);
+    const transaction = beginOwnedFilesystemTransaction(
+      [targetPath, stageRoot, linkPath],
+      path.join(root, 'backups/transaction-capability'),
+      { ownerRoot: root, temporaryPaths: [stageRoot] }
+    );
+
+    expect(() => transaction.writeText(outsidePath, 'outside\n')).toThrow(
+      'outside its admitted scope'
+    );
+    transaction.writeText(path.join(stageRoot, 'prepared.conf'), 'prepared\n');
+    expect(fs.readFileSync(path.join(stageRoot, 'prepared.conf'), 'utf8')).toBe('prepared\n');
+    expect(() => transaction.writeText(linkPath, 'redirected\n')).toThrow(
+      'outside its admitted scope'
+    );
+    expect(fs.readFileSync(referentPath, 'utf8')).toBe('referent original\n');
+
+    transaction.seal();
+    expect(() => transaction.writeText(targetPath, 'late\n')).toThrow('is sealed');
+    transaction.rollback();
+    expect(() => transaction.writeText(targetPath, 'later\n')).toThrow('is rolledBack');
+
+    const discarded = beginOwnedFilesystemTransaction(
+      [targetPath],
+      path.join(root, 'backups/discarded-capability'),
+      { ownerRoot: root }
+    );
+    discarded.discard();
+    expect(() => discarded.writeText(targetPath, 'discarded\n')).toThrow('is discarded');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('transaction capabilities expose neither maintenance writes nor live publication sources', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-transaction-public-surface-'));
+  const liveSourcePath = path.join(root, 'live-source.conf');
+  const targetPath = path.join(root, 'target.conf');
+  const stageRoot = path.join(root, 'stage');
+
+  try {
+    fs.writeFileSync(liveSourcePath, 'live source\n');
+    fs.writeFileSync(targetPath, 'target\n');
+    const transaction = beginOwnedFilesystemTransaction(
+      [liveSourcePath, targetPath, stageRoot],
+      path.join(root, 'backups/transaction-public-surface'),
+      { ownerRoot: root, temporaryPaths: [stageRoot] }
+    );
+
+    expect('writeRecoveryCandidate' in transaction).toBe(false);
+    expect('removeEmptyDirectories' in transaction).toBe(false);
+    expect(() => transaction.publishStaged(liveSourcePath, targetPath)).toThrow(
+      'must be an admitted disposable stage'
+    );
+    expect(fs.readFileSync(liveSourcePath, 'utf8')).toBe('live source\n');
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('target\n');
+
+    transaction.discard();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -407,13 +495,11 @@ test('directory recovery fences orphaned original and recovery exchanges before 
       'original-publisher',
       [
         "const module = await import('./scripts/installOps.mjs');",
-        'module.snapshotOwnedPaths([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
+        'const transaction = module.beginOwnedFilesystemTransaction([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
         '  ownerRoot: process.env.OWNER_ROOT,',
         '  snapshotId: process.env.SNAPSHOT_ID,',
         '});',
-        "module.installManagedPathRaw('copy', process.env.REPLACEMENT_PATH, process.env.TARGET_PATH, {",
-        '  ownerRoot: process.env.OWNER_ROOT,',
-        '});',
+        "transaction.installManagedPath('copy', process.env.REPLACEMENT_PATH, process.env.TARGET_PATH);",
         'process.exit(42);',
       ].join(' '),
       {
@@ -451,11 +537,15 @@ test('directory recovery fences orphaned original and recovery exchanges before 
     fs.writeFileSync(path.join(recoveryTargetPath, 'generation'), 'A\n');
     fs.mkdirSync(recoveryReplacementPath);
     fs.writeFileSync(path.join(recoveryReplacementPath, 'generation'), 'B\n');
-    const recoveryReceipt = snapshotOwnedPaths([recoveryTargetPath], recoveryBackupRoot, {
-      ownerRoot: root,
-      snapshotId: recoverySnapshotId,
-    });
-    installManagedPathRaw('copy', recoveryReplacementPath, recoveryTargetPath, { ownerRoot: root });
+    const recoveryReceipt = beginOwnedFilesystemTransaction(
+      [recoveryTargetPath],
+      recoveryBackupRoot,
+      {
+        ownerRoot: root,
+        snapshotId: recoverySnapshotId,
+      }
+    );
+    recoveryReceipt.installManagedPath('copy', recoveryReplacementPath, recoveryTargetPath);
     recoveryReceipt.seal();
     expect(fs.readFileSync(path.join(recoveryTargetPath, 'generation'), 'utf8')).toBe('B\n');
 
@@ -599,7 +689,7 @@ test('SIGKILL during snapshot-owned directory deletion leaves absence and recove
           "const fs = (await import('node:fs')).default;",
           "const path = (await import('node:path')).default;",
           "const module = await import('./scripts/installOps.mjs');",
-          'module.snapshotOwnedPaths([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
+          'const transaction = module.beginOwnedFilesystemTransaction([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
           '  ownerRoot: process.env.OWNER_ROOT,',
           '  snapshotId: process.env.SNAPSHOT_ID,',
           '});',
@@ -613,7 +703,7 @@ test('SIGKILL during snapshot-owned directory deletion leaves absence and recove
           '  }',
           '  return originalRm(requestedPath, options);',
           '};',
-          'module.removeOwnedPathRaw(process.env.OWNER_ROOT, process.env.TARGET_PATH);',
+          'transaction.remove(process.env.TARGET_PATH);',
         ].join(' '),
       ],
       cwd: process.cwd(),
@@ -665,10 +755,14 @@ test('persisted recovery restores declared target absence without claiming paren
   const absentParent = path.join(root, '.config');
 
   try {
-    const receipt = snapshotOwnedPaths([targetPath], path.join(root, 'backups/recovery'), {
-      ownerRoot: root,
-    });
-    writeTextFileRaw(targetPath, 'interrupted generation\n', { ownerRoot: root });
+    const receipt = beginOwnedFilesystemTransaction(
+      [targetPath],
+      path.join(root, 'backups/recovery'),
+      {
+        ownerRoot: root,
+      }
+    );
+    receipt.writeText(targetPath, 'interrupted generation\n');
     receipt.seal();
 
     restoreOwnedPathSnapshot(receipt.backupRoot, {
@@ -691,10 +785,14 @@ test('persisted recovery rejects v4 snapshot metadata without mutation', () => {
 
   try {
     fs.writeFileSync(targetPath, 'snapshot generation\n');
-    const receipt = snapshotOwnedPaths([targetPath], path.join(root, 'backups/recovery'), {
-      ownerRoot: root,
-    });
-    writeTextFileRaw(targetPath, 'interrupted generation\n', { ownerRoot: root });
+    const receipt = beginOwnedFilesystemTransaction(
+      [targetPath],
+      path.join(root, 'backups/recovery'),
+      {
+        ownerRoot: root,
+      }
+    );
+    receipt.writeText(targetPath, 'interrupted generation\n');
     receipt.seal();
 
     const manifestPath = path.join(receipt.backupRoot, 'snapshot.json');
@@ -777,12 +875,12 @@ test('unsupported and failed directory exchange retain complete target and recov
     fs.mkdirSync(path.join(targetPath, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(targetPath, 'old-only'), 'old generation\n');
     fs.writeFileSync(path.join(targetPath, 'nested/value'), 'old nested value\n');
-    const receipt = snapshotOwnedPaths([targetPath], backupRoot, { ownerRoot: root });
+    const receipt = beginOwnedFilesystemTransaction([targetPath], backupRoot, { ownerRoot: root });
 
     fs.mkdirSync(path.join(replacementPath, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(replacementPath, 'new-only'), 'new generation\n');
     fs.writeFileSync(path.join(replacementPath, 'nested/value'), 'new nested value\n');
-    installManagedPathRaw('copy', replacementPath, targetPath, { ownerRoot: root });
+    receipt.installManagedPath('copy', replacementPath, targetPath);
 
     fs.mkdirSync(fakeBin);
     const fakeMv = path.join(fakeBin, 'mv');
@@ -870,6 +968,7 @@ test('descriptor-anchored publication cannot be redirected by a parent swap', ()
     fs.mkdirSync(admittedParent);
     fs.writeFileSync(targetPath, 'old owned generation\n');
     fs.writeFileSync(externalTarget, 'external generation\n');
+    const maintenance = maintain(root, [targetPath]);
     fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
       if (!parentSwapped && resolveMutationPath(newPath) === targetPath) {
         parentSwapped = true;
@@ -880,7 +979,7 @@ test('descriptor-anchored publication cannot be redirected by a parent swap', ()
       return originalRename(oldPath, newPath);
     }) as typeof fs.renameSync;
 
-    writeTextFileRaw(targetPath, 'new owned generation\n', { ownerRoot: root });
+    maintenance.writeText(targetPath, 'new owned generation\n');
 
     expect(parentSwapped).toBe(true);
     expect(fs.readFileSync(path.join(movedParent, 'owned.conf'), 'utf8')).toBe(
@@ -905,24 +1004,30 @@ test('symbolic-link and directory installation semantics remain unchanged', () =
 
   try {
     fs.writeFileSync(referentPath, 'old referent\n');
+    const maintenance = maintain(root, [
+      referentPath,
+      writeLinkPath,
+      replaceLinkPath,
+      installLinkPath,
+      targetDirectory,
+    ]);
     fs.symlinkSync(path.basename(referentPath), writeLinkPath);
     traceAtomicReplacement(referentPath, 'old referent\n', 'new referent\n', () => {
-      writeTextFileRaw(writeLinkPath, 'new referent\n', { ownerRoot: root });
+      maintenance.writeText(writeLinkPath, 'new referent\n');
     });
     expect(fs.lstatSync(writeLinkPath).isSymbolicLink()).toBe(true);
     expect(fs.readlinkSync(writeLinkPath)).toBe(path.basename(referentPath));
 
     fs.symlinkSync(path.basename(referentPath), replaceLinkPath);
-    writeTextFileRaw(replaceLinkPath, 'owned leaf generation\n', {
+    maintenance.writeText(replaceLinkPath, 'owned leaf generation\n', {
       followFinalSymlink: false,
-      ownerRoot: root,
     });
     expect(fs.readFileSync(referentPath, 'utf8')).toBe('new referent\n');
     expect(fs.lstatSync(replaceLinkPath).isFile()).toBe(true);
     expect(fs.readFileSync(replaceLinkPath, 'utf8')).toBe('owned leaf generation\n');
 
     fs.mkdirSync(installLinkPath);
-    installManagedPathRaw('link', referentPath, installLinkPath, { ownerRoot: root });
+    maintenance.installManagedPath('link', referentPath, installLinkPath);
     expect(fs.lstatSync(installLinkPath).isSymbolicLink()).toBe(true);
     expect(fs.readlinkSync(installLinkPath)).toBe(path.resolve(referentPath));
 
@@ -931,7 +1036,7 @@ test('symbolic-link and directory installation semantics remain unchanged', () =
     fs.symlinkSync('theme.conf', path.join(sourceDirectory, 'current'));
     fs.mkdirSync(targetDirectory);
     fs.writeFileSync(path.join(targetDirectory, 'stale'), 'stale\n');
-    installManagedPathRaw('copy', sourceDirectory, targetDirectory, { ownerRoot: root });
+    maintenance.installManagedPath('copy', sourceDirectory, targetDirectory);
     expect(fs.existsSync(path.join(targetDirectory, 'stale'))).toBe(false);
     expect(fs.readFileSync(path.join(targetDirectory, 'theme.conf'), 'utf8')).toBe('theme\n');
     expect(fs.lstatSync(path.join(targetDirectory, 'current')).isSymbolicLink()).toBe(true);

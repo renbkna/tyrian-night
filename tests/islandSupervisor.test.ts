@@ -6,11 +6,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
 import { applyIslandShell, describeIslandShellFailure } from '../apps/vscode/src/islandShell';
-import {
-  IslandFileTransactionPartialMutationError,
-  rollbackFailedFileTransactionCore,
-} from '../apps/vscode/src/islandFileTransactionCore';
-import { IslandRegistryQuarantineError } from '../apps/vscode/src/islandRegistryMutationCore';
+import { IslandFileTransactionPartialMutationError } from '../apps/vscode/src/islandFileTransaction';
+import { IslandRegistryQuarantineError } from '../apps/vscode/src/islandRegistry';
 import { withIslandProcessLock } from '../apps/vscode/src/islandProcessLock';
 import { readIslandMutationFacts } from '../apps/vscode/src/islandSupervisorCore';
 import {
@@ -254,19 +251,11 @@ test('already-disabled restore changes physical state without rewriting desired 
   });
 });
 
-test('typed core partial failures preserve supervisor changed classification', async () => {
-  let transactionFailure: unknown;
-  try {
-    await rollbackFailedFileTransactionCore({
-      transactionError: new Error('transaction failed'),
-      physicalMutationAttempted: true,
-      rollback: async () => {
-        throw new Error('rollback failed');
-      },
-    });
-  } catch (error) {
-    transactionFailure = error;
-  }
+test('typed owner partial failures preserve supervisor changed classification', () => {
+  const transactionFailure = new IslandFileTransactionPartialMutationError(
+    new Error('transaction failed'),
+    new Error('rollback failed')
+  );
 
   expect(transactionFailure).toBeInstanceOf(IslandFileTransactionPartialMutationError);
   expect(readIslandMutationFacts(transactionFailure).changed).toBe(true);
@@ -283,19 +272,11 @@ test('typed core partial failures preserve supervisor changed classification', a
   ).toBe(true);
 });
 
-test('public failure normalization preserves both actionable aggregate causes', async () => {
-  let failure: unknown;
-  try {
-    await rollbackFailedFileTransactionCore({
-      transactionError: new Error('rename failed at workbench.html'),
-      physicalMutationAttempted: true,
-      rollback: async () => {
-        throw new Error('rollback backup missing at workbench.backup.html');
-      },
-    });
-  } catch (error) {
-    failure = error;
-  }
+test('public failure normalization preserves both actionable aggregate causes', () => {
+  const failure = new IslandFileTransactionPartialMutationError(
+    new Error('rename failed at workbench.html'),
+    new Error('rollback backup missing at workbench.backup.html')
+  );
 
   expect(describeIslandShellFailure(failure)).toMatchObject({
     physicalChanged: true,

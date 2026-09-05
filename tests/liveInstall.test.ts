@@ -14,12 +14,7 @@ import {
   recoverLiveTyrian,
   withHomeFilesystemTransaction,
 } from '../scripts/installLiveTyrian.mjs';
-import {
-  exists,
-  syncPathsDurably,
-  withTokenFileLock,
-  writeTextFileRaw,
-} from '../scripts/installOps.mjs';
+import { exists, syncPathsDurably, withTokenFileLock } from '../scripts/installOps.mjs';
 import {
   TYRIAN_BACKUP_HOME,
   TYRIAN_INSTALL_HOME,
@@ -1585,8 +1580,8 @@ test('live recovery removes a partially populated bounded raw-file scratch after
           '  backupRoot: process.env.BACKUP_ROOT,',
           "  owner: 'live',",
           '  shouldLeavePrepared: () => true,',
-          '}, () => {',
-          "  ops.writeTextFileRaw(target, 'new generation\\n', { ownerRoot: home });",
+          '}, (filesystem) => {',
+          "  filesystem.writeText(target, 'new generation\\n');",
           '});',
           'process.exit(42);',
         ].join(' '),
@@ -1667,9 +1662,9 @@ test('live recovery retains the last published owned write when death interrupts
           '  backupRoot: process.env.BACKUP_ROOT,',
           "  owner: 'live',",
           '  shouldLeavePrepared: () => true,',
-          '}, () => {',
-          "  ops.writeTextFileRaw(target, 'first owned generation\\n', { ownerRoot: home });",
-          "  ops.writeTextFileRaw(target, 'second owned generation\\n', { ownerRoot: home });",
+          '}, (filesystem) => {',
+          "  filesystem.writeText(target, 'first owned generation\\n');",
+          "  filesystem.writeText(target, 'second owned generation\\n');",
           '});',
           'process.exit(42);',
         ].join(' '),
@@ -1731,8 +1726,8 @@ test('live recovery still rejects an external write after an owned transaction w
           owner: 'live',
           shouldLeavePrepared: () => true,
         },
-        () => {
-          writeTextFileRaw(targetPath, 'owned generation\n', { ownerRoot: home });
+        (filesystem) => {
+          filesystem.writeText(targetPath, 'owned generation\n');
           throw new Error('interrupted after owned write');
         }
       )
@@ -1787,9 +1782,8 @@ test('legacy transaction pointer 3 and snapshot 5 recover a partial generated st
           owner: 'live',
           shouldLeavePrepared: () => true,
         },
-        () => {
-          fs.mkdirSync(stagingRoot);
-          fs.writeFileSync(path.join(stagingRoot, 'partial'), 'partial stage generation\n');
+        (filesystem) => {
+          filesystem.writeText(path.join(stagingRoot, 'partial'), 'partial stage generation\n');
           throw new Error('interrupted legacy stage');
         }
       )
@@ -1853,7 +1847,7 @@ test('live install rolls back immediately when the committed phase cannot be rec
   }
 });
 
-test('nested home transactions reject targets outside the outer owned set', () => {
+test('nested home transactions require an explicit parent and reject targets outside it', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-nested-owner-'));
   const ownedPath = path.join(home, '.config/owned.conf');
   const outsidePath = path.join(home, '.config/outside.conf');
@@ -1878,7 +1872,7 @@ test('nested home transactions reject targets outside the outer owned set', () =
           ),
           owner: 'live',
         },
-        () =>
+        (parent) =>
           withHomeFilesystemTransaction(
             home,
             {
@@ -1888,17 +1882,95 @@ test('nested home transactions reject targets outside the outer owned set', () =
                 '.local/state/tyrian-night/backups/live-tyrian-apply-nested-child'
               ),
               owner: 'live',
+              parent,
             },
             () => {
               nestedActionRan = true;
             }
           )
       )
-    ).toThrow('Nested home transaction target is outside its owner');
+    ).toThrow('Nested home transaction target is outside its parent');
     expect(nestedActionRan).toBe(false);
     expect(fs.readFileSync(ownedPath, 'utf8')).toBe('original\n');
     expect(fs.existsSync(outsidePath)).toBe(false);
     expect(fs.existsSync(transactionPath)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a public live install cannot recover an active unjoined home transaction', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-unjoined-owner-'));
+  const targetPath = path.join(home, '.config/owned.conf');
+  const backupRoot = path.join(
+    home,
+    '.local/state/tyrian-night/backups/live-tyrian-apply-unjoined-owner'
+  );
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'original\n');
+
+    withHomeFilesystemTransaction(
+      home,
+      { targetPaths: [targetPath], backupRoot, owner: 'live' },
+      (filesystem) => {
+        expect(() =>
+          installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' })
+        ).toThrow('requires its explicit parent capability');
+        expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8'))).toMatchObject({
+          phase: 'prepared',
+        });
+        filesystem.writeText(targetPath, 'outer generation\n');
+      }
+    );
+
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('outer generation\n');
+    expect(fs.existsSync(transactionPath)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('home transactions reject thenable actions and seal their retained capability', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-thenable-owner-'));
+  const targetPath = path.join(home, '.config/owned.conf');
+  const backupRoot = path.join(
+    home,
+    '.local/state/tyrian-night/backups/live-tyrian-apply-thenable-owner'
+  );
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+  let retainedFilesystem: { writeText: (filePath: string, content: string) => void } | undefined;
+
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'original\n');
+
+    expect(() =>
+      withHomeFilesystemTransaction(
+        home,
+        { targetPaths: [targetPath], backupRoot, owner: 'live' },
+        (filesystem) => {
+          retainedFilesystem = filesystem;
+          filesystem.writeText(targetPath, 'unfinished async generation\n');
+          return Promise.resolve();
+        }
+      )
+    ).toThrow('actions must complete synchronously');
+
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original\n');
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    if (retainedFilesystem === undefined)
+      throw new Error('Expected a retained filesystem capability');
+    expect(() => retainedFilesystem.writeText(targetPath, 'late generation\n')).toThrow(
+      'is sealed'
+    );
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

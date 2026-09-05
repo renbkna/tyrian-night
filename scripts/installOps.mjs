@@ -7,13 +7,22 @@ import path from 'node:path';
 
 /** @typedef {{ targetPath: string; backupPath: string; disposable: boolean; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; publishedGeneration: string; mutationGeneration: string }} SnapshotEntry */
 /** @typedef {{ backupRoot: string; entries: SnapshotEntry[]; missingBackupParents: string[]; ownerRoot: string; snapshotId: string; recoveryId?: string }} OwnedSnapshot */
+/**
+ * @typedef {{
+ *   ownerRoot: string;
+ *   label: string;
+ *   admitTarget: (targetPath: string, operation: string) => string;
+ *   admitPublicationSource: (targetPath: string, operation: string) => string;
+ *   recordIntent: (targetPath: string, generation: string) => void;
+ *   recordCompletion: (targetPath: string, generation: string) => void;
+ *   snapshotIdFor: (targetPath: string) => string | undefined;
+ * }} OwnedMutationAuthority
+ */
 
 /** @type {Map<string, { state: 'held'; depth: number; token: string } | { state: 'release-failed'; token: string }>} */
 const heldTokenLocks = new Map();
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 const DEFAULT_CORRUPT_LOCK_STALE_MS = 2_000;
-/** @type {Set<OwnedSnapshot>} */
-const activeOwnedSnapshots = new Set();
 /** @type {boolean | undefined} */
 let atomicDirectoryExchangeSupport;
 
@@ -204,7 +213,7 @@ export function admitOwnedDirectories(
  * @returns {T}
  */
 export function withTokenFileLock(requestedLockPath, action, options) {
-  requireOwnedMutationOptions(options);
+  requireOwnedRoot(options);
   const requestedAbsolutePath = path.resolve(requestedLockPath);
   const ownerRoot = resolvePathIdentity(options.ownerRoot);
   const heldLock = heldTokenLocks.get(requestedAbsolutePath);
@@ -230,7 +239,7 @@ export function withTokenFileLock(requestedLockPath, action, options) {
       withAnchoredTokenFileLock(requestedAbsolutePath, anchoredPath, action, options)
     );
   } finally {
-    removeOwnedEmptyDirectoriesRaw(ownerRoot, missingParents);
+    removeOwnedEmptyDirectoriesUnderRoot(ownerRoot, missingParents);
   }
 }
 
@@ -366,25 +375,120 @@ function withAnchoredTokenFileLock(lockIdentity, lockPath, action, options) {
 }
 
 /**
- * @param {ManagedPathMode} mode
- * @param {string} sourcePath
- * @param {string} targetPath
- * @param {{ ownerRoot: string }} options
- * @returns {void}
+ * Construct an explicitly nontransactional capability for fixed recovery,
+ * maintenance, or capture paths.  It never discovers an open transaction;
+ * callers must choose this narrower owner when no live transaction exists.
+ *
+ * @param {string} requestedOwnerRoot
+ * @param {{ paths?: string[]; directories?: string[] }} scope
+ * @param {string} [ownerLabel]
+ * @returns {{ installManagedPath: (mode: ManagedPathMode, sourcePath: string, targetPath: string) => void; writeText: (filePath: string, content: string, options?: { finalNewline?: boolean; followFinalSymlink?: boolean }) => void; writeBinary: (filePath: string, content: Buffer) => void; writeRecoveryCandidate: (candidatePath: string, content: string) => void; publishStaged: (stagedPath: string, targetPath: string) => void; remove: (targetPath: string) => void; removeEmptyDirectories: (directories: string[]) => void }}
  */
-export function installManagedPathRaw(mode, sourcePath, targetPath, options) {
-  requireOwnedMutationOptions(options);
-  assertOwnedMutationBoundary(targetPath);
+export function createOwnedFilesystemMaintenance(
+  requestedOwnerRoot,
+  scope,
+  ownerLabel = 'Owned filesystem maintenance'
+) {
+  const ownerRoot = resolvePathIdentity(requestedOwnerRoot);
+  const paths = admitOwnedPaths(ownerRoot, scope.paths ?? [], ownerLabel);
+  const directories = admitOwnedDirectories(ownerRoot, scope.directories ?? [], ownerLabel);
+
+  if (paths.length === 0 && directories.length === 0) {
+    throw new Error(`${ownerLabel} requires at least one admitted path`);
+  }
+
+  return createOwnedMutationCapability(
+    createOwnedMutationAuthority(ownerRoot, ownerLabel, (targetPath) => {
+      const target = path.resolve(targetPath);
+      if (
+        paths.includes(target) ||
+        directories.some((directory) => isSameOrDescendant(directory, target))
+      ) {
+        return target;
+      }
+      throw new Error(`${ownerLabel} mutation is outside its admitted scope: ${target}`);
+    })
+  );
+}
+
+/**
+ * @param {OwnedMutationAuthority} authority
+ * @returns {{ installManagedPath: (mode: ManagedPathMode, sourcePath: string, targetPath: string) => void; writeText: (filePath: string, content: string, options?: { finalNewline?: boolean; followFinalSymlink?: boolean }) => void; writeBinary: (filePath: string, content: Buffer) => void; writeRecoveryCandidate: (candidatePath: string, content: string) => void; publishStaged: (stagedPath: string, targetPath: string) => void; remove: (targetPath: string) => void; removeEmptyDirectories: (directories: string[]) => void }}
+ */
+function createOwnedMutationCapability(authority) {
+  return Object.freeze({
+    installManagedPath(mode, sourcePath, targetPath) {
+      installManagedPath(authority, mode, sourcePath, targetPath);
+    },
+    writeText(filePath, content, options = {}) {
+      writeTextFile(authority, filePath, content, options);
+    },
+    writeBinary(filePath, content) {
+      writeBinaryFile(authority, filePath, content);
+    },
+    writeRecoveryCandidate(candidatePath, content) {
+      writeOwnedRecoveryCandidate(authority, candidatePath, content);
+    },
+    publishStaged(stagedPath, targetPath) {
+      publishStagedOwnedPath(authority, stagedPath, targetPath);
+    },
+    remove(targetPath) {
+      removeOwnedPath(authority, targetPath);
+    },
+    removeEmptyDirectories(directories) {
+      removeOwnedEmptyDirectories(authority, directories);
+    },
+  });
+}
+
+/** @param {string} ownerRoot @param {string[]} directories */
+function removeOwnedEmptyDirectoriesUnderRoot(ownerRoot, directories) {
+  if (directories.length === 0) return;
+  const maintenance = createOwnedFilesystemMaintenance(
+    ownerRoot,
+    { directories },
+    'Owned filesystem cleanup'
+  );
+  maintenance.removeEmptyDirectories(directories);
+}
+
+/** @param {string} ownerRoot @param {string} targetPath @param {string} [label] */
+function removeOwnedMaintenancePath(ownerRoot, targetPath, label = 'Owned filesystem maintenance') {
+  createOwnedFilesystemMaintenance(ownerRoot, { paths: [targetPath] }, label).remove(targetPath);
+}
+
+/**
+ * @param {string} ownerRoot
+ * @param {string} label
+ * @param {(targetPath: string, operation: string) => string} admitTarget
+ * @param {{ admitPublicationSource?: (targetPath: string, operation: string) => string; recordIntent?: (targetPath: string, generation: string) => void; recordCompletion?: (targetPath: string, generation: string) => void; snapshotIdFor?: (targetPath: string) => string | undefined }} [hooks]
+ * @returns {OwnedMutationAuthority}
+ */
+function createOwnedMutationAuthority(ownerRoot, label, admitTarget, hooks = {}) {
+  return {
+    ownerRoot,
+    label,
+    admitTarget,
+    admitPublicationSource: hooks.admitPublicationSource ?? admitTarget,
+    recordIntent: hooks.recordIntent ?? (() => {}),
+    recordCompletion: hooks.recordCompletion ?? (() => {}),
+    snapshotIdFor: hooks.snapshotIdFor ?? (() => undefined),
+  };
+}
+
+/** @param {OwnedMutationAuthority} authority @param {ManagedPathMode} mode @param {string} sourcePath @param {string} targetPath */
+function installManagedPath(authority, mode, sourcePath, targetPath) {
+  const admittedTarget = authority.admitTarget(targetPath, 'installManagedPath');
 
   if (
     fs.lstatSync(sourcePath).isDirectory() ||
-    (exists(targetPath) && fs.lstatSync(targetPath).isDirectory())
+    (exists(admittedTarget) && fs.lstatSync(admittedTarget).isDirectory())
   ) {
     assertAtomicDirectoryExchangeAvailable();
   }
 
-  withAnchoredParent(options.ownerRoot, targetPath, true, (parent) => {
-    publishStagedPathAtomically(parent, targetPath, (temporaryPath) => {
+  withAnchoredParent(authority.ownerRoot, admittedTarget, true, (parent) => {
+    publishStagedPathAtomically(authority, parent, admittedTarget, (temporaryPath) => {
       if (mode === 'link') {
         fs.symlinkSync(path.resolve(sourcePath), temporaryPath);
         return;
@@ -395,18 +499,13 @@ export function installManagedPathRaw(mode, sourcePath, targetPath, options) {
   });
 }
 
-/**
- * @param {string} filePath
- * @param {string} content
- * @param {{ ownerRoot: string; finalNewline?: boolean; followFinalSymlink?: boolean }} options
- * @returns {void}
- */
-export function writeTextFileRaw(filePath, content, options) {
-  requireOwnedMutationOptions(options);
+/** @param {OwnedMutationAuthority} authority @param {string} filePath @param {string} content @param {{ finalNewline?: boolean; followFinalSymlink?: boolean }} options */
+function writeTextFile(authority, filePath, content, options) {
   const finalContent =
     options.finalNewline === true && !content.endsWith('\n') ? `${content}\n` : content;
 
   publishRegularFileAtomically(
+    authority,
     filePath,
     (temporaryPath, mode) => {
       const descriptor = fs.openSync(temporaryPath, 'wx', mode);
@@ -419,23 +518,14 @@ export function writeTextFileRaw(filePath, content, options) {
         fs.closeSync(descriptor);
       }
     },
-    {
-      followFinalSymlink: options.followFinalSymlink !== false,
-      ownerRoot: options.ownerRoot,
-      preserveTargetMode: true,
-    }
+    { followFinalSymlink: options.followFinalSymlink !== false, preserveTargetMode: true }
   );
 }
 
-/**
- * @param {string} filePath
- * @param {Buffer} content
- * @param {{ ownerRoot: string }} options
- * @returns {void}
- */
-export function writeBinaryFileRaw(filePath, content, options) {
-  requireOwnedMutationOptions(options);
+/** @param {OwnedMutationAuthority} authority @param {string} filePath @param {Buffer} content */
+function writeBinaryFile(authority, filePath, content) {
   publishRegularFileAtomically(
+    authority,
     filePath,
     (temporaryPath, mode) => {
       const descriptor = fs.openSync(temporaryPath, 'wx', mode);
@@ -448,93 +538,64 @@ export function writeBinaryFileRaw(filePath, content, options) {
         fs.closeSync(descriptor);
       }
     },
-    { followFinalSymlink: true, ownerRoot: options.ownerRoot, preserveTargetMode: true }
+    { followFinalSymlink: true, preserveTargetMode: true }
   );
 }
 
-/**
- * Write an unpublished recovery candidate directly at its fixed path. The
- * candidate is not semantic state: callers must atomically publish it to the
- * authoritative journal, and recovery may always delete an unpublished
- * candidate. A hard crash therefore leaves one bounded, owner-known artifact
- * instead of an unscannable UUID temporary.
- *
- * @param {string} ownerRoot
- * @param {string} candidatePath
- * @param {string} content
- * @returns {void}
- */
-export function writeOwnedRecoveryCandidateRaw(ownerRoot, candidatePath, content) {
-  assertOwnedMutationBoundary(candidatePath);
-  withAnchoredParent(ownerRoot, candidatePath, true, ({ anchoredPath, descriptor }) => {
-    if (exists(anchoredPath)) {
-      removePathIfReachable(anchoredPath);
+/** @param {OwnedMutationAuthority} authority @param {string} candidatePath @param {string} content */
+function writeOwnedRecoveryCandidate(authority, candidatePath, content) {
+  const admittedCandidate = authority.admitTarget(candidatePath, 'writeRecoveryCandidate');
+  withAnchoredParent(
+    authority.ownerRoot,
+    admittedCandidate,
+    true,
+    ({ anchoredPath, descriptor }) => {
+      if (exists(anchoredPath)) removePathIfReachable(anchoredPath);
+      fs.writeFileSync(anchoredPath, content, {
+        encoding: 'utf8',
+        flag: 'wx',
+        flush: true,
+        mode: 0o600,
+      });
+      fsyncDirectoryDescriptor(descriptor);
     }
-
-    fs.writeFileSync(anchoredPath, content, {
-      encoding: 'utf8',
-      flag: 'wx',
-      flush: true,
-      mode: 0o600,
-    });
-
-    fsyncDirectoryDescriptor(descriptor);
-  });
+  );
 }
 
-/**
- * Remove one owned path without re-resolving its admitted parent namespace.
- *
- * @param {string} ownerRoot
- * @param {string} targetPath
- * @returns {void}
- */
-export function removeOwnedPathRaw(ownerRoot, targetPath) {
-  assertOwnedMutationBoundary(targetPath);
-  recordOwnedMutationIntent(targetPath, 'absent');
-  const snapshot = [...activeOwnedSnapshots].find((candidate) =>
-    candidate.entries.some(
-      (entry) => !entry.disposable && entry.targetPath === path.resolve(targetPath)
-    )
-  );
+/** @param {OwnedMutationAuthority} authority @param {string} targetPath */
+function removeOwnedPath(authority, targetPath) {
+  const admittedTarget = authority.admitTarget(targetPath, 'remove');
+  authority.recordIntent(admittedTarget, 'absent');
+  const snapshot = authority.snapshotIdFor(admittedTarget);
   if (snapshot !== undefined) {
     removeSnapshotGeneration(
-      ownerRoot,
-      targetPath,
-      snapshotTemporaryPath(targetPath, snapshot.snapshotId)
+      authority.ownerRoot,
+      admittedTarget,
+      snapshotTemporaryPath(admittedTarget, snapshot)
     );
-    recordOwnedMutationCompletion(targetPath, 'absent');
+    authority.recordCompletion(admittedTarget, 'absent');
     return;
   }
 
   try {
-    withAnchoredParent(ownerRoot, targetPath, false, (parent) => {
+    withAnchoredParent(authority.ownerRoot, admittedTarget, false, (parent) => {
       removePathIfReachable(parent.anchoredPath);
       fsyncDirectoryDescriptor(parent.descriptor);
     });
   } catch (error) {
     if (!(error instanceof MissingOwnedParentError)) throw error;
   }
-  recordOwnedMutationCompletion(targetPath, 'absent');
+  authority.recordCompletion(admittedTarget, 'absent');
 }
 
-/**
- * Atomically publish an already staged owned path. Source and destination are
- * resolved relative to held directory descriptors, so a parent rename cannot
- * redirect publication outside the owner.
- *
- * @param {string} ownerRoot
- * @param {string} stagedPath
- * @param {string} targetPath
- * @returns {void}
- */
-export function publishStagedOwnedPathRaw(ownerRoot, stagedPath, targetPath) {
-  assertOwnedMutationBoundary(stagedPath);
-  assertOwnedMutationBoundary(targetPath);
-  withAnchoredParent(ownerRoot, stagedPath, false, (sourceParent) => {
-    withAnchoredParent(ownerRoot, targetPath, true, (targetParent) => {
+/** @param {OwnedMutationAuthority} authority @param {string} stagedPath @param {string} targetPath */
+function publishStagedOwnedPath(authority, stagedPath, targetPath) {
+  const admittedStage = authority.admitPublicationSource(stagedPath, 'publishStaged source');
+  const admittedTarget = authority.admitTarget(targetPath, 'publishStaged target');
+  withAnchoredParent(authority.ownerRoot, admittedStage, false, (sourceParent) => {
+    withAnchoredParent(authority.ownerRoot, admittedTarget, true, (targetParent) => {
       const stagedGeneration = readStableAnchoredGeneration(sourceParent.anchoredPath);
-      recordOwnedMutationIntent(targetPath, stagedGeneration);
+      authority.recordIntent(admittedTarget, stagedGeneration);
       if (
         exists(targetParent.anchoredPath) &&
         pathNeedsExchange(sourceParent.anchoredPath, targetParent.anchoredPath)
@@ -549,14 +610,14 @@ export function publishStagedOwnedPathRaw(ownerRoot, stagedPath, targetPath) {
       } else {
         fs.renameSync(sourceParent.anchoredPath, targetParent.anchoredPath);
       }
-      recordOwnedMutationIntent(stagedPath, 'absent');
+      authority.recordIntent(admittedStage, 'absent');
       fsyncDirectoryDescriptor(sourceParent.descriptor);
 
       if (sourceParent.descriptor !== targetParent.descriptor) {
         fsyncDirectoryDescriptor(targetParent.descriptor);
       }
-      recordOwnedMutationCompletion(targetPath, stagedGeneration);
-      recordOwnedMutationCompletion(stagedPath, 'absent');
+      authority.recordCompletion(admittedTarget, stagedGeneration);
+      authority.recordCompletion(admittedStage, 'absent');
     });
   });
 }
@@ -634,16 +695,17 @@ function addDirectoryChain(directories, startDirectory) {
 }
 
 /**
- * Snapshot a set of owned paths, including their absence, before mutation.
- * The returned receipt is the only authority for restoring that snapshot.
+ * Start one owned filesystem transaction.  The returned capability is the
+ * only path that can publish to its live targets; snapshot data is an internal
+ * recovery representation, not ambient process state.
  *
  * @param {string[]} targetPaths
  * @param {string} backupRoot
  * @param {{ ownerRoot: string; snapshotId?: string; temporaryPaths?: string[] }} options
- * @returns {{ backupRoot: string; snapshotId: string; targetPaths: string[]; discard: () => void; rollback: () => void; seal: () => void }}
+ * @returns {{ backupRoot: string; snapshotId: string; targetPaths: string[]; installManagedPath: (mode: ManagedPathMode, sourcePath: string, targetPath: string) => void; writeText: (filePath: string, content: string, options?: { finalNewline?: boolean; followFinalSymlink?: boolean }) => void; writeBinary: (filePath: string, content: Buffer) => void; publishStaged: (stagedPath: string, targetPath: string) => void; remove: (targetPath: string) => void; discard: () => void; rollback: () => void; seal: () => void }}
  */
-export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
-  requireOwnedMutationOptions(options);
+export function beginOwnedFilesystemTransaction(targetPaths, backupRoot, options) {
+  requireOwnedRoot(options);
   const ownerRoot = resolvePathIdentity(options.ownerRoot);
   const uniquePaths = [...new Set(targetPaths.map((targetPath) => path.resolve(targetPath)))];
   admitOwnedPaths(ownerRoot, uniquePaths, 'Owned filesystem snapshot');
@@ -719,7 +781,76 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
     ownerRoot,
     snapshotId,
   };
-  let closed = false;
+  const backupAuthority = createOwnedMutationAuthority(
+    ownerRoot,
+    'Owned filesystem snapshot backup',
+    (targetPath) => {
+      const target = path.resolve(targetPath);
+      if (!isSameOrDescendant(snapshotState.backupRoot, target)) {
+        throw new Error(`Owned filesystem snapshot backup escapes its root: ${target}`);
+      }
+      return target;
+    }
+  );
+  const backupOperations = createOwnedMutationCapability(backupAuthority);
+  let lifecycle = /** @type {'open' | 'sealed' | 'revoked' | 'discarded' | 'rolledBack'} */ (
+    'open'
+  );
+  /** @param {string} targetPath @param {string} operation @returns {string} */
+  const admitOpenTransactionPath = (targetPath, operation) => {
+    if (lifecycle !== 'open') {
+      throw new Error(`Owned filesystem transaction is ${lifecycle}; cannot ${operation}`);
+    }
+    return path.resolve(targetPath);
+  };
+  const transactionAuthority = createOwnedMutationAuthority(
+    ownerRoot,
+    'Owned filesystem transaction',
+    (targetPath, operation) => {
+      const target = admitOpenTransactionPath(targetPath, operation);
+      const exactEntry = entries.find((entry) => entry.targetPath === target);
+      if (exactEntry !== undefined) return target;
+      if (
+        entries.some((entry) => entry.disposable && isSameOrDescendant(entry.targetPath, target))
+      ) {
+        return target;
+      }
+      if (
+        entries.some((entry) => !entry.disposable && isSameOrDescendant(entry.targetPath, target))
+      ) {
+        throw new Error(
+          `Directory transaction requires complete-generation replacement: ${target}`
+        );
+      }
+      throw new Error(
+        `Owned filesystem transaction mutation is outside its admitted scope: ${target}`
+      );
+    },
+    {
+      admitPublicationSource(stagedPath, operation) {
+        const stage = admitOpenTransactionPath(stagedPath, operation);
+        if (
+          entries.some((entry) => entry.disposable && isSameOrDescendant(entry.targetPath, stage))
+        ) {
+          return stage;
+        }
+        throw new Error(
+          `Owned filesystem transaction publication source must be an admitted disposable stage: ${stage}`
+        );
+      },
+      recordIntent(targetPath, generation) {
+        recordSnapshotMutationIntent(snapshotState, targetPath, generation);
+      },
+      recordCompletion(targetPath, generation) {
+        recordSnapshotMutationCompletion(snapshotState, targetPath, generation);
+      },
+      snapshotIdFor(targetPath) {
+        return entries.some((entry) => !entry.disposable && entry.targetPath === targetPath)
+          ? snapshotId
+          : undefined;
+      },
+    }
+  );
 
   try {
     withAnchoredParent(ownerRoot, backupRoot, true, ({ anchoredPath, descriptor }) => {
@@ -734,6 +865,7 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
 
       withAnchoredParent(ownerRoot, entry.backupPath, true, (parent) => {
         publishStagedPathAtomically(
+          backupAuthority,
           parent,
           entry.backupPath,
           (temporaryPath) => {
@@ -765,8 +897,8 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
     syncPathsDurably([backupRoot, path.dirname(backupRoot)]);
   } catch (error) {
     try {
-      removeOwnedPathRaw(ownerRoot, backupRoot);
-      removeOwnedEmptyDirectoriesRaw(ownerRoot, missingBackupParents);
+      backupOperations.remove(backupRoot);
+      removeOwnedEmptyDirectoriesUnderRoot(ownerRoot, missingBackupParents);
     } catch {
       // The snapshot error remains the useful failure when cleanup is impossible.
     }
@@ -774,27 +906,39 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
     throw error;
   }
 
-  activeOwnedSnapshots.add(snapshotState);
-
-  return {
+  const { installManagedPath, publishStaged, remove, writeBinary, writeText } =
+    createOwnedMutationCapability(transactionAuthority);
+  return Object.freeze({
+    installManagedPath,
+    publishStaged,
+    remove,
+    writeBinary,
+    writeText,
     backupRoot,
     snapshotId,
     targetPaths: uniquePaths,
     seal() {
-      activeOwnedSnapshots.delete(snapshotState);
+      if (lifecycle !== 'open') {
+        throw new Error(`Owned filesystem transaction is already ${lifecycle}`);
+      }
+      lifecycle = 'sealed';
     },
     discard() {
-      activeOwnedSnapshots.delete(snapshotState);
-      removeOwnedPathRaw(ownerRoot, backupRoot);
-      removeOwnedEmptyDirectoriesRaw(ownerRoot, missingBackupParents);
+      if (lifecycle === 'discarded' || lifecycle === 'rolledBack' || lifecycle === 'revoked') {
+        throw new Error(`Owned filesystem transaction is already ${lifecycle}`);
+      }
+      lifecycle = 'revoked';
+      backupOperations.remove(backupRoot);
+      removeOwnedEmptyDirectoriesUnderRoot(ownerRoot, missingBackupParents);
 
       syncPathsDurably([path.dirname(backupRoot)]);
-      closed = true;
+      lifecycle = 'discarded';
     },
     rollback() {
-      if (closed) {
-        return;
+      if (lifecycle === 'discarded' || lifecycle === 'rolledBack' || lifecycle === 'revoked') {
+        throw new Error(`Owned filesystem transaction is already ${lifecycle}`);
       }
+      lifecycle = 'revoked';
 
       if (
         entries.some(
@@ -809,9 +953,10 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
       const failures = [];
 
       const recoveryIdentity = prepareSnapshotRecovery(snapshotState, 6);
+      const recoveryAuthority = createSnapshotRecoveryAuthority(snapshotState);
       for (const entry of entries) {
         try {
-          restoreSnapshotEntry(entry, ownerRoot, recoveryIdentity);
+          restoreSnapshotEntry(entry, recoveryAuthority, recoveryIdentity);
         } catch (error) {
           failures.push(error);
         }
@@ -822,14 +967,13 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
       }
 
       syncPathsDurably(entries.map(({ targetPath }) => targetPath));
-      activeOwnedSnapshots.delete(snapshotState);
-      removeOwnedPathRaw(ownerRoot, backupRoot);
-      removeOwnedEmptyDirectoriesRaw(ownerRoot, missingBackupParents);
+      backupOperations.remove(backupRoot);
+      removeOwnedEmptyDirectoriesUnderRoot(ownerRoot, missingBackupParents);
       syncPathsDurably([path.dirname(backupRoot)]);
 
-      closed = true;
+      lifecycle = 'rolledBack';
     },
-  };
+  });
 }
 
 /**
@@ -864,11 +1008,12 @@ export function restoreOwnedPathSnapshot(requestedBackupRoot, options) {
     throw new Error('Owned filesystem snapshot has no single admitted owner');
   const snapshot = { ...manifest, backupRoot, ownerRoot, snapshotId: options.snapshotId };
   const recoveryIdentity = prepareSnapshotRecovery(snapshot, manifest.version);
+  const recoveryAuthority = createSnapshotRecoveryAuthority(snapshot);
   /** @type {unknown[]} */
   const failures = [];
   for (const entry of manifest.entries) {
     try {
-      restoreSnapshotEntry(entry, ownerRoot, recoveryIdentity);
+      restoreSnapshotEntry(entry, recoveryAuthority, recoveryIdentity);
     } catch (error) {
       failures.push(error);
     }
@@ -901,7 +1046,7 @@ export function discardOwnedPathSnapshot(requestedBackupRoot, options) {
     throw new Error('Owned filesystem snapshot is outside its allowed roots');
   }
 
-  removeOwnedPathRaw(ownerRoot, backupRoot);
+  removeOwnedMaintenancePath(ownerRoot, backupRoot, 'Owned filesystem snapshot backup');
   syncPathsDurably([path.dirname(backupRoot)]);
 }
 
@@ -1159,25 +1304,31 @@ function collectMissingParentDirectories(targetPaths) {
  * Remove transaction-created empty directories through the same admitted owner
  * namespace used to create them.
  *
- * @param {string} ownerRoot
+ * @param {OwnedMutationAuthority} authority
  * @param {string[]} directories
  * @returns {void}
  */
-export function removeOwnedEmptyDirectoriesRaw(ownerRoot, directories) {
-  const physicalOwnerRoot = resolvePathIdentity(ownerRoot);
+function removeOwnedEmptyDirectories(authority, directories) {
+  const physicalOwnerRoot = resolvePathIdentity(authority.ownerRoot);
 
   for (const directory of [...new Set(directories)].toSorted(
     (left, right) => right.length - left.length
   )) {
-    if (path.resolve(directory) === physicalOwnerRoot) {
+    const admittedDirectory = authority.admitTarget(directory, 'removeEmptyDirectories');
+    if (admittedDirectory === physicalOwnerRoot) {
       continue;
     }
 
     try {
-      withAnchoredParent(ownerRoot, directory, false, ({ anchoredPath, descriptor }) => {
-        fs.rmdirSync(anchoredPath);
-        fsyncDirectoryDescriptor(descriptor);
-      });
+      withAnchoredParent(
+        authority.ownerRoot,
+        admittedDirectory,
+        false,
+        ({ anchoredPath, descriptor }) => {
+          fs.rmdirSync(anchoredPath);
+          fsyncDirectoryDescriptor(descriptor);
+        }
+      );
     } catch (error) {
       if (
         error instanceof MissingOwnedParentError ||
@@ -1222,12 +1373,14 @@ function removePathIfReachable(targetPath) {
  * the complete snapshot generation.
  *
  * @param {{ targetPath: string; backupPath: string; disposable: boolean; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; publishedGeneration: string; mutationGeneration: string }} entry
- * @param {string} ownerRoot
+ * @param {OwnedMutationAuthority} authority
  * @param {string} snapshotId
  * @returns {void}
  */
-function restoreSnapshotEntry(entry, ownerRoot, snapshotId) {
+function restoreSnapshotEntry(entry, authority, snapshotId) {
   if (entry.disposable) return;
+  const ownerRoot = authority.ownerRoot;
+  authority.admitTarget(entry.targetPath, 'restore snapshot');
   const currentGeneration = readStablePathGeneration(ownerRoot, entry.targetPath);
 
   if (currentGeneration === entry.originalGeneration) {
@@ -1252,6 +1405,7 @@ function restoreSnapshotEntry(entry, ownerRoot, snapshotId) {
 
   withAnchoredParent(ownerRoot, entry.targetPath, true, (parent) => {
     publishStagedPathAtomically(
+      authority,
       parent,
       entry.targetPath,
       (temporaryPath) => {
@@ -1377,7 +1531,7 @@ function prepareSnapshotRecovery(snapshot, version) {
  */
 function retireSnapshotTemporaryPath(ownerRoot, temporaryPath) {
   const retiredPath = `${temporaryPath}.retired`;
-  removeOwnedPathRaw(ownerRoot, retiredPath);
+  removeOwnedMaintenancePath(ownerRoot, retiredPath, 'Owned filesystem recovery scratch');
   try {
     withAnchoredParent(ownerRoot, temporaryPath, false, (parent) => {
       if (exists(parent.anchoredPath)) {
@@ -1391,7 +1545,7 @@ function retireSnapshotTemporaryPath(ownerRoot, temporaryPath) {
   } catch (error) {
     if (!(error instanceof MissingOwnedParentError)) throw error;
   }
-  removeOwnedPathRaw(ownerRoot, retiredPath);
+  removeOwnedMaintenancePath(ownerRoot, retiredPath, 'Owned filesystem recovery scratch');
 }
 
 /**
@@ -1399,25 +1553,25 @@ function retireSnapshotTemporaryPath(ownerRoot, temporaryPath) {
  * primitive. The temporary file lives beside the destination so replacement
  * cannot cross filesystems.
  *
+ * @param {OwnedMutationAuthority} authority
  * @param {string} requestedPath
  * @param {(temporaryPath: string, mode: number | undefined) => void} populate
- * @param {{ ownerRoot: string; followFinalSymlink?: boolean; preserveTargetMode?: boolean }} options
+ * @param {{ followFinalSymlink?: boolean; preserveTargetMode?: boolean }} options
  * @returns {void}
  */
-function publishRegularFileAtomically(requestedPath, populate, options) {
-  requireOwnedMutationOptions(options);
-  const filePath = path.resolve(requestedPath);
+function publishRegularFileAtomically(authority, requestedPath, populate, options) {
+  const filePath = authority.admitTarget(requestedPath, 'publish regular file');
   const publishPath = options.followFinalSymlink
-    ? resolveFinalSymlinkTarget(filePath, options.ownerRoot)
+    ? resolveFinalSymlinkTarget(filePath, authority.ownerRoot)
     : filePath;
-  assertOwnedMutationBoundary(publishPath);
+  authority.admitTarget(publishPath, 'publish regular-file referent');
 
-  withAnchoredParent(options.ownerRoot, publishPath, true, (parent) => {
+  withAnchoredParent(authority.ownerRoot, publishPath, true, (parent) => {
     const targetStats = exists(parent.anchoredPath) ? fs.lstatSync(parent.anchoredPath) : undefined;
     const mode =
       options.preserveTargetMode && targetStats?.isFile() ? targetStats.mode & 0o7777 : undefined;
 
-    publishStagedPathAtomically(parent, publishPath, (temporaryPath) => {
+    publishStagedPathAtomically(authority, parent, publishPath, (temporaryPath) => {
       populate(temporaryPath, mode);
     });
   });
@@ -1458,9 +1612,9 @@ function resolveFinalSymlinkTarget(requestedPath, ownerRoot) {
  * @param {{ ownerRoot?: unknown } | undefined} options
  * @returns {asserts options is { ownerRoot: string }}
  */
-function requireOwnedMutationOptions(options) {
+function requireOwnedRoot(options) {
   if (!options || typeof options.ownerRoot !== 'string' || options.ownerRoot.length === 0) {
-    throw new Error('Owned filesystem mutation requires an explicit owner root');
+    throw new Error('Owned filesystem owner requires an explicit root');
   }
 }
 
@@ -1562,6 +1716,7 @@ function withAnchoredParent(requestedOwnerRoot, requestedTargetPath, createParen
 class MissingOwnedParentError extends Error {}
 
 /**
+ * @param {OwnedMutationAuthority} authority
  * @param {{ descriptor: number; anchoredPath: string; leafName: string }} parent
  * @param {string} targetPath
  * @param {(temporaryPath: string) => void} populate
@@ -1570,17 +1725,15 @@ class MissingOwnedParentError extends Error {}
  * @returns {void}
  */
 function publishStagedPathAtomically(
+  authority,
   parent,
   targetPath,
   populate,
   recordMutation = true,
   snapshotId
 ) {
-  snapshotId ??= [...activeOwnedSnapshots].find((snapshot) =>
-    snapshot.entries.some(
-      /** @param {{ targetPath: string }} entry */ (entry) => entry.targetPath === targetPath
-    )
-  )?.snapshotId;
+  const admittedTarget = authority.admitTarget(targetPath, 'publish staged path');
+  snapshotId ??= authority.snapshotIdFor(admittedTarget);
   const temporaryLeaf =
     snapshotId === undefined
       ? `.${parent.leafName}.${randomUUID()}.tmp`
@@ -1592,7 +1745,7 @@ function publishStagedPathAtomically(
     const desiredGeneration = readStableAnchoredGeneration(temporaryPath);
 
     if (recordMutation) {
-      recordOwnedMutationIntent(targetPath, desiredGeneration);
+      authority.recordIntent(admittedTarget, desiredGeneration);
     }
 
     if (exists(parent.anchoredPath) && pathNeedsExchange(temporaryPath, parent.anchoredPath)) {
@@ -1603,7 +1756,7 @@ function publishStagedPathAtomically(
     }
 
     fsyncDirectoryDescriptor(parent.descriptor);
-    if (recordMutation) recordOwnedMutationCompletion(targetPath, desiredGeneration);
+    if (recordMutation) authority.recordCompletion(admittedTarget, desiredGeneration);
   } finally {
     if (exists(temporaryPath)) {
       removePathIfReachable(temporaryPath);
@@ -1802,29 +1955,6 @@ function hashDirectoryGeneration(directory, hash) {
   }
 }
 
-/**
- * A snapshot of a published directory owns complete directory generations.
- * Incremental population belongs in a separately admitted disposable stage.
- * @param {string} targetPath
- * @returns {void}
- */
-function assertOwnedMutationBoundary(targetPath) {
-  const target = path.resolve(targetPath);
-  for (const snapshot of activeOwnedSnapshots) {
-    for (const entry of snapshot.entries) {
-      if (
-        !entry.disposable &&
-        entry.targetPath !== target &&
-        isSameOrDescendant(entry.targetPath, target)
-      ) {
-        throw new Error(
-          `Directory snapshot requires complete-generation replacement: ${entry.targetPath}`
-        );
-      }
-    }
-  }
-}
-
 /** @param {string} snapshotId */
 function assertSnapshotId(snapshotId) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(snapshotId)) {
@@ -1833,43 +1963,83 @@ function assertSnapshotId(snapshotId) {
 }
 
 /**
+ * @param {OwnedSnapshot} snapshot
  * @param {string} targetPath
  * @param {string} desiredGeneration
  * @returns {void}
  */
-function recordOwnedMutationIntent(targetPath, desiredGeneration) {
+function recordSnapshotMutationIntent(snapshot, targetPath, desiredGeneration) {
   const resolvedTarget = path.resolve(targetPath);
-
-  for (const snapshot of activeOwnedSnapshots) {
-    const entry = snapshot.entries.find(
-      /** @param {{ targetPath: string }} candidate */ (candidate) =>
-        candidate.targetPath === resolvedTarget
-    );
-
-    if (!entry || entry.disposable) continue;
-    entry.mutationGeneration = desiredGeneration;
-    writeSnapshotManifest(snapshot);
-  }
+  const entry = snapshot.entries.find(
+    /** @param {{ targetPath: string }} candidate */ (candidate) =>
+      candidate.targetPath === resolvedTarget
+  );
+  if (!entry || entry.disposable) return;
+  entry.mutationGeneration = desiredGeneration;
+  writeSnapshotManifest(snapshot);
 }
 
 /**
  * Intent and completed publication are distinct durable facts. A second write
  * may die after recording its intent while the previous owned generation is
  * still visible, so recovery must retain both until publication completes.
+ * @param {OwnedSnapshot} snapshot
  * @param {string} targetPath
  * @param {string} generation
  * @returns {void}
  */
-function recordOwnedMutationCompletion(targetPath, generation) {
-  for (const snapshot of activeOwnedSnapshots) {
-    const entry = snapshot.entries.find(
-      /** @param {{ targetPath: string }} candidate */ (candidate) =>
-        candidate.targetPath === path.resolve(targetPath)
-    );
-    if (!entry || entry.disposable) continue;
-    entry.publishedGeneration = generation;
-    writeSnapshotManifest(snapshot);
-  }
+function recordSnapshotMutationCompletion(snapshot, targetPath, generation) {
+  const entry = snapshot.entries.find(
+    /** @param {{ targetPath: string }} candidate */ (candidate) =>
+      candidate.targetPath === path.resolve(targetPath)
+  );
+  if (!entry || entry.disposable) return;
+  entry.publishedGeneration = generation;
+  writeSnapshotManifest(snapshot);
+}
+
+/** @param {OwnedSnapshot} snapshot @returns {OwnedMutationAuthority} */
+function createSnapshotRecoveryAuthority(snapshot) {
+  return createOwnedMutationAuthority(
+    snapshot.ownerRoot,
+    'Owned filesystem snapshot recovery',
+    (targetPath) => {
+      const target = path.resolve(targetPath);
+      if (!snapshot.entries.some((entry) => entry.targetPath === target)) {
+        throw new Error(
+          `Owned filesystem snapshot recovery is outside its admitted scope: ${target}`
+        );
+      }
+      return target;
+    },
+    {
+      snapshotIdFor(targetPath) {
+        return snapshot.entries.some(
+          (entry) => !entry.disposable && entry.targetPath === targetPath
+        )
+          ? snapshot.snapshotId
+          : undefined;
+      },
+    }
+  );
+}
+
+/** @param {OwnedSnapshot} snapshot @returns {OwnedMutationAuthority} */
+function createSnapshotMetadataAuthority(snapshot) {
+  const manifestPath = path.join(snapshot.backupRoot, 'snapshot.json');
+  return createOwnedMutationAuthority(
+    snapshot.ownerRoot,
+    'Owned filesystem snapshot metadata',
+    (targetPath) => {
+      const target = path.resolve(targetPath);
+      if (target !== manifestPath) {
+        throw new Error(
+          `Owned filesystem snapshot metadata is outside its admitted scope: ${target}`
+        );
+      }
+      return target;
+    }
+  );
 }
 
 /**
@@ -1911,6 +2081,7 @@ function writeSnapshotManifest(snapshot) {
   )}\n`;
 
   publishRegularFileAtomically(
+    createSnapshotMetadataAuthority(snapshot),
     manifestPath,
     (temporaryPath) => {
       const descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
@@ -1922,11 +2093,7 @@ function writeSnapshotManifest(snapshot) {
         fs.closeSync(descriptor);
       }
     },
-    {
-      followFinalSymlink: false,
-      ownerRoot: snapshot.ownerRoot,
-      preserveTargetMode: true,
-    }
+    { followFinalSymlink: false, preserveTargetMode: true }
   );
 }
 

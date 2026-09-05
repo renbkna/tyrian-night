@@ -17,22 +17,17 @@ import {
   admitOwnedDirectories,
   admitOwnedPaths,
   assertAtomicDirectoryExchangeAvailable,
+  beginOwnedFilesystemTransaction,
+  createOwnedFilesystemMaintenance,
   discardOwnedPathSnapshot,
   escapeRegExp,
   exists,
-  installManagedPathRaw as installManagedPathWithMode,
   isSameOrDescendant,
   operation,
-  publishStagedOwnedPathRaw,
-  removeOwnedEmptyDirectoriesRaw,
-  removeOwnedPathRaw,
   resolvePathIdentity,
   restoreOwnedPathSnapshot,
-  snapshotOwnedPaths,
   syncPathsDurably,
   withTokenFileLock,
-  writeOwnedRecoveryCandidateRaw,
-  writeTextFileRaw,
 } from './installOps.mjs';
 import {
   buildTyrianBackupRoot,
@@ -59,8 +54,16 @@ export const LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH =
 const PLASMA_LIFECYCLE_RELATIVE_PATH = '.local/state/tyrian-night/plasma-lifecycle.json';
 const LIVE_INSTALL_TARGETS = new Set(['plasma', 'caelestia']);
 const HYPRLAND_MODES = new Set(['lua', 'legacy']);
-/** @type {Map<string, { depth: number; owner: 'live' | 'rice' | 'layout'; targetPaths: string[]; temporaryPaths: string[] }>} */
-const activeHomeTransactions = new Map();
+/** @type {WeakMap<object, { active: boolean; home: string; owner: 'live' | 'rice' | 'layout'; targetPaths: string[]; temporaryPaths: string[] }>} */
+const homeFilesystemCapabilityStates = new WeakMap();
+/**
+ * A collision fence only: it rejects a fresh nested owner before it can run
+ * recovery against the parent's prepared pointer.  It never returns a
+ * transaction or grants mutation authority; joining still requires the exact
+ * parent capability below.
+ * @type {Set<string>}
+ */
+const activeHomeFilesystemOwnerClaims = new Set();
 
 /**
  * @typedef {'copy' | 'link'} InstallMode
@@ -107,6 +110,7 @@ const activeHomeTransactions = new Map();
  * @typedef {{ common: XdgRoots; plasma: XdgRoots; caelestia: XdgRoots }} LiveOwnedRoots
  * @typedef {{ paths: LiveOwnedRegistry; roots: LiveOwnedRoots }} LiveOwnedState
  * @typedef {{ backupRoot: string; rollback: () => void }} LiveInstallReceipt
+ * @typedef {Pick<ReturnType<typeof beginOwnedFilesystemTransaction>, 'installManagedPath' | 'writeText' | 'writeBinary' | 'publishStaged' | 'remove'>} HomeFilesystemCapability
  */
 
 /**
@@ -392,7 +396,7 @@ function buildMaterializedInstallPaths(themeSlugs, desktopThemeAssets) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; target: LiveInstallTarget; hyprlandMode?: HyprlandMode; runCommand?: CommandRunner; testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} options
+ * @param {{ repoRoot?: string; home?: string; apply?: boolean; link?: boolean; stagingRoot?: string; environment?: NodeJS.ProcessEnv; target: LiveInstallTarget; hyprlandMode?: HyprlandMode; runCommand?: CommandRunner; testInterruptAfterMutation?: boolean; testFailCommit?: boolean; parentTransaction?: HomeFilesystemCapability }} options
  * @returns {LiveInstallReceipt | undefined}
  */
 export function installLiveTyrian(options) {
@@ -406,6 +410,13 @@ export function installLiveTyrian(options) {
     'Live install transaction container'
   );
   if (!plan.apply) {
+    if (options.parentTransaction !== undefined) {
+      throw new Error('A preview cannot join a home filesystem transaction');
+    }
+    return installLiveTyrianOwned(plan, options);
+  }
+
+  if (options.parentTransaction !== undefined) {
     return installLiveTyrianOwned(plan, options);
   }
 
@@ -460,11 +471,7 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
         );
       }
 
-      if (
-        !activeHomeTransactions.has(userHome) &&
-        !options.allowPlasmaRecovery &&
-        options.recoverBeforeAction !== false
-      ) {
+      if (!options.allowPlasmaRecovery && options.recoverBeforeAction !== false) {
         recoverHomeFilesystemTransaction(userHome);
       }
 
@@ -477,8 +484,8 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
 /**
  * @template T
  * @param {string} requestedHome
- * @param {{ targetPaths: string[]; temporaryPaths?: string[]; backupRoot: string; owner: 'live' | 'rice' | 'layout'; shouldLeavePrepared?: (error: unknown) => boolean; afterRollback?: () => void; afterCommit?: () => void; testFailCommit?: boolean }} transaction
- * @param {() => T} action
+ * @param {{ targetPaths: string[]; temporaryPaths?: string[]; backupRoot: string; owner: 'live' | 'rice' | 'layout'; parent?: HomeFilesystemCapability; shouldLeavePrepared?: (error: unknown) => boolean; afterRollback?: () => void; afterCommit?: () => void; testFailCommit?: boolean }} transaction
+ * @param {(filesystem: HomeFilesystemCapability) => T} action
  * @returns {{ result: T; receipt?: LiveInstallReceipt }}
  */
 export function withHomeFilesystemTransaction(requestedHome, transaction, action) {
@@ -497,34 +504,35 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
   if (temporaryPaths.some((target) => !targetPaths.includes(target))) {
     throw new Error('Disposable transaction paths must be complete snapshot targets');
   }
+  if (transaction.parent !== undefined) {
+    const parent = homeFilesystemCapabilityStates.get(transaction.parent);
+    if (parent === undefined || !parent.active) {
+      throw new Error('Nested home transaction requires an active parent capability');
+    }
+    if (parent.home !== userHome) {
+      throw new Error('Nested home transaction parent belongs to another home');
+    }
+    const outsideOwner = targetPaths.find(
+      (targetPath) =>
+        !parent.targetPaths.some((ownedPath) => isSameOrDescendant(ownedPath, targetPath))
+    );
+    if (outsideOwner) {
+      throw new Error(`Nested home transaction target is outside its parent: ${outsideOwner}`);
+    }
+    if (temporaryPaths.some((target) => !parent.temporaryPaths.includes(target))) {
+      throw new Error('Nested disposable transaction paths must be admitted by the parent');
+    }
+    const result = action(transaction.parent);
+    assertSynchronousHomeFilesystemAction(result);
+    return { result };
+  }
+
+  assertNoActiveHomeFilesystemOwner(userHome);
+
   const [backupRoot] = canonicalizeOwnedHomePaths(userHome, [transaction.backupRoot]);
   admitOwnedDirectories(userHome, [backupRoot], `${transaction.owner} backup container`);
 
   return withLiveInstallLock(userHome, () => {
-    const active = activeHomeTransactions.get(userHome);
-
-    if (active) {
-      const outsideOwner = targetPaths.find(
-        (targetPath) =>
-          !active.targetPaths.some((ownedPath) => isSameOrDescendant(ownedPath, targetPath))
-      );
-
-      if (outsideOwner) {
-        throw new Error(`Nested home transaction target is outside its owner: ${outsideOwner}`);
-      }
-
-      if (temporaryPaths.some((target) => !active.temporaryPaths.includes(target))) {
-        throw new Error('Nested disposable transaction paths must be admitted by the owner');
-      }
-      active.depth += 1;
-
-      try {
-        return { result: action() };
-      } finally {
-        active.depth -= 1;
-      }
-    }
-
     assertAtomicDirectoryExchangeAvailable();
 
     const snapshotId = randomUUID();
@@ -539,11 +547,11 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
       temporaryPaths: temporaryPaths.map((targetPath) => path.relative(userHome, targetPath)),
     };
     writeLiveInstallTransaction(userHome, allocatingPointer);
-    /** @type {ReturnType<typeof snapshotOwnedPaths> | undefined} */
+    /** @type {ReturnType<typeof beginOwnedFilesystemTransaction> | undefined} */
     let snapshot;
 
     try {
-      snapshot = snapshotOwnedPaths(targetPaths, backupRoot, {
+      snapshot = beginOwnedFilesystemTransaction(targetPaths, backupRoot, {
         ownerRoot: userHome,
         snapshotId,
         temporaryPaths,
@@ -558,19 +566,23 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
 
     const pointer = { ...allocatingPointer, phase: /** @type {const} */ ('prepared') };
 
-    activeHomeTransactions.set(userHome, {
-      depth: 1,
-      owner: transaction.owner,
+    const filesystem = createHomeFilesystemCapability(
+      userHome,
+      transaction.owner,
       targetPaths,
       temporaryPaths,
-    });
+      snapshot
+    );
+    activeHomeFilesystemOwnerClaims.add(userHome);
     /** @type {T | undefined} */
     let result;
 
     try {
-      result = action();
+      result = action(filesystem);
+      assertSynchronousHomeFilesystemAction(result);
     } catch (error) {
-      activeHomeTransactions.delete(userHome);
+      activeHomeFilesystemOwnerClaims.delete(userHome);
+      deactivateHomeFilesystemCapability(filesystem);
       snapshot.seal();
 
       if (transaction.shouldLeavePrepared?.(error)) {
@@ -604,7 +616,8 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
       throw error;
     }
 
-    activeHomeTransactions.delete(userHome);
+    activeHomeFilesystemOwnerClaims.delete(userHome);
+    deactivateHomeFilesystemCapability(filesystem);
     snapshot.seal();
 
     try {
@@ -673,6 +686,76 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
 }
 
 /**
+ * Bind one transaction's mutation methods to a home-specific capability.  The
+ * WeakMap is only a provenance check for a capability supplied explicitly by a
+ * caller; it never discovers work from a home path.
+ *
+ * @param {string} userHome
+ * @param {'live' | 'rice' | 'layout'} owner
+ * @param {string[]} targetPaths
+ * @param {string[]} temporaryPaths
+ * @param {ReturnType<typeof beginOwnedFilesystemTransaction>} filesystem
+ * @returns {HomeFilesystemCapability}
+ */
+function createHomeFilesystemCapability(userHome, owner, targetPaths, temporaryPaths, filesystem) {
+  const capability = Object.freeze({
+    installManagedPath: filesystem.installManagedPath,
+    writeText: filesystem.writeText,
+    writeBinary: filesystem.writeBinary,
+    publishStaged: filesystem.publishStaged,
+    remove: filesystem.remove,
+  });
+  homeFilesystemCapabilityStates.set(capability, {
+    active: true,
+    home: userHome,
+    owner,
+    targetPaths,
+    temporaryPaths,
+  });
+  return capability;
+}
+
+/** @param {HomeFilesystemCapability} capability */
+function deactivateHomeFilesystemCapability(capability) {
+  const state = homeFilesystemCapabilityStates.get(capability);
+  if (state === undefined) {
+    throw new Error('Home filesystem capability provenance was lost');
+  }
+  state.active = false;
+}
+
+/**
+ * This is a collision fence only. It never discovers or returns a capability;
+ * callers must receive the parent explicitly to join its transaction.
+ *
+ * @param {string} userHome
+ * @returns {void}
+ */
+function assertNoActiveHomeFilesystemOwner(userHome) {
+  if (activeHomeFilesystemOwnerClaims.has(userHome)) {
+    throw new Error('Nested home transaction requires its explicit parent capability');
+  }
+}
+
+/**
+ * A transaction commits or rolls back before this synchronous boundary returns.
+ * Letting an async callback escape would allow it to retain a capability after
+ * its owner's lifecycle has completed.
+ *
+ * @param {unknown} result
+ * @returns {void}
+ */
+function assertSynchronousHomeFilesystemAction(result) {
+  if (
+    result !== null &&
+    (typeof result === 'object' || typeof result === 'function') &&
+    typeof (/** @type {{ then?: unknown }} */ (result).then) === 'function'
+  ) {
+    throw new Error('Home filesystem transaction actions must complete synchronously');
+  }
+}
+
+/**
  * Resolve fixed leaves through verified physical parents. Transaction admission
  * and persisted recovery therefore use the same path identity.
  *
@@ -686,7 +769,7 @@ function canonicalizeOwnedHomePaths(userHome, targetPaths) {
 
 /**
  * @param {LiveInstallPlan} plan
- * @param {{ testInterruptAfterMutation?: boolean; testFailCommit?: boolean }} options
+ * @param {{ testInterruptAfterMutation?: boolean; testFailCommit?: boolean; parentTransaction?: HomeFilesystemCapability }} options
  * @returns {LiveInstallReceipt | undefined}
  */
 function installLiveTyrianOwned(plan, options) {
@@ -695,11 +778,11 @@ function installLiveTyrianOwned(plan, options) {
     resolveLiveInstallTransactionScope(plan);
 
   if (!plan.apply) {
-    cleanupStaleOwnedPaths(plan, staleOwnedPaths);
-    materializeSourceRoot(plan);
-    installTerminalLayer(plan, prepared.common);
-    installTargetLayer(plan, prepared.desktop);
-    publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots);
+    cleanupStaleOwnedPaths(plan, staleOwnedPaths, undefined);
+    materializeSourceRoot(plan, undefined);
+    installTerminalLayer(plan, prepared.common, undefined);
+    installTargetLayer(plan, prepared.desktop, undefined);
+    publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots, undefined);
     console.log(
       `Dry run complete for ${plan.target}. Re-run with --apply --target=${plan.target} to ${plan.mode === 'link' ? 'link live config to the repo' : `copy Tyrian into ${plan.installRoot}`}.`
     );
@@ -713,20 +796,21 @@ function installLiveTyrianOwned(plan, options) {
       temporaryPaths: [plan.stagingRoot],
       backupRoot: plan.backupRoot,
       owner: 'live',
+      parent: options.parentTransaction,
       shouldLeavePrepared: (error) => error instanceof SimulatedLiveInstallInterruption,
       testFailCommit: options.testFailCommit,
     },
-    () => {
-      cleanupStaleOwnedPaths(plan, staleOwnedPaths);
-      materializeSourceRoot(plan);
+    (filesystem) => {
+      cleanupStaleOwnedPaths(plan, staleOwnedPaths, filesystem);
+      materializeSourceRoot(plan, filesystem);
 
       if (options.testInterruptAfterMutation) {
         throw new SimulatedLiveInstallInterruption();
       }
 
-      installTerminalLayer(plan, prepared.common);
-      installTargetLayer(plan, prepared.desktop);
-      publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots);
+      installTerminalLayer(plan, prepared.common, filesystem);
+      installTargetLayer(plan, prepared.desktop, filesystem);
+      publishLiveOwnedPaths(plan, desiredOwnedRegistry, desiredOwnedRoots, filesystem);
     }
   );
 
@@ -1048,12 +1132,13 @@ function isPersistedTyrianPlasmaOwnedPath(ownedPath, dataRoot) {
 /**
  * @param {LiveInstallPlan} plan
  * @param {string[]} staleOwnedPaths
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function cleanupStaleOwnedPaths(plan, staleOwnedPaths) {
+function cleanupStaleOwnedPaths(plan, staleOwnedPaths, filesystem) {
   for (const stalePath of staleOwnedPaths) {
     operation(plan.apply, `remove stale owned path ${stalePath}`, () => {
-      removeOwnedPathRaw(plan.home, stalePath);
+      requireHomeFilesystemCapability(filesystem).remove(stalePath);
     });
   }
 }
@@ -1062,9 +1147,10 @@ function cleanupStaleOwnedPaths(plan, staleOwnedPaths) {
  * @param {LiveInstallPlan} plan
  * @param {LiveOwnedRegistry} registry
  * @param {LiveOwnedRoots} roots
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function publishLiveOwnedPaths(plan, registry, roots) {
+function publishLiveOwnedPaths(plan, registry, roots, filesystem) {
   assertLiveOwnedRegistry(plan, registry, roots);
   const relativeProfiles = Object.fromEntries(
     Object.entries(registry).map(([profile, ownedPaths]) => {
@@ -1094,7 +1180,9 @@ function publishLiveOwnedPaths(plan, registry, roots) {
   )}\n`;
 
   operation(plan.apply, `write ${plan.ownershipManifestPath}`, () => {
-    writeFileRaw(plan.home, plan.ownershipManifestPath, content);
+    requireHomeFilesystemCapability(filesystem).writeText(plan.ownershipManifestPath, content, {
+      followFinalSymlink: false,
+    });
   });
 }
 
@@ -1110,11 +1198,12 @@ class SimulatedLiveInstallInterruption extends Error {
  * @returns {'none' | 'committed' | 'rolledBack'}
  */
 export function recoverHomeFilesystemTransaction(userHome, options = {}) {
+  assertNoActiveHomeFilesystemOwner(resolvePathIdentity(userHome));
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
   const transactionCandidatePath = `${transactionPath}.next`;
 
   if (exists(transactionCandidatePath)) {
-    removeOwnedPathRaw(userHome, transactionCandidatePath);
+    createLiveInstallMetadataMaintenance(userHome).remove(transactionCandidatePath);
   }
 
   if (!exists(transactionPath)) {
@@ -1126,7 +1215,11 @@ export function recoverHomeFilesystemTransaction(userHome, options = {}) {
 
   if (transaction.phase === 'allocating') {
     if (exists(backupRoot)) {
-      removeOwnedPathRaw(userHome, backupRoot);
+      createOwnedFilesystemMaintenance(
+        userHome,
+        { paths: [backupRoot] },
+        'Live install interrupted backup cleanup'
+      ).remove(backupRoot);
     }
 
     removeLiveInstallTransaction(userHome);
@@ -1212,17 +1305,14 @@ function writeLiveInstallTransaction(userHome, transaction) {
   // The fixed candidate is an explicit recovery artifact. A crash before
   // publication leaves one bounded path for the next lock owner to remove.
   const temporaryPath = `${transactionPath}.next`;
+  const metadata = createLiveInstallMetadataMaintenance(userHome);
 
   try {
-    writeOwnedRecoveryCandidateRaw(
-      userHome,
-      temporaryPath,
-      `${JSON.stringify(transaction, null, 2)}\n`
-    );
-    publishStagedOwnedPathRaw(userHome, temporaryPath, transactionPath);
+    metadata.writeRecoveryCandidate(temporaryPath, `${JSON.stringify(transaction, null, 2)}\n`);
+    metadata.publishStaged(temporaryPath, transactionPath);
   } finally {
     if (exists(temporaryPath)) {
-      removeOwnedPathRaw(userHome, temporaryPath);
+      metadata.remove(temporaryPath);
     }
   }
 }
@@ -1338,8 +1428,6 @@ function readLiveInstallTransaction(userHome) {
  */
 function removeLiveInstallTransaction(userHome) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
-  removeOwnedPathRaw(userHome, transactionPath);
-  removeOwnedPathRaw(userHome, `${transactionPath}.next`);
   const absentParents = [];
   let parent = path.dirname(transactionPath);
 
@@ -1348,7 +1436,27 @@ function removeLiveInstallTransaction(userHome) {
     parent = path.dirname(parent);
   }
 
-  removeOwnedEmptyDirectoriesRaw(userHome, absentParents);
+  const metadata = createLiveInstallMetadataMaintenance(userHome, absentParents);
+  metadata.remove(transactionPath);
+  metadata.remove(`${transactionPath}.next`);
+  metadata.removeEmptyDirectories(absentParents);
+}
+
+/**
+ * Transaction pointers are recovery metadata, separate from the live targets
+ * they describe.  This owner admits only the fixed durable record and its
+ * fixed candidate (plus transaction-created empty parents during cleanup).
+ *
+ * @param {string} userHome
+ * @param {string[]} [emptyDirectories]
+ */
+function createLiveInstallMetadataMaintenance(userHome, emptyDirectories = []) {
+  const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
+  return createOwnedFilesystemMaintenance(
+    userHome,
+    { paths: [transactionPath, `${transactionPath}.next`], directories: emptyDirectories },
+    'Live install transaction metadata'
+  );
 }
 
 /**
@@ -1760,21 +1868,24 @@ function prepareLiveInstallPreview(plan) {
 
 /**
  * @param {LiveInstallPlan} plan
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function materializeSourceRoot(plan) {
+function materializeSourceRoot(plan, filesystem) {
   operation(plan.apply, `${plan.mode} Tyrian install source to ${plan.installRoot}`, () => {
     const stagingRoot = plan.stagingRoot;
     try {
       for (const root of plan.materializedRoots) {
         const relativeTarget = path.relative(plan.installRoot, root.target);
-        installManagedPathWithMode(plan.mode, root.source, path.join(stagingRoot, relativeTarget), {
-          ownerRoot: plan.home,
-        });
+        requireHomeFilesystemCapability(filesystem).installManagedPath(
+          plan.mode,
+          root.source,
+          path.join(stagingRoot, relativeTarget)
+        );
       }
-      publishStagedOwnedPathRaw(plan.home, stagingRoot, plan.installRoot);
+      requireHomeFilesystemCapability(filesystem).publishStaged(stagingRoot, plan.installRoot);
     } finally {
-      if (exists(stagingRoot)) removeOwnedPathRaw(plan.home, stagingRoot);
+      if (exists(stagingRoot)) requireHomeFilesystemCapability(filesystem).remove(stagingRoot);
     }
   });
 }
@@ -1782,91 +1893,114 @@ function materializeSourceRoot(plan) {
 /**
  * @param {LiveInstallPlan} plan
  * @param {PreparedCommonInstall} prepared
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installTerminalLayer(plan, prepared) {
+function installTerminalLayer(plan, prepared, filesystem) {
   for (const slug of plan.terminalThemeSlugs) {
     installManagedPath(
       plan,
       path.join(plan.sourceRoot, `terminal/ghostty/themes/${slug}`),
-      path.join(plan.livePaths.ghosttyThemes, slug)
+      path.join(plan.livePaths.ghosttyThemes, slug),
+      filesystem
     );
     installManagedPath(
       plan,
       path.join(plan.sourceRoot, `terminal/foot/themes/${slug}.ini`),
-      path.join(plan.livePaths.footThemes, `${slug}.ini`)
+      path.join(plan.livePaths.footThemes, `${slug}.ini`),
+      filesystem
     );
   }
 
-  writeFile(plan, plan.livePaths.ghosttyConfig, prepared.ghosttyConfig);
-  writeFile(plan, plan.livePaths.footConfig, prepared.footConfig);
+  writeFile(plan, plan.livePaths.ghosttyConfig, prepared.ghosttyConfig, filesystem);
+  writeFile(plan, plan.livePaths.footConfig, prepared.footConfig, filesystem);
 
-  writeFile(plan, plan.livePaths.fishStartupConfig, prepared.fishStartupConfig);
-  installManagedPath(plan, plan.sourcePaths.fishGreeting, plan.livePaths.fishGreeting);
+  writeFile(plan, plan.livePaths.fishStartupConfig, prepared.fishStartupConfig, filesystem);
+  installManagedPath(plan, plan.sourcePaths.fishGreeting, plan.livePaths.fishGreeting, filesystem);
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @param {PreparedPlasmaInstall | PreparedCaelestiaInstall} prepared
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installTargetLayer(plan, prepared) {
+function installTargetLayer(plan, prepared, filesystem) {
   if (plan.target !== prepared.target) {
     throw new Error('Prepared desktop target does not match the live install plan');
   }
 
   if (prepared.target === 'plasma') {
-    installPlasmaLayer(plan, prepared);
+    installPlasmaLayer(plan, prepared, filesystem);
     return;
   }
 
-  installCaelestiaLayer(plan, prepared);
+  installCaelestiaLayer(plan, prepared, filesystem);
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @param {PreparedPlasmaInstall} prepared
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installPlasmaLayer(plan, prepared) {
-  installManagedPath(plan, plan.sourcePaths.kdeTyrianScheme, plan.livePaths.kdeTyrianScheme);
+function installPlasmaLayer(plan, prepared, filesystem) {
+  installManagedPath(
+    plan,
+    plan.sourcePaths.kdeTyrianScheme,
+    plan.livePaths.kdeTyrianScheme,
+    filesystem
+  );
   installManagedPath(
     plan,
     plan.sourcePaths.plasmaTyrianThemeRoot,
-    plan.livePaths.plasmaTyrianTheme
+    plan.livePaths.plasmaTyrianTheme,
+    filesystem
   );
-  installLookAndFeelPackage(plan);
-  writeFile(plan, plan.livePaths.kdeglobals, prepared.kdeglobals);
-  writeFile(plan, plan.livePaths.plasmarc, prepared.plasmarc);
-  writeFile(plan, plan.livePaths.screenLockerConfig, prepared.screenLockerConfig);
+  installLookAndFeelPackage(plan, filesystem);
+  writeFile(plan, plan.livePaths.kdeglobals, prepared.kdeglobals, filesystem);
+  writeFile(plan, plan.livePaths.plasmarc, prepared.plasmarc, filesystem);
+  writeFile(plan, plan.livePaths.screenLockerConfig, prepared.screenLockerConfig, filesystem);
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @param {PreparedCaelestiaInstall} prepared
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installCaelestiaLayer(plan, prepared) {
+function installCaelestiaLayer(plan, prepared, filesystem) {
   publishRuntimeFile(
     plan,
     plan.sourcePaths.caelestiaSchemeState,
-    plan.livePaths.caelestiaSchemeState
+    plan.livePaths.caelestiaSchemeState,
+    filesystem
   );
-  publishRuntimeFile(plan, plan.sourcePaths.hyprCurrentScheme, plan.livePaths.hyprCurrentScheme);
-  writeFile(plan, plan.livePaths.caelestiaSequences, prepared.caelestiaSequences);
+  publishRuntimeFile(
+    plan,
+    plan.sourcePaths.hyprCurrentScheme,
+    plan.livePaths.hyprCurrentScheme,
+    filesystem
+  );
+  writeFile(plan, plan.livePaths.caelestiaSequences, prepared.caelestiaSequences, filesystem);
 }
 
 /**
  * @param {LiveInstallPlan} plan
  * @param {string} sourcePath
  * @param {string} targetPath
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installManagedPath(plan, sourcePath, targetPath) {
+function installManagedPath(plan, sourcePath, targetPath, filesystem) {
   const verb = plan.mode === 'link' ? 'link' : 'copy';
 
   operation(plan.apply, `${verb} ${sourcePath} -> ${targetPath}`, () => {
-    installManagedPathWithMode(plan.mode, sourcePath, targetPath, { ownerRoot: plan.home });
+    requireHomeFilesystemCapability(filesystem).installManagedPath(
+      plan.mode,
+      sourcePath,
+      targetPath
+    );
   });
 }
 
@@ -1876,27 +2010,28 @@ function installManagedPath(plan, sourcePath, targetPath) {
  * @param {LiveInstallPlan} plan
  * @param {string} sourcePath
  * @param {string} targetPath
+ * @param {HomeFilesystemCapability | undefined} filesystem
  */
-function publishRuntimeFile(plan, sourcePath, targetPath) {
+function publishRuntimeFile(plan, sourcePath, targetPath, filesystem) {
   operation(plan.apply, `publish ${sourcePath} -> ${targetPath}`, () => {
-    installManagedPathWithMode('copy', sourcePath, targetPath, { ownerRoot: plan.home });
+    requireHomeFilesystemCapability(filesystem).installManagedPath('copy', sourcePath, targetPath);
   });
 }
 
 /**
  * @param {LiveInstallPlan} plan
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function installLookAndFeelPackage(plan) {
+function installLookAndFeelPackage(plan, filesystem) {
   operation(
     plan.apply,
     `materialize ${plan.sourcePaths.lookAndFeelTyrianRoot} -> ${plan.livePaths.lookAndFeelTyrian}`,
     () => {
-      installManagedPathWithMode(
+      requireHomeFilesystemCapability(filesystem).installManagedPath(
         'copy',
         plan.sourcePaths.lookAndFeelTyrianRoot,
-        plan.livePaths.lookAndFeelTyrian,
-        { ownerRoot: plan.home }
+        plan.livePaths.lookAndFeelTyrian
       );
     }
   );
@@ -1947,22 +2082,23 @@ function patchIniSectionContent(sectionContent, values) {
  * @param {LiveInstallPlan} plan
  * @param {string} filePath
  * @param {string} content
+ * @param {HomeFilesystemCapability | undefined} filesystem
  * @returns {void}
  */
-function writeFile(plan, filePath, content) {
+function writeFile(plan, filePath, content, filesystem) {
   operation(plan.apply, `write ${filePath}`, () => {
-    writeFileRaw(plan.home, filePath, content);
+    requireHomeFilesystemCapability(filesystem).writeText(filePath, content, {
+      followFinalSymlink: false,
+    });
   });
 }
 
-/**
- * @param {string} ownerRoot
- * @param {string} filePath
- * @param {string} content
- * @returns {void}
- */
-function writeFileRaw(ownerRoot, filePath, content) {
-  writeTextFileRaw(filePath, content, { followFinalSymlink: false, ownerRoot });
+/** @param {HomeFilesystemCapability | undefined} filesystem @returns {HomeFilesystemCapability} */
+function requireHomeFilesystemCapability(filesystem) {
+  if (filesystem === undefined) {
+    throw new Error('A live mutation requires its home filesystem capability');
+  }
+  return filesystem;
 }
 
 /**
