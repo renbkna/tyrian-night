@@ -383,8 +383,14 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.scripts.verify).toStartWith(
     'bun run check:tracked-generated && bun run build:generated'
   );
-  expect(workspace.scripts['check:tracked-generated']).toBe(
-    'bun run check:contracts && bun run check:vscode-themes && bun run check:zed-theme && bun run check:theme-preview'
+  const trackedGeneratedChecks = workspace.scripts['check:tracked-generated'].split(' && ');
+  expect(trackedGeneratedChecks).toEqual(
+    expect.arrayContaining([
+      'bun run check:contracts',
+      'bun run check:vscode-themes',
+      'bun run check:zed-theme',
+      'bun run check:theme-preview',
+    ])
   );
   expect(workspace.scripts['test:isolated']).toBe('bun test --isolate');
   for (const scriptName of [
@@ -409,6 +415,7 @@ test('workspace and product manifests have non-competing release ownership', () 
     'source/themes/*.json',
     'scripts/colorScience.mjs',
     'scripts/colorVision.mjs',
+    'scripts/vscodeProjection.mjs',
     'scripts/themePreview.mjs',
     'scripts/themeSources.mjs',
     'scripts/zedTheme.mjs',
@@ -421,6 +428,7 @@ test('workspace and product manifests have non-competing release ownership', () 
     expect(trackedGeneratedGate).toContain(pathspec);
   }
   expect(trackedGeneratedGate.match(/scripts\/zedTheme\.mjs/gu)).toHaveLength(2);
+  expect(trackedGeneratedGate.match(/scripts\/vscodeProjection\.mjs/gu)).toHaveLength(2);
   for (const { slug } of SOURCE_THEMES) {
     expect(trackedGeneratedGate).not.toContain(`apps/vscode/themes/${slug}.json`);
   }
@@ -434,6 +442,13 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(workspace.devDependencies).not.toHaveProperty('tsup');
   expect(workspace.scripts.verify).toContain('bun run check:generated');
   expect(workspace.scripts.verify).toContain('bun run check:rice');
+  const verifySteps = workspace.scripts.verify.split(' && ');
+  expect(verifySteps[0]).toBe('bun run check:tracked-generated');
+  expect(verifySteps.indexOf('bun run check:tracked-generated')).toBeLessThan(
+    verifySteps.indexOf('bun run build:generated')
+  );
+  expect(verifySteps).toContain('bun run test:isolated ./tests');
+  expect(fs.existsSync('tests/zedExtension.test.ts')).toBe(true);
   expect(workspace.scripts['build:generated']).toContain('bun run build:vscode-package-assets');
   expect(workspace.scripts['build:generated']).toContain('bun run build:theme-preview');
   expect(workspace.scripts['check:generated']).toContain('bun run check:vscode-package-assets');
@@ -531,7 +546,7 @@ test('workspace and product manifests have non-competing release ownership', () 
   expect(ciWorkflow).toContain('run: bun install --frozen-lockfile');
   expect(ciWorkflow).toContain('run: bun run package:vscode');
   expect(ciWorkflow).toContain('run: bun run --cwd apps/vscode package:artifact');
-  expect(ciWorkflow).toContain('run: bun run verify:desktop');
+  expect(ciWorkflow).toContain('run: bun run verify');
   expect(ciWorkflow).toContain('windows-latest');
   expect(ciWorkflow).toContain('macos-latest');
 });

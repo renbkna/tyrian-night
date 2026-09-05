@@ -1,4 +1,12 @@
-import type { IslandShellStatus, IslandShellWriteAccess } from './islandShell.js';
+import type {
+  IslandShellResult,
+  IslandShellStatus,
+  IslandShellWriteAccess,
+} from './islandShell.js';
+import type {
+  IslandUiApplySupervisionResult,
+  IslandUiRestoreSupervisionResult,
+} from './islandSupervisor.js';
 
 export const ISLAND_WIRE_PROTOCOL_VERSION = 2 as const;
 
@@ -31,6 +39,203 @@ export type IslandReconciliationStatus = {
   managed: boolean;
   active: boolean;
 };
+
+export type IslandApplyResult =
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'applied' | 'already-current';
+      physicalChanged: boolean;
+    }
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'permission-required';
+      physicalChanged: boolean;
+      reason: string;
+      writeAccess: { blockedPaths: Array<{ path: string; reason: string }> };
+    }
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'unsupported' | 'blocked';
+      physicalChanged: boolean;
+      reason: string;
+    };
+
+export type IslandRestoreResult =
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'restored' | 'already-classic';
+      physicalChanged: boolean;
+    }
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'permission-required';
+      physicalChanged: boolean;
+      reason: string;
+      failedAppRoots: Array<{ appRoot: string; reason: string }>;
+    }
+  | {
+      version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+      kind: 'blocked';
+      physicalChanged: boolean;
+      reason: string;
+      failedAppRoots: Array<{ appRoot: string; reason: string }>;
+    };
+
+export type IslandDirectRestoreResult = {
+  version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
+  active: false;
+  physicalChanged: boolean;
+  incompleteRecovery: boolean;
+};
+
+export function projectIslandApplyResult(
+  result: IslandUiApplySupervisionResult
+): IslandApplyResult {
+  const base = { version: ISLAND_WIRE_PROTOCOL_VERSION, physicalChanged: result.physicalChanged };
+  switch (result.kind) {
+    case 'applied':
+    case 'already-current':
+      return { ...base, kind: result.kind };
+    case 'permission-required':
+      return {
+        ...base,
+        kind: result.kind,
+        reason: result.reason,
+        writeAccess: { blockedPaths: result.writeAccess.blockedPaths },
+      };
+    case 'unsupported':
+    case 'blocked':
+      return { ...base, kind: result.kind, reason: result.reason };
+  }
+}
+
+export function projectIslandShellApplyResult(
+  result: Pick<IslandShellResult, 'changed' | 'physicalChanged'>
+): IslandApplyResult {
+  return {
+    version: ISLAND_WIRE_PROTOCOL_VERSION,
+    kind: result.changed ? 'applied' : 'already-current',
+    physicalChanged: result.physicalChanged,
+  };
+}
+
+export function projectIslandRestoreResult(
+  result: IslandUiRestoreSupervisionResult
+): IslandRestoreResult {
+  const base = { version: ISLAND_WIRE_PROTOCOL_VERSION, physicalChanged: result.physicalChanged };
+  switch (result.kind) {
+    case 'restored':
+    case 'already-classic':
+      return { ...base, kind: result.kind };
+    case 'permission-required':
+    case 'blocked':
+      return {
+        ...base,
+        kind: result.kind,
+        reason: result.reason,
+        failedAppRoots: result.failedAppRoots,
+      };
+  }
+}
+
+export function projectIslandDirectRestoreResult(
+  result: Pick<IslandShellResult, 'physicalChanged' | 'active' | 'incompleteRecovery'>
+): IslandDirectRestoreResult {
+  if (result.active) throw new Error('Direct Island restore result must be inactive.');
+  return {
+    version: ISLAND_WIRE_PROTOCOL_VERSION,
+    active: false,
+    physicalChanged: result.physicalChanged,
+    incompleteRecovery: result.incompleteRecovery,
+  };
+}
+
+export function decodeIslandApplyResult(value: unknown): IslandApplyResult {
+  const field = 'Island apply result';
+  const record = requireProtocolRecord(value, field);
+  requireProtocolVersion(record.version, field);
+  const kind = requireProtocolDiscriminant(
+    record.kind,
+    {
+      applied: 'applied',
+      'already-current': 'already-current',
+      'permission-required': 'permission-required',
+      unsupported: 'unsupported',
+      blocked: 'blocked',
+    },
+    `${field}.kind`
+  );
+  const physicalChanged = requireProtocolBoolean(
+    record.physicalChanged,
+    `${field}.physicalChanged`
+  );
+  if (kind === 'applied' || kind === 'already-current') {
+    return { version: ISLAND_WIRE_PROTOCOL_VERSION, kind, physicalChanged };
+  }
+  const reason = requireProtocolString(record.reason, `${field}.reason`);
+  if (kind !== 'permission-required') {
+    return { version: ISLAND_WIRE_PROTOCOL_VERSION, kind, physicalChanged, reason };
+  }
+  const writeAccess = requireProtocolRecord(record.writeAccess, `${field}.writeAccess`);
+  return {
+    version: ISLAND_WIRE_PROTOCOL_VERSION,
+    kind,
+    physicalChanged,
+    reason,
+    writeAccess: {
+      blockedPaths: validateBlockedPaths(
+        writeAccess.blockedPaths,
+        `${field}.writeAccess.blockedPaths`
+      ),
+    },
+  };
+}
+
+export function decodeIslandRestoreResult(value: unknown): IslandRestoreResult {
+  const field = 'Island restore result';
+  const record = requireProtocolRecord(value, field);
+  requireProtocolVersion(record.version, field);
+  const kind = requireProtocolDiscriminant(
+    record.kind,
+    {
+      restored: 'restored',
+      'already-classic': 'already-classic',
+      'permission-required': 'permission-required',
+      blocked: 'blocked',
+    },
+    `${field}.kind`
+  );
+  const physicalChanged = requireProtocolBoolean(
+    record.physicalChanged,
+    `${field}.physicalChanged`
+  );
+  if (kind === 'restored' || kind === 'already-classic') {
+    return { version: ISLAND_WIRE_PROTOCOL_VERSION, kind, physicalChanged };
+  }
+  return {
+    version: ISLAND_WIRE_PROTOCOL_VERSION,
+    kind,
+    physicalChanged,
+    reason: requireProtocolString(record.reason, `${field}.reason`),
+    failedAppRoots: validateFailedAppRoots(record.failedAppRoots, `${field}.failedAppRoots`),
+  };
+}
+
+export function decodeIslandDirectRestoreResult(value: unknown): IslandDirectRestoreResult {
+  const field = 'Island direct restore result';
+  const record = requireProtocolRecord(value, field);
+  requireProtocolVersion(record.version, field);
+  if (record.active !== false) throw invalidProtocolField(`${field}.active`);
+  return {
+    version: ISLAND_WIRE_PROTOCOL_VERSION,
+    active: false,
+    physicalChanged: requireProtocolBoolean(record.physicalChanged, `${field}.physicalChanged`),
+    incompleteRecovery: requireProtocolBoolean(
+      record.incompleteRecovery,
+      `${field}.incompleteRecovery`
+    ),
+  };
+}
 
 type IslandDoctorAccessInspection =
   | {
@@ -427,6 +632,21 @@ function validateBlockedPaths(
     return {
       path: requireProtocolString(record.path, `${field}[${index}].path`),
       reason: requireProtocolString(record.reason, `${field}[${index}].reason`),
+    };
+  });
+}
+
+function validateFailedAppRoots(
+  value: unknown,
+  field: string
+): Array<{ appRoot: string; reason: string }> {
+  if (!Array.isArray(value)) throw invalidProtocolField(field);
+  return value.map((entry, index) => {
+    const entryField = `${field}[${index}]`;
+    const record = requireProtocolRecord(entry, entryField);
+    return {
+      appRoot: requireProtocolString(record.appRoot, `${entryField}.appRoot`),
+      reason: requireProtocolString(record.reason, `${entryField}.reason`),
     };
   });
 }

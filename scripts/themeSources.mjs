@@ -1,16 +1,18 @@
 // @ts-check
 
-import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
+import { contrastRatio, hexToOklch, hueDistance } from './colorScience.mjs';
 import {
   loadThemeDefinitionContext,
   resolveThemeRecipe,
-  themeFamilyClassification,
   themeColor,
+  themeFamilyClassification,
   validateThemeRecipe,
 } from './themeDefinition.mjs';
-import { contrastRatio, hexToOklch, hueDistance } from './colorScience.mjs';
+import { auditThemePigmentPolicy, readThemePigmentPolicy } from './themePigmentPolicy.mjs';
+import { auditThemeSafety, readThemeSafetyContract } from './themeSafety.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -42,34 +44,151 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   sources: ReadonlyArray<ThemeSource>;
  * }} ThemeRepository
  */
+/**
+ * @typedef {{
+ *   definition: import('./themeDefinition.mjs').ThemeDefinitionContext;
+ *   root: string;
+ *   sources: ReadonlyArray<ThemeSource>;
+ * }} ThemeInspectionRepository
+ */
 
-export const SOURCE_THEMES = loadThemeRepository(repoRoot).sources;
+/** @typedef {{ mode: 'inspection' | 'production'; repository: ThemeInspectionRepository | ThemeRepository; recipe: import('./themeDefinition.mjs').ThemeRecipe; theme: import('./themeDefinition.mjs').ThemeDefinition }} ThemeSourceSnapshot */
+/** @typedef {{ mode: 'inspection' | 'production'; productionAdmitted: boolean; resolvedThemes: ReadonlyMap<string, import('./themeDefinition.mjs').ThemeDefinition> }} ThemeRepositorySnapshot */
+
+/** @type {WeakMap<object, ThemeRepositorySnapshot>} */
+const repositorySnapshots = new WeakMap();
+/** @type {WeakMap<object, ThemeSourceSnapshot>} */
+const sourceSnapshots = new WeakMap();
+
+const defaultInspectionRepository = loadThemeInspectionRepository(repoRoot);
 
 /**
- * Loads one role-membership context and every catalog member for a repository root.
+ * The default catalog is an immutable structural snapshot. Its palette remains
+ * unavailable to production callers until it is admitted against hard policy,
+ * so inspection tooling can still import this module for an invalid checkout.
+ */
+export const SOURCE_THEMES = defaultInspectionRepository.sources;
+
+/**
+ * Loads the immutable production snapshot for a repository root. The snapshot
+ * admits only themes that satisfy structural, family, safety, and pigment policy.
  * @param {string} [root]
  * @returns {ThemeRepository}
  */
 export function loadThemeRepository(root = repoRoot) {
-  const resolvedRoot = path.resolve(root);
-  const definition = loadThemeDefinitionContext(resolvedRoot);
-  const sources = Object.freeze(
-    readThemeSources(resolvedRoot, definition).map((source) => Object.freeze(source))
-  );
-
-  return Object.freeze({ definition, root: resolvedRoot, sources });
+  return /** @type {ThemeRepository} */ (loadThemeSnapshot(root, 'production'));
 }
 
 /**
+ * Loads an explicit inspect-only snapshot. It preserves the same structural and
+ * family validation as production, but does not reject a theme for hard rendered
+ * policy so the color-audit command can describe those violations.
  * @param {string} [root]
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @returns {ThemeSource[]}
+ * @returns {ThemeInspectionRepository}
  */
-export function readThemeSources(root = repoRoot, definition = loadThemeDefinitionContext(root)) {
-  const resolvedRoot = requireContextRoot(root, definition);
+export function loadThemeInspectionRepository(root = repoRoot) {
+  return /** @type {ThemeInspectionRepository} */ (loadThemeSnapshot(root, 'inspection'));
+}
+
+/**
+ * Establishes that a repository is the owner-issued snapshot admitted for
+ * production use. Consumers that receive an injectable repository must ask
+ * this boundary rather than treating matching roots as admission.
+ * @param {ThemeRepository | ThemeInspectionRepository} repository
+ * @returns {ThemeRepository}
+ */
+export function requireProductionThemeRepository(repository) {
+  const snapshot = repositorySnapshots.get(repository);
+  if (!snapshot?.productionAdmitted) {
+    throw new Error('Theme generation requires a production-admitted repository snapshot.');
+  }
+  return /** @type {ThemeRepository} */ (repository);
+}
+
+/**
+ * Convenience metadata read for consumers that do not need a resolved palette.
+ * A consumer that needs colors must retain the repository and call readSourceTheme.
+ * @param {string} [root]
+ * @returns {ReadonlyArray<ThemeSource>}
+ */
+export function readThemeSources(root = repoRoot) {
+  return loadThemeRepository(root).sources;
+}
+
+/**
+ * Reads a resolved palette from the production snapshot that created its source.
+ * This never re-reads an editable recipe from disk.
+ * @param {ThemeSource} source
+ * @param {ThemeRepository} [repository]
+ * @returns {import('./themeDefinition.mjs').ThemeDefinition}
+ */
+export function readSourceTheme(source, repository) {
+  if (repository === undefined) {
+    const sourceSnapshot = sourceSnapshots.get(source);
+    if (!sourceSnapshot || sourceSnapshot.repository !== defaultInspectionRepository) {
+      throw new Error(
+        'Theme reads outside the default catalog require an explicit repository snapshot.'
+      );
+    }
+    promoteDefaultThemeSnapshot();
+    return readProductionTheme(source, defaultInspectionRepository);
+  }
+  return readProductionTheme(source, repository);
+}
+
+/**
+ * Admits the already-captured default snapshot. This deliberately validates
+ * the same frozen definition and resolved themes that produced SOURCE_THEMES;
+ * it must never reopen editable recipes and match a replacement by slug.
+ */
+function promoteDefaultThemeSnapshot() {
+  const snapshot = repositorySnapshots.get(defaultInspectionRepository);
+  if (!snapshot) throw new Error('Default theme snapshot is unavailable.');
+  if (snapshot.productionAdmitted) return;
+
+  validateProductionThemePolicy(
+    defaultInspectionRepository.sources,
+    snapshot.resolvedThemes,
+    defaultInspectionRepository.root,
+    defaultInspectionRepository.definition
+  );
+  snapshot.productionAdmitted = true;
+}
+
+/**
+ * Reads a resolved palette from an explicit inspection snapshot.
+ * @param {ThemeSource} source
+ * @param {ThemeInspectionRepository} repository
+ * @returns {import('./themeDefinition.mjs').ThemeDefinition}
+ */
+export function readInspectionTheme(source, repository) {
+  return readSnapshotValue(source, repository, 'inspection', 'theme');
+}
+
+/**
+ * Reads the editable recipe captured by an explicit inspection snapshot.
+ * Production generation has no recipe reader.
+ * @param {ThemeSource} source
+ * @param {ThemeInspectionRepository} repository
+ * @returns {import('./themeDefinition.mjs').ThemeRecipe}
+ */
+export function readInspectionThemeRecipe(source, repository) {
+  return readSnapshotValue(source, repository, 'inspection', 'recipe');
+}
+
+/**
+ * @param {string} root
+ * @param {'inspection' | 'production'} mode
+ * @returns {ThemeInspectionRepository | ThemeRepository}
+ */
+function loadThemeSnapshot(root, mode) {
+  const resolvedRoot = path.resolve(root);
+  const definition = loadThemeDefinitionContext(resolvedRoot);
   const themesDirectory = path.join(resolvedRoot, 'source/themes');
   /** @type {Map<string, import('./themeDefinition.mjs').ThemeDefinition>} */
   const resolvedThemes = new Map();
+  /** @type {Map<string, import('./themeDefinition.mjs').ThemeRecipe>} */
+  const recipes = new Map();
   const themes = normalizeThemeCatalog(
     readJson(path.join(resolvedRoot, 'source/themeCatalog.json')),
     (slug) => {
@@ -82,8 +201,9 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
 
       const recipe = validateThemeRecipe(readJson(sourcePath), slug, definition);
       validateFrozenThemePalette(recipe, slug, definition);
-      const resolvedTheme = resolveThemeRecipe(recipe, slug, definition);
+      const resolvedTheme = deepFreeze(resolveThemeRecipe(recipe, slug, definition));
       resolvedThemes.set(slug, resolvedTheme);
+      recipes.set(slug, deepFreeze(recipe));
       return { name: resolvedTheme.name };
     },
     (slug) => themeFamilyClassification(definition, slug)
@@ -100,7 +220,24 @@ export function readThemeSources(root = repoRoot, definition = loadThemeDefiniti
   }
 
   validateThemeFamilyRelationships(themes, resolvedThemes, definition);
-  return themes;
+  if (mode === 'production') {
+    validateProductionThemePolicy(themes, resolvedThemes, resolvedRoot, definition);
+  }
+
+  const sources = Object.freeze(themes.map((source) => deepFreeze(source)));
+  const repository = Object.freeze({ definition, root: resolvedRoot, sources });
+  repositorySnapshots.set(repository, {
+    mode,
+    productionAdmitted: mode === 'production',
+    resolvedThemes,
+  });
+  for (const source of sources) {
+    const recipe = recipes.get(source.slug);
+    const theme = resolvedThemes.get(source.slug);
+    if (!recipe || !theme) throw new Error(`Theme '${source.slug}' was not resolved.`);
+    sourceSnapshots.set(source, { mode, repository, recipe, theme });
+  }
+  return repository;
 }
 
 /**
@@ -131,47 +268,37 @@ function validateFrozenThemePalette(recipe, slug, definition) {
 }
 
 /**
+ * @template {'recipe' | 'theme'} T
  * @param {ThemeSource} source
- * @param {string} [root]
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @returns {import('./themeDefinition.mjs').ThemeDefinition}
+ * @param {ThemeInspectionRepository | ThemeRepository} repository
+ * @param {'inspection' | 'production'} mode
+ * @param {T} property
+ * @returns {T extends 'recipe' ? import('./themeDefinition.mjs').ThemeRecipe : import('./themeDefinition.mjs').ThemeDefinition}
  */
-export function readSourceTheme(
-  source,
-  root = repoRoot,
-  definition = loadThemeDefinitionContext(root)
-) {
-  const resolvedRoot = requireContextRoot(root, definition);
-  return resolveThemeRecipe(
-    validateThemeRecipe(
-      readJson(path.join(resolvedRoot, source.sourcePath)),
-      source.slug,
-      definition
-    ),
-    source.slug,
-    definition
-  );
+function readSnapshotValue(source, repository, mode, property) {
+  const repositorySnapshot = repositorySnapshots.get(repository);
+  const sourceSnapshot = sourceSnapshots.get(source);
+  if (!repositorySnapshot || !sourceSnapshot || sourceSnapshot.repository !== repository) {
+    throw new Error('Theme source must come from the requested repository snapshot.');
+  }
+  if (repositorySnapshot.mode !== mode || sourceSnapshot.mode !== mode) {
+    throw new Error(`Theme ${mode} reads require a ${mode} repository snapshot.`);
+  }
+  return /** @type {any} */ (sourceSnapshot[property]);
 }
 
 /**
- * Reads the editable pigment recipe for tooling that deliberately operates at the owner boundary.
- * Generators should continue to consume readSourceTheme().
  * @param {ThemeSource} source
- * @param {string} [root]
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @returns {import('./themeDefinition.mjs').ThemeRecipe}
+ * @param {ThemeInspectionRepository | ThemeRepository} repository
+ * @returns {import('./themeDefinition.mjs').ThemeDefinition}
  */
-export function readSourceThemeRecipe(
-  source,
-  root = repoRoot,
-  definition = loadThemeDefinitionContext(root)
-) {
-  const resolvedRoot = requireContextRoot(root, definition);
-  return validateThemeRecipe(
-    readJson(path.join(resolvedRoot, source.sourcePath)),
-    source.slug,
-    definition
-  );
+function readProductionTheme(source, repository) {
+  const sourceSnapshot = sourceSnapshots.get(source);
+  if (!sourceSnapshot || sourceSnapshot.repository !== repository) {
+    throw new Error('Theme source must come from the requested repository snapshot.');
+  }
+  requireProductionThemeRepository(repository);
+  return sourceSnapshot.theme;
 }
 
 /**
@@ -355,15 +482,39 @@ function requireSingleThemeRole(themes, role) {
 }
 
 /**
+ * The production admission gate owns hard color policy. The inspect-only
+ * repository intentionally omits this step so diagnostics can explain an
+ * invalid editable palette without offering it to generators.
+ * @param {ReadonlyArray<ThemeSource>} sources
+ * @param {ReadonlyMap<string, import('./themeDefinition.mjs').ThemeDefinition>} themes
  * @param {string} root
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
  */
-function requireContextRoot(root, definition) {
-  const resolvedRoot = path.resolve(root);
-  if (definition.root !== resolvedRoot) {
-    throw new Error('Theme definition context does not belong to the requested repository root.');
+function validateProductionThemePolicy(sources, themes, root, definition) {
+  const safetyContract = readThemeSafetyContract(
+    path.join(root, 'source/themeSafetyContract.json'),
+    definition
+  );
+  const pigmentPolicy = readThemePigmentPolicy(
+    path.join(root, 'source/themePigmentPolicy.json'),
+    definition
+  );
+  for (const source of sources) {
+    const theme = themes.get(source.slug);
+    if (!theme) throw new Error(`Theme '${source.slug}' was not resolved.`);
+    const safetyViolations = auditThemeSafety(theme, safetyContract);
+    if (safetyViolations.length > 0) {
+      throw new Error(
+        `Theme '${source.slug}' violates theme safety policy: ${JSON.stringify(safetyViolations)}.`
+      );
+    }
+    const pigmentViolations = auditThemePigmentPolicy(theme, pigmentPolicy);
+    if (pigmentViolations.length > 0) {
+      throw new Error(
+        `Theme '${source.slug}' violates theme pigment policy: ${JSON.stringify(pigmentViolations)}.`
+      );
+    }
   }
-  return resolvedRoot;
 }
 
 /**
@@ -493,4 +644,13 @@ function requireMetricRange(value, range, owner) {
   ) {
     throw new Error(`${owner} ${value.toFixed(4)} is outside ${range.minimum}..${range.maximum}.`);
   }
+}
+
+/** @template T @param {T} value @returns {T} */
+function deepFreeze(value) {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }

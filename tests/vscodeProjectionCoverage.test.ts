@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 
-import { VSCODE_PROJECTION, bracketColor, uiColor } from '../scripts/themeDefinition.mjs';
+import { bracketColor, uiColor } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
+import { VSCODE_PROJECTION } from '../scripts/vscodeProjection.mjs';
 
 const REQUIRED_PUBLIC_KEYS = [
   'actionBar.toggledBackground',

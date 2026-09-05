@@ -1,41 +1,45 @@
 import crypto from 'node:crypto';
-import { constants as fsConstants, type Dirent } from 'node:fs';
+import { type Dirent, constants as fsConstants } from 'node:fs';
 import fs, { type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-
+import { rollbackFailedFileTransactionCore } from './islandFileTransactionCore.js';
 import {
   BACKUP_HTML_FILE_NAME,
   BACKUP_PRODUCT_FILE_NAME,
+  buildIslandPatchPaths,
+  buildIslandRegistryLockPath,
+  buildIslandRootLockPath,
+  buildManagedRootRecordPath,
+  buildManagedRootsDirectoryPath,
+  buildQuarantinedRootsDirectoryPath,
   ISLAND_CSS_FILE_NAME,
   ISLAND_MANIFEST_FILE_NAME,
   ISLAND_PATCH_CONTRACT_VERSION,
   ISLAND_PATCH_STRATEGY,
+  type IslandManifestV3,
+  type IslandPatchPaths,
+  isIslandManifestV3Shape,
   TYRIAN_MARKER_END,
   TYRIAN_MARKER_START,
   WORKBENCH_CHECKSUM_KEY,
   WORKBENCH_CSS_LINK,
-  buildIslandRegistryLockPath,
-  buildIslandRootLockPath,
-  buildIslandPatchPaths,
-  buildManagedRootRecordPath,
-  buildManagedRootsDirectoryPath,
-  buildQuarantinedRootsDirectoryPath,
-  isIslandManifestV3Shape,
-  type IslandManifestV3,
-  type IslandPatchPaths,
 } from './islandPatchContract.js';
-import { rollbackFailedFileTransactionCore } from './islandFileTransactionCore.js';
-import { readIslandApplyPlatformSupport } from './islandPlatform.js';
+import {
+  exchangeIslandPaths,
+  type IslandFileTransactionProtocol,
+  readIslandApplyPlatformSupport,
+  selectIslandFileTransactionProtocol,
+} from './islandPlatform.js';
 import { isIslandLockLifecycleFailure, withIslandProcessLock } from './islandProcessLock.js';
 import {
   IslandRegistryQuarantineError,
   moveRegistryRecordToQuarantineCore,
 } from './islandRegistryMutationCore.js';
 import {
+  type IslandMutationFacts,
   islandMutationFacts,
   mergeIslandMutationFacts,
   readIslandMutationFacts,
-  type IslandMutationFacts,
 } from './islandSupervisorCore.js';
 
 const TYRIAN_STYLESHEET_HREF_SOURCE = String.raw`(?:["'](?:[^"']*\/)?${escapeRegExp(ISLAND_CSS_FILE_NAME)}(?:[?#][^"']*)?["']|(?:[^\s"'=<>\x60]*\/)?${escapeRegExp(ISLAND_CSS_FILE_NAME)}(?:[?#][^\s"'=<>\x60]*)?)`;
@@ -46,15 +50,12 @@ const TYRIAN_STYLESHEET_PATTERN = new RegExp(
 );
 const ANY_FILE_GENERATION = Symbol('any-file-generation');
 const MANAGED_ROOT_RECORD_VERSION = 2 as const;
+type RegularFileIdentity =
+  | { kind: 'absent' }
+  | { kind: 'present'; device: string; inode: string; mode: number };
 type RegularFileGeneration =
   | { kind: 'absent' }
-  | {
-      kind: 'present';
-      device: string;
-      inode: string;
-      mode: number;
-      content: string;
-    };
+  | (Extract<RegularFileIdentity, { kind: 'present' }> & { content: string });
 class IslandDurablePublicationFailure extends Error {
   readonly publicationChanged = true;
 
@@ -99,7 +100,6 @@ export type IslandShellStatus = {
     | 'broken-backup'
     | 'checksum-mismatch';
   verificationPassed: boolean;
-  canSelfHeal: boolean;
   transaction: IslandTransactionHealth;
   restoreProof: 'none' | 'manifest-v3-backup-pair' | 'strip-tyrian-block';
   workbenchChecksum: string | undefined;
@@ -127,7 +127,7 @@ export type IslandTransactionHealth =
       kind: 'recoverable';
       recoverability: 'automatic';
       journalPath: string;
-      version: 4;
+      version: 4 | 5;
       phase: 'preparing' | 'prepared' | 'committing' | 'verified';
       reason: string;
     }
@@ -375,28 +375,71 @@ type PreparedFileMutation = FileMutation & {
   originalDevice: string | undefined;
   originalInode: string | undefined;
   originalContent: string | undefined;
-  retiredPath: string;
+  /** Existing files deleted by restore retain their original generation here. */
+  retiredPath: string | undefined;
+  /** Existing files replaced by apply exchange this desired candidate atomically. */
+  publicationPath: string | undefined;
   stagedPath: string | undefined;
 };
 
-type FileTransactionJournal = {
+type FileTransactionEntryV4 = {
+  filePath: string;
+  backupPath: string;
+  stagedPath: string | undefined;
+  existed: boolean;
+  originalChecksum: string | null;
+  desiredChecksum: string | null;
+  originalMode: number | undefined;
+  originalDevice: string | undefined;
+  originalInode: string | undefined;
+  retiredPath: string;
+};
+
+type FileTransactionEntryV5 = {
+  filePath: string;
+  backupPath: string;
+  stagedPath: string | undefined;
+  existed: boolean;
+  originalChecksum: string | null;
+  desiredChecksum: string | null;
+  originalMode: number | undefined;
+  originalDevice: string | undefined;
+  originalInode: string | undefined;
+  /**
+   * Before exchange this is a hardlink of stagedPath (desired). After an
+   * atomic exchange it is the retired original generation. It is deliberately
+   * not renamed: its inode establishes which side of the exchange survived.
+   */
+  publicationPath: string | undefined;
+  /** Only destructive sidecar removal uses a classic retired path. */
+  retiredPath: string | undefined;
+};
+
+type FileTransactionJournalV4 = {
   version: 4;
   id: string;
   appRoot: string;
   phase: 'preparing' | 'prepared' | 'committing' | 'verified';
-  entries: Array<{
-    filePath: string;
-    backupPath: string;
-    stagedPath: string | undefined;
-    existed: boolean;
-    originalChecksum: string | null;
-    desiredChecksum: string | null;
-    originalMode: number | undefined;
-    originalDevice: string | undefined;
-    originalInode: string | undefined;
-    retiredPath: string;
-  }>;
+  entries: FileTransactionEntryV4[];
 };
+
+type FileTransactionJournalV5 = {
+  version: 5;
+  id: string;
+  appRoot: string;
+  phase: 'preparing' | 'prepared' | 'committing' | 'verified';
+  recovery?: FileTransactionRecoveryAttempt;
+  entries: FileTransactionEntryV5[];
+};
+
+type FileTransactionRecoveryAttempt = {
+  id: string;
+  previousId?: string;
+  phase: 'fencing' | 'ready' | 'complete';
+};
+
+type FileTransactionJournal = FileTransactionJournalV4 | FileTransactionJournalV5;
+type FileTransactionEntry = FileTransactionJournal['entries'][number];
 
 type IslandPatchFileSystem = {
   appRoot: string;
@@ -404,6 +447,7 @@ type IslandPatchFileSystem = {
   appRootHandle: FileHandle;
   workbenchHandle: FileHandle;
   pathFor(filePath: string): string;
+  parentDescriptorFor(filePath: string): number;
   assertNamespaceCurrent(): Promise<void>;
   close(): Promise<void>;
 };
@@ -458,7 +502,7 @@ export async function applyIslandShellForPlatform(
   },
   platform: NodeJS.Platform
 ): Promise<IslandShellResult> {
-  assertIslandApplyPlatformSupported(platform);
+  const transactionProtocol = assertIslandApplyPlatformSupported(platform);
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   await assertPatchPathAncestorsOwned(appRoot);
@@ -507,6 +551,7 @@ export async function applyIslandShellForPlatform(
               );
             }
           },
+          transactionProtocol,
           fileSystem
         );
       } catch (error) {
@@ -569,6 +614,17 @@ export async function readIslandShellApplyReadinessForPlatform(
       reason: platformSupport.reason,
     };
   }
+  try {
+    selectIslandFileTransactionProtocol('apply', platform);
+  } catch (error) {
+    return {
+      kind: 'unsupported',
+      appRoot: options.appRoot,
+      status: undefined,
+      writeAccess: undefined,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
@@ -607,8 +663,12 @@ async function readIslandShellApplyReadinessUnlocked(options: {
         reason: status.transaction.reason,
       };
     }
-    const payload = await buildApplyPayload(options);
+    // Recovery owns the interrupted generation. Payload construction must use
+    // the recovered files, and is performed again inside the locked transition.
+    const payload =
+      status.transaction.kind === 'recoverable' ? undefined : await buildApplyPayload(options);
     const changed =
+      payload === undefined ||
       status.registrationState !== 'valid' ||
       status.desiredThemeId !== payload.desiredThemeId ||
       wouldApplyPayloadChange(payload);
@@ -711,8 +771,16 @@ export async function readIslandShellWriteAccess(options: {
       path: appRoot,
       existingMode: fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
     },
-    { path: paths.workbenchHtmlPath, existingMode: fsConstants.R_OK },
-    { path: paths.productJsonPath, existingMode: fsConstants.R_OK },
+    {
+      path: paths.workbenchHtmlPath,
+      existingMode: fsConstants.R_OK,
+      missingParentMode: fsConstants.W_OK | fsConstants.X_OK,
+    },
+    {
+      path: paths.productJsonPath,
+      existingMode: fsConstants.R_OK,
+      missingParentMode: fsConstants.W_OK | fsConstants.X_OK,
+    },
     ...(options.cssSourcePath
       ? [{ path: options.cssSourcePath, existingMode: fsConstants.R_OK }]
       : []),
@@ -784,6 +852,7 @@ export async function restoreIslandShell(options: {
   appRoot: string;
   registryHome?: string;
 }): Promise<IslandShellResult> {
+  const transactionProtocol = selectIslandFileTransactionProtocol('restore');
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
   await assertPatchPathAncestorsOwned(appRoot);
@@ -799,7 +868,13 @@ export async function restoreIslandShell(options: {
       const recordChanged = await publishManagedRootRecord(appRoot, null, canonicalOptions);
       let physicalChanged: boolean;
       try {
-        physicalChanged = await commitRestorePlan(state, plan, canonicalOptions, fileSystem);
+        physicalChanged = await commitRestorePlan(
+          state,
+          plan,
+          canonicalOptions,
+          transactionProtocol,
+          fileSystem
+        );
       } catch (error) {
         if (recordChanged || initializationChanged) {
           throw new IslandPartialMutationError(
@@ -828,17 +903,52 @@ export async function restoreIslandShell(options: {
         status,
       };
     },
-    async () => {
+    async (fileSystem) => {
+      await assertIslandRestoreTransactionProtocol(appRoot, transactionProtocol, fileSystem);
       await readRestorableManagedRootRegistration(appRoot, canonicalOptions);
     }
   );
 }
 
-function assertIslandApplyPlatformSupported(platform: NodeJS.Platform): void {
-  const support = readIslandApplyPlatformSupport(platform);
-  if (!support.supported) {
-    throw new IslandShellFailure('unsupported', support.reason);
+function assertIslandApplyPlatformSupported(
+  platform: NodeJS.Platform
+): IslandFileTransactionProtocol {
+  try {
+    return selectIslandFileTransactionProtocol('apply', platform);
+  } catch (error) {
+    throw new IslandShellFailure(
+      'unsupported',
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    );
   }
+}
+
+/**
+ * A V4 Restore cannot safely take ownership of a V5 exchange journal. Check
+ * the journal while holding the root lock, before durable desired state is
+ * initialized or changed, so the user can install GNU mv and retry intact.
+ */
+async function assertIslandRestoreTransactionProtocol(
+  appRoot: string,
+  transactionProtocol: IslandFileTransactionProtocol,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  if (transactionProtocol === 'v5') return;
+
+  await fileSystem?.assertNamespaceCurrent();
+  const transaction = await inspectIslandTransactionHealth(
+    buildIslandPatchPaths(appRoot).transactionJournalPath,
+    appRoot,
+    fileSystem
+  );
+  if (transaction.kind !== 'recoverable' || transaction.version !== 5) return;
+
+  throw new IslandShellFailure(
+    'unsupported',
+    `Tyrian Classic UI restore found a pending v5 transaction at '${transaction.journalPath}'. A Linux host with GNU mv --exchange and --no-copy is required to recover it before restore can continue.`,
+    { mutation: { incompleteRecovery: true } }
+  );
 }
 
 export async function restoreAllIslandShells(options?: {
@@ -920,6 +1030,7 @@ async function removeMissingManagedAppRoot(
     const recordPath = getManagedRootRecordPath(candidate.appRoot, environment);
     let current: RegistryRecordGeneration;
     try {
+      await settleDurableMetadataPublication(recordPath, 'managed app root record');
       current = await readRegistryRecordGeneration(
         recordPath,
         candidate.recordGeneration?.corrupt ?? false
@@ -1009,7 +1120,6 @@ async function readIslandShellStatusUnlocked(
         registered,
         classification: 'permission-denied',
         verificationPassed: false,
-        canSelfHeal: false,
         transaction: transaction ?? {
           kind: 'unavailable',
           recoverability: 'manual',
@@ -1046,7 +1156,6 @@ async function readIslandShellStatusUnlocked(
             ? 'transaction-pending'
             : 'missing',
         verificationPassed: false,
-        canSelfHeal: registered || visibleTransaction.kind === 'recoverable',
         transaction: visibleTransaction,
         restoreProof: 'none',
         workbenchChecksum: undefined,
@@ -1307,11 +1416,6 @@ async function inspectIslandRoot(
       registered,
       classification,
       verificationPassed,
-      canSelfHeal:
-        classification === 'transaction-pending' ||
-        classification === 'managed-only' ||
-        (hasTyrianEvidence &&
-          (classification === 'broken-backup' || classification === 'checksum-mismatch')),
       restoreProof,
       transaction,
       workbenchChecksum,
@@ -1534,6 +1638,7 @@ async function commitRestorePlan(
   state: IslandRootState,
   plan: RestorePlan,
   environment: IslandShellEnvironment,
+  transactionProtocol: IslandFileTransactionProtocol,
   fileSystem?: IslandPatchFileSystem
 ): Promise<boolean> {
   if (plan.kind === 'noop') {
@@ -1596,6 +1701,7 @@ async function commitRestorePlan(
         );
       }
     },
+    transactionProtocol,
     fileSystem
   );
 }
@@ -1939,7 +2045,7 @@ async function readManagedAppRootRegistration(
   const recordPath = getManagedRootRecordPath(appRoot, environment);
   let generation: RegularFileGeneration;
   try {
-    generation = await readRegularFileGeneration(recordPath, 'managed app root record');
+    generation = await readDurableMetadataGeneration(recordPath, 'managed app root record');
   } catch (error) {
     if (isPermissionError(error)) throw error;
     return {
@@ -2121,14 +2227,51 @@ async function readManagedRootRecordsFromDirectory(
     throw error;
   }
 
+  const recordNames = new Set<string>();
+  const temporaryNames = new Set<string>();
   for (const entry of entries) {
-    if (entry.name.startsWith('.tyrian-night-') && entry.name.endsWith('.tmp')) continue;
-    const recordPath = path.join(directoryPath, entry.name);
-    const validRecordName = /^[0-9a-f]{64}\.json$/u.test(entry.name);
-    const stats = await lstatIfExists(recordPath);
-    if (stats === undefined) continue;
+    if (/^[0-9a-f]{64}\.json$/u.test(entry.name)) recordNames.add(entry.name);
+    const retiredRecord = /^\.tyrian-night-retired-([0-9a-f]{64}\.json)\.tmp$/u.exec(entry.name);
+    if (retiredRecord?.[1] !== undefined) {
+      recordNames.add(retiredRecord[1]);
+      temporaryNames.add(entry.name);
+    }
+    const legacyRetiredRecord =
+      /^\.tyrian-night-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}-retired-([0-9a-f]{64}\.json)\.tmp$/iu.exec(
+        entry.name
+      );
+    if (legacyRetiredRecord?.[1] !== undefined) {
+      recordNames.add(legacyRetiredRecord[1]);
+      temporaryNames.add(entry.name);
+    }
+    if (entry.name.startsWith('.tyrian-night-') && entry.name.endsWith('.tmp')) {
+      temporaryNames.add(entry.name);
+    }
+  }
 
-    if (!validRecordName || !stats.isFile() || stats.isSymbolicLink()) {
+  for (const recordName of [...recordNames].sort()) {
+    const recordPath = path.join(directoryPath, recordName);
+    let stats: Awaited<ReturnType<typeof fs.lstat>> | undefined;
+    try {
+      const corruptCanonical = await readCorruptCanonicalRegistryStats(recordPath);
+      if (corruptCanonical !== undefined) {
+        stats = corruptCanonical;
+      } else {
+        const sourcePath = await durableMetadataSourcePath(recordPath);
+        if (sourcePath === undefined) continue;
+        stats = await fs.lstat(sourcePath);
+      }
+    } catch (error) {
+      const reason = `${recordPath}: ${error instanceof Error ? error.message : String(error)}`;
+      if (mode === 'diagnostic') {
+        accumulator.registryDiagnostics.push(reason);
+        continue;
+      }
+      throw error;
+    }
+
+    if (stats === undefined) continue;
+    if (!stats.isFile() || stats.isSymbolicLink()) {
       const reason = `Tyrian managed app root record is invalid at '${recordPath}'.`;
       if (mode === 'diagnostic') {
         accumulator.registryDiagnostics.push(reason);
@@ -2237,6 +2380,33 @@ async function readManagedRootRecordsFromDirectory(
     });
   }
 
+  for (const entry of entries) {
+    if (recordNames.has(entry.name) || temporaryNames.has(entry.name)) continue;
+    const recordPath = path.join(directoryPath, entry.name);
+    const validRecordName = /^[0-9a-f]{64}\.json$/u.test(entry.name);
+    const stats = await lstatIfExists(recordPath);
+    if (stats === undefined) continue;
+
+    if (!validRecordName || !stats.isFile() || stats.isSymbolicLink()) {
+      const reason = `Tyrian managed app root record is invalid at '${recordPath}'.`;
+      if (mode === 'diagnostic') {
+        accumulator.registryDiagnostics.push(reason);
+        continue;
+      }
+      if (mode === 'restore' && (stats.isFile() || stats.isSymbolicLink())) {
+        const generation = registryRecordGenerationFromStats(recordPath, stats, undefined, true);
+        await quarantineManagedRootRecordAndRecord(
+          recordPath,
+          environment,
+          generation,
+          accumulator
+        );
+        continue;
+      }
+      throw new Error(reason);
+    }
+  }
+
   accumulator.roots.sort((left, right) => left.appRoot.localeCompare(right.appRoot));
 }
 
@@ -2253,18 +2423,28 @@ async function readRegistryRecordGeneration(
   corrupt: boolean,
   identityPath = recordPath
 ): Promise<RegistryRecordGeneration> {
-  const before = await fs.lstat(recordPath);
+  const corruptCanonical = corrupt
+    ? await readCorruptCanonicalRegistryStats(recordPath)
+    : undefined;
+  if (corruptCanonical !== undefined) {
+    return registryRecordGenerationFromStats(identityPath, corruptCanonical, undefined, true);
+  }
+  const sourcePath =
+    (await durableMetadataSourcePath(recordPath, 'managed app root record')) ?? recordPath;
+  const before = await fs.lstat(sourcePath);
   let content: string | undefined;
   if (before.isFile() && !before.isSymbolicLink()) {
     try {
-      content = await fs.readFile(recordPath, 'utf8');
+      content = await fs.readFile(sourcePath, 'utf8');
     } catch (error) {
       if (!corrupt) throw error;
     }
   }
-  const after = await lstatIfExists(recordPath);
+  const after = await lstatIfExists(sourcePath);
+  const afterSourcePath = await durableMetadataSourcePath(recordPath, 'managed app root record');
   if (
     after === undefined ||
+    afterSourcePath !== sourcePath ||
     before.dev !== after.dev ||
     before.ino !== after.ino ||
     Number(before.mode) !== Number(after.mode)
@@ -2276,6 +2456,51 @@ async function readRegistryRecordGeneration(
     );
   }
   return registryRecordGenerationFromStats(identityPath, after, content, corrupt);
+}
+
+/**
+ * Registry quarantine moves corrupt symlink entries with rename and never
+ * follows them. Metadata publication remains regular-file-only: this narrow
+ * admission exists only when its fixed predecessor and candidate are absent,
+ * so corrupt canonical data cannot hide durable publication evidence.
+ */
+async function readCorruptCanonicalRegistryStats(
+  recordPath: string
+): Promise<Awaited<ReturnType<typeof fs.lstat>> | undefined> {
+  const paths = durableMetadataPaths(recordPath);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const before = await lstatIfExists(recordPath);
+    if (before === undefined || !before.isSymbolicLink()) return undefined;
+
+    await assertNoLegacyDurableRemovalEvidence(recordPath, 'managed app root record');
+    const [retired, candidate, after] = await Promise.all([
+      lstatIfExists(paths.retiredPath),
+      lstatIfExists(paths.candidatePath),
+      lstatIfExists(recordPath),
+    ]);
+    if (retired !== undefined || candidate !== undefined) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian managed app root record has durable publication evidence beside a corrupt canonical record at '${recordPath}'.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    await assertNoLegacyDurableRemovalEvidence(recordPath, 'managed app root record');
+    if (
+      after !== undefined &&
+      after.isSymbolicLink() &&
+      before.dev === after.dev &&
+      before.ino === after.ino &&
+      Number(before.mode) === Number(after.mode)
+    ) {
+      return after;
+    }
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian corrupt managed app root record changed during no-follow inspection at '${recordPath}'.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
 }
 
 function registryRecordGenerationFromStats(
@@ -2346,7 +2571,14 @@ async function quarantineManagedRootRecord(
   environment: IslandShellEnvironment | undefined,
   expected: RegistryRecordGeneration
 ): Promise<string> {
-  const current = await readRegistryRecordGeneration(recordPath, expected.corrupt);
+  const corruptCanonical = await readCorruptCanonicalRegistryStats(recordPath);
+  let current: RegistryRecordGeneration;
+  if (corruptCanonical === undefined) {
+    await settleDurableMetadataPublication(recordPath, 'managed app root record');
+    current = await readRegistryRecordGeneration(recordPath, expected.corrupt);
+  } else {
+    current = registryRecordGenerationFromStats(recordPath, corruptCanonical, undefined, true);
+  }
   if (!sameRegistryRecordGeneration(current, expected)) {
     throw new Error(`Tyrian managed app root record changed before quarantine at '${recordPath}'.`);
   }
@@ -2465,6 +2697,7 @@ async function commitFileTransaction(
   appRoot: string,
   mutations: FileMutation[],
   verify: () => Promise<void>,
+  transactionProtocol: IslandFileTransactionProtocol,
   admittedFileSystem?: IslandPatchFileSystem
 ): Promise<boolean> {
   if (admittedFileSystem !== undefined) {
@@ -2473,11 +2706,19 @@ async function commitFileTransaction(
       appRoot,
       mutations,
       verify,
+      transactionProtocol,
       admittedFileSystem
     );
   }
   if (process.platform !== 'linux') {
-    return commitFileTransactionWithFileSystem(journalPath, appRoot, mutations, verify, undefined);
+    return commitFileTransactionWithFileSystem(
+      journalPath,
+      appRoot,
+      mutations,
+      verify,
+      transactionProtocol,
+      undefined
+    );
   }
   const fileSystem = await openIslandPatchFileSystem(appRoot);
   try {
@@ -2486,6 +2727,7 @@ async function commitFileTransaction(
       appRoot,
       mutations,
       verify,
+      transactionProtocol,
       fileSystem
     );
   } finally {
@@ -2498,8 +2740,15 @@ async function commitFileTransactionWithFileSystem(
   appRoot: string,
   mutations: FileMutation[],
   verify: () => Promise<void>,
+  transactionProtocol: IslandFileTransactionProtocol,
   fileSystem: IslandPatchFileSystem | undefined
 ): Promise<boolean> {
+  if (transactionProtocol === 'v5' && fileSystem === undefined) {
+    throw new IslandShellFailure(
+      'unsupported',
+      'Atomic Island app-file publication requires the Linux descriptor-anchored filesystem.'
+    );
+  }
   const targets = new Set<string>();
   const prepared: PreparedFileMutation[] = [];
   const transactionId = crypto.randomUUID();
@@ -2547,6 +2796,13 @@ async function commitFileTransactionWithFileSystem(
       originalInode: stats === undefined ? undefined : String(stats.ino),
       originalContent: currentContent,
       retiredPath: transactionSiblingPath(mutation.filePath, transactionId, 'retired'),
+      publicationPath:
+        transactionProtocol === 'v5' &&
+        changed &&
+        stats !== undefined &&
+        mutation.content !== undefined
+          ? transactionSiblingPath(mutation.filePath, transactionId, 'publication')
+          : undefined,
       stagedPath:
         changed && mutation.content !== undefined
           ? transactionSiblingPath(mutation.filePath, transactionId, 'stage')
@@ -2561,7 +2817,13 @@ async function commitFileTransactionWithFileSystem(
     return false;
   }
 
-  let journal = buildFileTransactionJournal(appRoot, transactionId, 'preparing', changedMutations);
+  let journal = buildFileTransactionJournal(
+    appRoot,
+    transactionId,
+    'preparing',
+    changedMutations,
+    transactionProtocol
+  );
   let durableJournalGeneration: RegularFileGeneration = { kind: 'absent' };
   let physicalMutationAttempted = false;
   durableJournalGeneration = await writeDurableJsonFile(
@@ -2589,6 +2851,14 @@ async function commitFileTransactionWithFileSystem(
           await fs.chmod(stagedOperationPath, mutation.originalMode);
           await syncFile(stagedOperationPath);
         }
+      }
+
+      if (mutation.publicationPath !== undefined) {
+        const stagedPath = fileSystem?.pathFor(mutation.stagedPath!) ?? mutation.stagedPath!;
+        const publicationPath =
+          fileSystem?.pathFor(mutation.publicationPath) ?? mutation.publicationPath;
+        await fs.link(stagedPath, publicationPath);
+        await assertPublicationCandidateGeneration(mutation, fileSystem);
       }
     }
 
@@ -2669,8 +2939,45 @@ function buildFileTransactionJournal(
   appRoot: string,
   id: string,
   phase: FileTransactionJournal['phase'],
-  mutations: PreparedFileMutation[]
+  mutations: PreparedFileMutation[],
+  transactionProtocol: IslandFileTransactionProtocol
 ): FileTransactionJournal {
+  if (transactionProtocol === 'v5') {
+    return {
+      version: 5,
+      id,
+      appRoot,
+      phase,
+      entries: mutations.map(
+        ({
+          filePath,
+          backupPath,
+          stagedPath,
+          existed,
+          originalContent,
+          content,
+          originalMode,
+          originalDevice,
+          originalInode,
+          publicationPath,
+          retiredPath,
+        }) => ({
+          filePath,
+          backupPath,
+          stagedPath,
+          existed,
+          originalChecksum: checksumOrNull(originalContent),
+          desiredChecksum: checksumOrNull(content),
+          originalMode,
+          originalDevice,
+          originalInode,
+          publicationPath,
+          retiredPath: content === undefined ? retiredPath : undefined,
+        })
+      ),
+    };
+  }
+
   return {
     version: 4,
     id,
@@ -2698,7 +3005,7 @@ function buildFileTransactionJournal(
         originalMode,
         originalDevice,
         originalInode,
-        retiredPath,
+        retiredPath: retiredPath!,
       })
     ),
   };
@@ -2733,10 +3040,51 @@ async function publishPreparedMutation(
 ): Promise<void> {
   await assertPreparedMutationGeneration(mutation, fileSystem);
   const targetPath = fileSystem?.pathFor(mutation.filePath) ?? mutation.filePath;
-  const retiredPublicPath = mutation.retiredPath;
-  const retiredPath = fileSystem?.pathFor(retiredPublicPath) ?? retiredPublicPath;
+
+  if (mutation.publicationPath !== undefined) {
+    if (fileSystem === undefined) {
+      throw new IslandShellFailure(
+        'unsupported',
+        'Atomic Island app-file publication requires the Linux descriptor-anchored filesystem.'
+      );
+    }
+    await assertPublicationCandidateGeneration(mutation, fileSystem);
+    await fileSystem.assertNamespaceCurrent();
+    exchangeIslandPaths({
+      sourceParentDescriptor: fileSystem.parentDescriptorFor(mutation.publicationPath),
+      sourceLeaf: path.basename(mutation.publicationPath),
+      targetParentDescriptor: fileSystem.parentDescriptorFor(mutation.filePath),
+      targetLeaf: path.basename(mutation.filePath),
+    });
+    await fileSystem.assertNamespaceCurrent();
+
+    const [published, retired, staged] = await Promise.all([
+      readRegularFileGeneration(targetPath, `published transaction target '${mutation.filePath}'`),
+      readRegularFileGeneration(
+        fileSystem.pathFor(mutation.publicationPath),
+        `retired transaction generation '${mutation.publicationPath}'`
+      ),
+      readRegularFileGeneration(
+        fileSystem.pathFor(mutation.stagedPath!),
+        `staged transaction generation '${mutation.stagedPath}'`
+      ),
+    ]);
+    if (
+      !isOriginalPreparedMutationGeneration(retired, mutation) ||
+      !sameRegularFileGeneration(published, staged)
+    ) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian transaction target changed across the atomic publication boundary at '${mutation.filePath}'.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    return;
+  }
 
   if (mutation.existed) {
+    const retiredPublicPath = mutation.retiredPath!;
+    const retiredPath = fileSystem?.pathFor(retiredPublicPath) ?? retiredPublicPath;
     await fs.rename(targetPath, retiredPath);
     const [retiredContent, retiredStats] = await Promise.all([
       readTransactionTarget(retiredPath, mutation.filePath),
@@ -2769,6 +3117,45 @@ async function publishPreparedMutation(
         { cause: error, mutation: { externalDrift: true, incompleteRecovery: true } }
       );
     }
+  }
+}
+
+function isOriginalPreparedMutationGeneration(
+  generation: RegularFileGeneration,
+  mutation: Pick<
+    PreparedFileMutation,
+    'existed' | 'originalContent' | 'originalDevice' | 'originalInode' | 'originalMode'
+  >
+): boolean {
+  return generation.kind === 'absent'
+    ? !mutation.existed
+    : checksumOrNull(generation.content) === checksumOrNull(mutation.originalContent) &&
+        generation.device === mutation.originalDevice &&
+        generation.inode === mutation.originalInode &&
+        generation.mode === mutation.originalMode;
+}
+
+async function assertPublicationCandidateGeneration(
+  mutation: PreparedFileMutation,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  if (mutation.publicationPath === undefined || mutation.stagedPath === undefined) return;
+  const [publication, staged] = await Promise.all([
+    readRegularFileGeneration(
+      fileSystem?.pathFor(mutation.publicationPath) ?? mutation.publicationPath,
+      `publication candidate '${mutation.publicationPath}'`
+    ),
+    readRegularFileGeneration(
+      fileSystem?.pathFor(mutation.stagedPath) ?? mutation.stagedPath,
+      `staged transaction generation '${mutation.stagedPath}'`
+    ),
+  ]);
+  if (!sameRegularFileGeneration(publication, staged)) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian transaction publication candidate changed before exchange at '${mutation.filePath}'.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
   }
 }
 
@@ -2806,12 +3193,207 @@ async function rollbackFileTransaction(
     return false;
   }
 
-  return rollbackVersion4FileTransaction(journalPath, journal, fileSystem);
+  return journal.version === 4
+    ? rollbackVersion4FileTransaction(journalPath, journal, fileSystem)
+    : rollbackVersion5FileTransaction(journalPath, journal, fileSystem);
+}
+
+// Inspection and execution use this same generation evidence. Checksums alone
+// cannot distinguish our published inode from an external same-content replacement.
+type Version4RecoveryPlan = 'unchanged' | 'restore' | 'replace' | 'remove';
+type Version5RecoveryPlan = 'unchanged' | 'reverse-exchange' | 'restore-retired' | 'remove-created';
+
+async function planFileTransactionEntryRecovery(
+  version: FileTransactionJournal['version'],
+  entry: FileTransactionEntry,
+  fileSystem?: IslandPatchFileSystem
+): Promise<Version4RecoveryPlan | Version5RecoveryPlan> {
+  return version === 5
+    ? planVersion5FileTransactionEntryRecovery(entry as FileTransactionEntryV5, fileSystem)
+    : planVersion4FileTransactionEntryRecovery(entry as FileTransactionEntryV4, fileSystem);
+}
+
+async function planVersion4FileTransactionEntryRecovery(
+  entry: FileTransactionEntryV4,
+  fileSystem?: IslandPatchFileSystem
+): Promise<Version4RecoveryPlan> {
+  const targetPath = fileSystem?.pathFor(entry.filePath) ?? entry.filePath;
+  const retiredPath = fileSystem?.pathFor(entry.retiredPath) ?? entry.retiredPath;
+  const [current, retired] = await Promise.all([
+    readRegularFileGeneration(targetPath, `transaction target '${entry.filePath}'`),
+    readRegularFileGeneration(retiredPath, `transaction retired generation '${entry.retiredPath}'`),
+  ]);
+  if (retired.kind === 'present' && !isOriginalTransactionGeneration(retired, entry)) {
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian transaction retired generation changed at '${entry.retiredPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+  if (isOriginalTransactionGeneration(current, entry)) return 'unchanged';
+  if (current.kind === 'absent' && retired.kind === 'present') return 'restore';
+  if (
+    current.kind === 'present' &&
+    checksumOrNull(current.content) === entry.desiredChecksum &&
+    (retired.kind === 'present' || !entry.existed)
+  ) {
+    if (entry.stagedPath === undefined) {
+      throw new IslandShellFailure(
+        'corrupt',
+        `Tyrian transaction has no staged generation for '${entry.filePath}'.`
+      );
+    }
+    const staged = await readRegularFileGeneration(
+      fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath,
+      `transaction staged generation '${entry.stagedPath}'`
+    );
+    if (sameRegularFileGeneration(current, staged)) {
+      return retired.kind === 'present' ? 'replace' : 'remove';
+    }
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian transaction recovery found external drift at '${entry.filePath}' and left it untouched.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+async function planVersion5FileTransactionEntryRecovery(
+  entry: FileTransactionEntryV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<Version5RecoveryPlan> {
+  const targetPath = fileSystem?.pathFor(entry.filePath) ?? entry.filePath;
+  const target = await readRegularFileGeneration(
+    targetPath,
+    `transaction target '${entry.filePath}'`
+  );
+
+  if (entry.publicationPath !== undefined) {
+    if (entry.stagedPath === undefined) {
+      throw new IslandShellFailure(
+        'corrupt',
+        `Tyrian v5 transaction has no staged generation for '${entry.filePath}'.`,
+        { mutation: { incompleteRecovery: true } }
+      );
+    }
+    const [publication, staged] = await Promise.all([
+      readRegularFileGeneration(
+        fileSystem?.pathFor(entry.publicationPath) ?? entry.publicationPath,
+        `publication candidate '${entry.publicationPath}'`
+      ),
+      readRegularFileGeneration(
+        fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath,
+        `staged transaction generation '${entry.stagedPath}'`
+      ),
+    ]);
+    if (!isDesiredTransactionGeneration(staged, entry)) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 staged generation changed at '${entry.stagedPath}' and was left untouched.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    if (
+      isOriginalTransactionGeneration(target, entry) &&
+      sameRegularFileGeneration(publication, staged)
+    ) {
+      return 'unchanged';
+    }
+    if (
+      sameRegularFileGeneration(target, staged) &&
+      isOriginalTransactionGeneration(publication, entry)
+    ) {
+      return 'reverse-exchange';
+    }
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian v5 transaction recovery found external drift at '${entry.filePath}' and left every generation intact.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+
+  if (entry.desiredChecksum !== null) {
+    if (entry.stagedPath === undefined) {
+      throw new IslandShellFailure(
+        'corrupt',
+        `Tyrian v5 transaction has no staged generation for '${entry.filePath}'.`,
+        { mutation: { incompleteRecovery: true } }
+      );
+    }
+    const staged = await readRegularFileGeneration(
+      fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath,
+      `staged transaction generation '${entry.stagedPath}'`
+    );
+    if (!isDesiredTransactionGeneration(staged, entry)) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 staged generation changed at '${entry.stagedPath}' and was left untouched.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    if (target.kind === 'absent') return 'unchanged';
+    if (sameRegularFileGeneration(target, staged)) return 'remove-created';
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian v5 transaction recovery found external drift at '${entry.filePath}' and left it untouched.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+
+  if (entry.retiredPath === undefined) {
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian v5 transaction has no retired generation path for '${entry.filePath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+  const retired = await readRegularFileGeneration(
+    fileSystem?.pathFor(entry.retiredPath) ?? entry.retiredPath,
+    `transaction retired generation '${entry.retiredPath}'`
+  );
+  if (retired.kind === 'present' && !isOriginalTransactionGeneration(retired, entry)) {
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian transaction retired generation changed at '${entry.retiredPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+  if (isOriginalTransactionGeneration(target, entry)) return 'unchanged';
+  if (target.kind === 'absent' && retired.kind === 'present') return 'restore-retired';
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian v5 transaction recovery found external drift at '${entry.filePath}' and left it untouched.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+function isOriginalTransactionGeneration(
+  generation: RegularFileGeneration,
+  entry: Pick<
+    FileTransactionEntry,
+    'existed' | 'originalChecksum' | 'originalDevice' | 'originalInode' | 'originalMode'
+  >
+): boolean {
+  return generation.kind === 'absent'
+    ? !entry.existed
+    : checksumOrNull(generation.content) === entry.originalChecksum &&
+        generation.device === entry.originalDevice &&
+        generation.inode === entry.originalInode &&
+        generation.mode === entry.originalMode;
+}
+
+function isDesiredTransactionGeneration(
+  generation: RegularFileGeneration,
+  entry: Pick<FileTransactionEntry, 'desiredChecksum'>
+): generation is Extract<RegularFileGeneration, { kind: 'present' }> {
+  return (
+    generation.kind === 'present' && checksumOrNull(generation.content) === entry.desiredChecksum
+  );
 }
 
 async function rollbackVersion4FileTransaction(
   journalPath: string,
-  journal: FileTransactionJournal,
+  journal: FileTransactionJournalV4,
   fileSystem?: IslandPatchFileSystem
 ): Promise<boolean> {
   const failures: unknown[] = [];
@@ -2825,76 +3407,13 @@ async function rollbackVersion4FileTransaction(
         entry.stagedPath === undefined
           ? undefined
           : (fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath);
-      const retiredStats = await lstatIfExists(retiredPath);
-      const currentChecksum = checksumOrNull(
-        await readTransactionTarget(targetPath, entry.filePath)
-      );
-      const currentStats = await lstatIfExists(targetPath);
-
-      if (retiredStats !== undefined) {
-        const retiredChecksum = checksumOrNull(
-          await readTransactionTarget(retiredPath, entry.retiredPath)
-        );
-        if (
-          !retiredStats.isFile() ||
-          retiredStats.isSymbolicLink() ||
-          retiredChecksum !== entry.originalChecksum ||
-          String(retiredStats.dev) !== entry.originalDevice ||
-          String(retiredStats.ino) !== entry.originalInode ||
-          Number(retiredStats.mode) !== entry.originalMode
-        ) {
-          throw new IslandShellFailure(
-            'corrupt',
-            `Tyrian transaction retired generation changed at '${entry.retiredPath}'.`,
-            { mutation: { incompleteRecovery: true } }
-          );
-        }
-
-        if (currentChecksum === entry.originalChecksum) {
-          if (
-            currentStats !== undefined &&
-            currentStats.dev === retiredStats.dev &&
-            currentStats.ino === retiredStats.ino
-          ) {
-            continue;
-          }
-          throw new IslandShellFailure(
-            'blocked',
-            `Tyrian transaction recovery found a same-content replacement generation at '${entry.filePath}' and left it untouched.`,
-            { mutation: { externalDrift: true, incompleteRecovery: true } }
-          );
-        }
-        if (currentChecksum === null) {
-          try {
-            await fs.link(retiredPath, targetPath);
-          } catch (error) {
-            if (isAlreadyExistsError(error)) {
-              throw new IslandShellFailure(
-                'blocked',
-                `Tyrian transaction recovery observed a replacement generation at '${entry.filePath}' and left it untouched.`,
-                { cause: error, mutation: { externalDrift: true, incompleteRecovery: true } }
-              );
-            }
-            throw error;
-          }
-          physicalChanged = true;
-          continue;
-        }
-        if (currentChecksum !== entry.desiredChecksum) {
-          throw new IslandShellFailure(
-            'blocked',
-            `Tyrian transaction recovery found external drift at '${entry.filePath}' and left every generation untouched.`,
-            { mutation: { externalDrift: true, incompleteRecovery: true } }
-          );
-        }
-        if (currentChecksum !== null) {
-          if (stagedPath === undefined)
-            throw new IslandShellFailure(
-              'corrupt',
-              `Tyrian transaction has no staged generation for '${entry.filePath}'.`
-            );
-          await retireDesiredGeneration(entry, journal.id, targetPath, stagedPath, fileSystem);
-        }
+      const recovery = await planVersion4FileTransactionEntryRecovery(entry, fileSystem);
+      if (recovery === 'unchanged') continue;
+      if (recovery === 'replace' || recovery === 'remove') {
+        await retireDesiredGeneration(entry, journal.id, targetPath, stagedPath!, fileSystem);
+        physicalChanged = true;
+      }
+      if (recovery === 'restore' || recovery === 'replace') {
         try {
           await fs.link(retiredPath, targetPath);
         } catch (error) {
@@ -2908,41 +3427,7 @@ async function rollbackVersion4FileTransaction(
           throw error;
         }
         physicalChanged = true;
-        continue;
       }
-
-      if (currentChecksum === entry.originalChecksum) {
-        if (
-          (currentStats === undefined ? undefined : String(currentStats.dev)) ===
-            entry.originalDevice &&
-          (currentStats === undefined ? undefined : String(currentStats.ino)) ===
-            entry.originalInode &&
-          (currentStats === undefined ? undefined : Number(currentStats.mode)) ===
-            entry.originalMode
-        ) {
-          continue;
-        }
-        throw new IslandShellFailure(
-          'blocked',
-          `Tyrian transaction recovery found a same-content replacement generation at '${entry.filePath}' and left it untouched.`,
-          { mutation: { externalDrift: true, incompleteRecovery: true } }
-        );
-      }
-      if (!entry.existed && currentChecksum === entry.desiredChecksum && currentChecksum !== null) {
-        if (stagedPath === undefined)
-          throw new IslandShellFailure(
-            'corrupt',
-            `Tyrian transaction has no staged generation for '${entry.filePath}'.`
-          );
-        await retireDesiredGeneration(entry, journal.id, targetPath, stagedPath, fileSystem);
-        physicalChanged = true;
-        continue;
-      }
-      throw new IslandShellFailure(
-        'blocked',
-        `Tyrian transaction recovery found external drift at '${entry.filePath}' and left it untouched.`,
-        { mutation: { externalDrift: true, incompleteRecovery: true } }
-      );
     } catch (error) {
       failures.push(error);
     }
@@ -2977,8 +3462,566 @@ async function rollbackVersion4FileTransaction(
   return physicalChanged;
 }
 
+async function rollbackVersion5FileTransaction(
+  journalPath: string,
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<boolean> {
+  let recoveryJournal = journal;
+  if (journal.recovery?.phase === 'complete') {
+    await assertVersion5RecoveryComplete(journal, fileSystem);
+    await removeVersion5RecoveryCandidates(journal, fileSystem);
+    await removeTemporaryFilesBeforeJournal(journalPath, journal, fileSystem);
+    return false;
+  }
+
+  if (journal.entries.some(({ publicationPath }) => publicationPath !== undefined)) {
+    recoveryJournal = await beginVersion5RecoveryAttempt(journalPath, journal, fileSystem);
+  }
+
+  const failures: unknown[] = [];
+  let physicalChanged = false;
+
+  for (const entry of recoveryJournal.entries.toReversed()) {
+    try {
+      const recoveredEntry = version5RecoveryEntry(entry, recoveryJournal.recovery);
+      const recovery = await planVersion5FileTransactionEntryRecovery(recoveredEntry, fileSystem);
+      const targetPath = fileSystem?.pathFor(entry.filePath) ?? entry.filePath;
+      if (recovery === 'reverse-exchange') {
+        await reverseVersion5Publication(recoveredEntry, fileSystem);
+        physicalChanged = true;
+      } else if (recovery === 'remove-created') {
+        const stagedPath = fileSystem?.pathFor(entry.stagedPath!) ?? entry.stagedPath!;
+        await retireDesiredGeneration(entry, journal.id, targetPath, stagedPath, fileSystem);
+        physicalChanged = true;
+      } else if (recovery === 'restore-retired') {
+        const retiredPath = fileSystem?.pathFor(entry.retiredPath!) ?? entry.retiredPath!;
+        try {
+          await fs.link(retiredPath, targetPath);
+        } catch (error) {
+          if (isAlreadyExistsError(error)) {
+            throw new IslandShellFailure(
+              'blocked',
+              `Tyrian transaction recovery observed a replacement generation at '${entry.filePath}' and left it untouched.`,
+              { cause: error, mutation: { externalDrift: true, incompleteRecovery: true } }
+            );
+          }
+          throw error;
+        }
+        physicalChanged = true;
+      }
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  try {
+    await syncPatchMutationDirectories(
+      fileSystem,
+      recoveryJournal.entries.map(({ filePath }) => filePath)
+    );
+  } catch (error) {
+    failures.push(error);
+  }
+
+  if (failures.length > 0) {
+    throw new IslandShellFailure(
+      combineIslandFailureCodes(failures),
+      `Tyrian transaction recovery could not safely restore every target: ${failures
+        .map((failure) => (failure instanceof Error ? failure.message : String(failure)))
+        .join(' ')}`,
+      {
+        cause: new AggregateError(failures),
+        mutation: mergeIslandMutationFacts(
+          ...failures.map((failure) => readIslandMutationFacts(failure)),
+          { physicalChanged, incompleteRecovery: true }
+        ),
+      }
+    );
+  }
+
+  if (recoveryJournal.recovery !== undefined) {
+    recoveryJournal = await persistVersion5RecoveryAttempt(
+      journalPath,
+      recoveryJournal,
+      { ...recoveryJournal.recovery, phase: 'complete' },
+      fileSystem
+    );
+    await assertVersion5RecoveryComplete(recoveryJournal, fileSystem);
+    await removeVersion5RecoveryCandidates(recoveryJournal, fileSystem);
+  }
+  await removeTemporaryFilesBeforeJournal(journalPath, recoveryJournal, fileSystem);
+  return physicalChanged;
+}
+
+function version5RecoveryCandidatePath(entry: FileTransactionEntryV5, recoveryId: string): string {
+  return transactionSiblingPath(entry.filePath, recoveryId, 'recovery');
+}
+
+function version5RecoveryEntry(
+  entry: FileTransactionEntryV5,
+  recovery: FileTransactionRecoveryAttempt | undefined
+): FileTransactionEntryV5 {
+  if (entry.publicationPath === undefined) return entry;
+  if (recovery === undefined || (recovery.phase !== 'ready' && recovery.phase !== 'complete')) {
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian v5 transaction has no ready recovery source for '${entry.filePath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+  return { ...entry, publicationPath: version5RecoveryCandidatePath(entry, recovery.id) };
+}
+
+async function beginVersion5RecoveryAttempt(
+  journalPath: string,
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<FileTransactionJournalV5> {
+  if (fileSystem === undefined) {
+    throw new IslandShellFailure(
+      'unsupported',
+      'Tyrian v5 transaction recovery requires Linux descriptor-anchored fencing.',
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+
+  let recoveryJournal = journal;
+  const previousAttempt = journal.recovery;
+  if (previousAttempt?.phase === 'ready') {
+    await assertVersion5ReadyAttemptTopology(journal, fileSystem);
+    recoveryJournal = await persistVersion5RecoveryAttempt(
+      journalPath,
+      journal,
+      {
+        id: crypto.randomUUID(),
+        previousId: previousAttempt.id,
+        phase: 'fencing',
+      },
+      fileSystem
+    );
+  } else if (previousAttempt === undefined) {
+    recoveryJournal = await persistVersion5RecoveryAttempt(
+      journalPath,
+      journal,
+      { id: crypto.randomUUID(), phase: 'fencing' },
+      fileSystem
+    );
+  }
+
+  if (recoveryJournal.recovery?.phase !== 'fencing') {
+    throw new IslandShellFailure(
+      'corrupt',
+      `Tyrian v5 transaction has an invalid recovery phase at '${journalPath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+
+  await fenceVersion5RecoveryAttempt(recoveryJournal, fileSystem);
+  await syncPatchMutationDirectories(
+    fileSystem,
+    recoveryJournal.entries.map(({ filePath }) => filePath)
+  );
+  return persistVersion5RecoveryAttempt(
+    journalPath,
+    recoveryJournal,
+    { ...recoveryJournal.recovery, phase: 'ready' },
+    fileSystem
+  );
+}
+
+async function persistVersion5RecoveryAttempt(
+  journalPath: string,
+  journal: FileTransactionJournalV5,
+  recovery: FileTransactionRecoveryAttempt,
+  fileSystem?: IslandPatchFileSystem
+): Promise<FileTransactionJournalV5> {
+  const journalOperationPath = fileSystem?.pathFor(journalPath) ?? journalPath;
+  const generation = await readDurableMetadataGeneration(
+    journalOperationPath,
+    `transaction journal '${journalPath}'`
+  );
+  if (generation.kind !== 'present' || generation.content !== serializeDurableJson(journal)) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian v5 transaction journal changed before recovery state publication at '${journalPath}'.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+  const nextJournal: FileTransactionJournalV5 = { ...journal, recovery };
+  await writeDurableJsonFile(journalOperationPath, nextJournal, generation);
+  return nextJournal;
+}
+
+async function fenceVersion5RecoveryAttempt(
+  journal: FileTransactionJournalV5,
+  fileSystem: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery?.phase !== 'fencing') {
+    throw new IslandShellFailure(
+      'corrupt',
+      'Tyrian attempted to fence a v5 transaction without a fencing recovery state.',
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+
+  for (const entry of journal.entries) {
+    if (entry.publicationPath === undefined) continue;
+    const currentPublicPath = version5RecoveryCandidatePath(entry, recovery.id);
+    const priorPublicPath =
+      recovery.previousId === undefined
+        ? entry.publicationPath
+        : version5RecoveryCandidatePath(entry, recovery.previousId);
+    const [current, prior] = await Promise.all([
+      lstatIfExists(fileSystem.pathFor(currentPublicPath)),
+      lstatIfExists(fileSystem.pathFor(priorPublicPath)),
+    ]);
+
+    if (current !== undefined && prior !== undefined) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery found competing source generations for '${entry.filePath}' and left both untouched.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    if (current === undefined && prior === undefined) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery lost its fenced source for '${entry.filePath}'.`,
+        { mutation: { incompleteRecovery: true } }
+      );
+    }
+    if (current === undefined) {
+      // Rename revokes the old helper source before this owner inspects a
+      // candidate or plans a target. A delayed exchange now linearizes either
+      // before this rename or fails because its source name stays absent.
+      await fileSystem.assertNamespaceCurrent();
+      await fs.rename(fileSystem.pathFor(priorPublicPath), fileSystem.pathFor(currentPublicPath));
+      await fileSystem.assertNamespaceCurrent();
+    }
+
+    const [moved, retiredSource, originalSource] = await Promise.all([
+      readRegularFileGeneration(
+        fileSystem.pathFor(currentPublicPath),
+        `v5 fenced recovery source '${currentPublicPath}'`
+      ),
+      readRegularFileGeneration(
+        fileSystem.pathFor(priorPublicPath),
+        `v5 revoked recovery source '${priorPublicPath}'`
+      ),
+      recovery.previousId === undefined
+        ? Promise.resolve<RegularFileGeneration>({ kind: 'absent' })
+        : readRegularFileGeneration(
+            fileSystem.pathFor(entry.publicationPath),
+            `revoked publication source '${entry.publicationPath}'`
+          ),
+    ]);
+    if (retiredSource.kind !== 'absent' || originalSource.kind !== 'absent') {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery could not revoke a prior source for '${entry.filePath}'.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    await assertVersion5RecoveryCandidate(entry, moved, currentPublicPath, fileSystem);
+  }
+}
+
+async function assertVersion5RecoveryCandidate(
+  entry: FileTransactionEntryV5,
+  generation: RegularFileGeneration,
+  displayPath: string,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  if (isOriginalTransactionGeneration(generation, entry)) return;
+  if (entry.stagedPath !== undefined && isDesiredTransactionGeneration(generation, entry)) {
+    const staged = await readRegularFileGeneration(
+      fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath,
+      `staged transaction generation '${entry.stagedPath}'`
+    );
+    if (sameRegularFileGeneration(generation, staged)) return;
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian v5 recovery source changed at '${displayPath}' and was left untouched.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+/**
+ * Ready and complete attempts keep every older publisher name absent. Read
+ * again after settlement before cleanup so a prior diagnostic read can never
+ * authorize a later mutation.
+ */
+async function readVersion5RecoveryCandidateAfterRevocation(
+  entry: FileTransactionEntryV5,
+  recovery: FileTransactionRecoveryAttempt,
+  readCandidate: typeof readRegularFileGeneration,
+  fileSystem?: IslandPatchFileSystem
+): Promise<RegularFileGeneration> {
+  if (entry.publicationPath === undefined) return { kind: 'absent' };
+  const currentPath = version5RecoveryCandidatePath(entry, recovery.id);
+  const revokedPaths = [entry.publicationPath];
+  if (recovery.previousId !== undefined) {
+    revokedPaths.push(version5RecoveryCandidatePath(entry, recovery.previousId));
+  }
+  const [current, ...revoked] = await Promise.all([
+    readCandidate(
+      fileSystem?.pathFor(currentPath) ?? currentPath,
+      `v5 recovery source '${currentPath}'`
+    ),
+    ...revokedPaths.map((candidatePath) =>
+      readRegularFileGeneration(
+        fileSystem?.pathFor(candidatePath) ?? candidatePath,
+        `revoked publication source '${candidatePath}'`
+      )
+    ),
+  ]);
+  if (revoked.some((generation) => generation.kind !== 'absent')) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian v5 recovery found a resurrected source for '${entry.filePath}' and left it untouched.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+  return current;
+}
+
+async function assertVersion5ReadyAttemptTopology(
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery?.phase !== 'ready') {
+    throw new IslandShellFailure('corrupt', 'Tyrian v5 recovery has no ready source topology.', {
+      mutation: { incompleteRecovery: true },
+    });
+  }
+  for (const entry of journal.entries) {
+    if (entry.publicationPath === undefined) continue;
+    const current = await readVersion5RecoveryCandidateAfterRevocation(
+      entry,
+      recovery,
+      readRegularFileGeneration,
+      fileSystem
+    );
+    await assertVersion5RecoveryCandidate(
+      entry,
+      current,
+      version5RecoveryCandidatePath(entry, recovery.id),
+      fileSystem
+    );
+  }
+}
+
+/**
+ * A fencing record is durable before recovery reads any target. It admits
+ * exactly one source per entry: either a prior helper has already exchanged
+ * it, or the recovery rename has already revoked it. Doctor only inspects
+ * this topology; an owner completes the rename before it plans targets.
+ */
+async function assertVersion5FencingAttemptTopology(
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery?.phase !== 'fencing') {
+    throw new IslandShellFailure('corrupt', 'Tyrian v5 recovery has no fencing source topology.', {
+      mutation: { incompleteRecovery: true },
+    });
+  }
+
+  for (const entry of journal.entries) {
+    if (entry.publicationPath === undefined) continue;
+    const currentPath = version5RecoveryCandidatePath(entry, recovery.id);
+    const priorPath =
+      recovery.previousId === undefined
+        ? entry.publicationPath
+        : version5RecoveryCandidatePath(entry, recovery.previousId);
+    const [current, prior] = await Promise.all([
+      readRegularFileGeneration(
+        fileSystem?.pathFor(currentPath) ?? currentPath,
+        `v5 recovery source '${currentPath}'`
+      ),
+      readRegularFileGeneration(
+        fileSystem?.pathFor(priorPath) ?? priorPath,
+        `v5 recovery predecessor '${priorPath}'`
+      ),
+    ]);
+    if (current.kind !== 'absent' && prior.kind !== 'absent') {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery found competing source generations for '${entry.filePath}' and left both untouched.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    if (current.kind === 'absent' && prior.kind === 'absent') {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery lost its fenced source for '${entry.filePath}'.`,
+        { mutation: { incompleteRecovery: true } }
+      );
+    }
+    await assertVersion5RecoveryCandidate(
+      entry,
+      current.kind === 'absent' ? prior : current,
+      current.kind === 'absent' ? priorPath : currentPath,
+      fileSystem
+    );
+    if (recovery.previousId !== undefined) {
+      const original = await readRegularFileGeneration(
+        fileSystem?.pathFor(entry.publicationPath) ?? entry.publicationPath,
+        `revoked publication source '${entry.publicationPath}'`
+      );
+      if (original.kind !== 'absent') {
+        throw new IslandShellFailure(
+          'blocked',
+          `Tyrian v5 recovery found a resurrected publication source at '${entry.publicationPath}'.`,
+          { mutation: { externalDrift: true, incompleteRecovery: true } }
+        );
+      }
+    }
+  }
+}
+
+async function assertVersion5RecoveryComplete(
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery?.phase !== 'complete') {
+    throw new IslandShellFailure('corrupt', 'Tyrian v5 recovery is not marked complete.', {
+      mutation: { incompleteRecovery: true },
+    });
+  }
+  for (const entry of journal.entries) {
+    const target = await readRegularFileGeneration(
+      fileSystem?.pathFor(entry.filePath) ?? entry.filePath,
+      `recovered transaction target '${entry.filePath}'`
+    );
+    if (!isOriginalTransactionGeneration(target, entry)) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian v5 recovery target changed after restoration at '${entry.filePath}'.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
+    if (entry.publicationPath === undefined) continue;
+    const currentPath = version5RecoveryCandidatePath(entry, recovery.id);
+    const current = await readVersion5RecoveryCandidateAfterRevocation(
+      entry,
+      recovery,
+      readDurableMetadataGeneration,
+      fileSystem
+    );
+    if (current.kind !== 'absent') {
+      await assertVersion5DesiredRecoveryCandidate(entry, current, currentPath, fileSystem);
+    }
+  }
+}
+
+async function assertVersion5DesiredRecoveryCandidate(
+  entry: FileTransactionEntryV5,
+  generation: RegularFileGeneration,
+  displayPath: string,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  if (entry.stagedPath === undefined || !isDesiredTransactionGeneration(generation, entry)) {
+    throwUnexpectedTransactionEvidence(displayPath);
+  }
+  const staged = await readRegularFileGeneration(
+    fileSystem?.pathFor(entry.stagedPath) ?? entry.stagedPath,
+    `staged transaction generation '${entry.stagedPath}'`
+  );
+  if (!sameRegularFileGeneration(generation, staged))
+    throwUnexpectedTransactionEvidence(displayPath);
+}
+
+async function removeVersion5RecoveryCandidates(
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery?.phase !== 'complete') return;
+  for (const entry of journal.entries) {
+    if (entry.publicationPath === undefined) continue;
+    const sourcePath = version5RecoveryCandidatePath(entry, recovery.id);
+    const sourceOperationPath = fileSystem?.pathFor(sourcePath) ?? sourcePath;
+    await settleDurableMetadataPublication(
+      sourceOperationPath,
+      `v5 recovery source '${sourcePath}'`
+    );
+    const candidate = await readVersion5RecoveryCandidateAfterRevocation(
+      entry,
+      recovery,
+      readRegularFileGeneration,
+      fileSystem
+    );
+    if (candidate.kind === 'absent') continue;
+    if (fileSystem === undefined) {
+      throw new IslandShellFailure(
+        'unsupported',
+        `Tyrian v5 recovery cleanup requires Linux filesystem admission for '${entry.filePath}'.`,
+        { mutation: { incompleteRecovery: true } }
+      );
+    }
+    await assertVersion5DesiredRecoveryCandidate(entry, candidate, sourcePath, fileSystem);
+    await removeFileDurably(sourceOperationPath, { incompleteRecovery: true }, candidate);
+  }
+}
+
+async function reverseVersion5Publication(
+  entry: FileTransactionEntryV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  if (
+    fileSystem === undefined ||
+    entry.publicationPath === undefined ||
+    entry.stagedPath === undefined
+  ) {
+    throw new IslandShellFailure(
+      'unsupported',
+      `Tyrian v5 transaction recovery requires Linux atomic exchange for '${entry.filePath}'.`,
+      { mutation: { incompleteRecovery: true } }
+    );
+  }
+  await fileSystem.assertNamespaceCurrent();
+  exchangeIslandPaths({
+    sourceParentDescriptor: fileSystem.parentDescriptorFor(entry.publicationPath),
+    sourceLeaf: path.basename(entry.publicationPath),
+    targetParentDescriptor: fileSystem.parentDescriptorFor(entry.filePath),
+    targetLeaf: path.basename(entry.filePath),
+  });
+  await fileSystem.assertNamespaceCurrent();
+  const [target, publication, staged] = await Promise.all([
+    readRegularFileGeneration(
+      fileSystem.pathFor(entry.filePath),
+      `restored transaction target '${entry.filePath}'`
+    ),
+    readRegularFileGeneration(
+      fileSystem.pathFor(entry.publicationPath),
+      `publication candidate '${entry.publicationPath}'`
+    ),
+    readRegularFileGeneration(
+      fileSystem.pathFor(entry.stagedPath),
+      `staged transaction generation '${entry.stagedPath}'`
+    ),
+  ]);
+  if (
+    !isOriginalTransactionGeneration(target, entry) ||
+    !sameRegularFileGeneration(publication, staged)
+  ) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian v5 transaction changed across atomic recovery at '${entry.filePath}' and preserved every generation.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+}
+
 async function retireDesiredGeneration(
-  entry: FileTransactionJournal['entries'][number],
+  entry: FileTransactionEntry,
   transactionId: string,
   targetPath: string,
   stagedPath: string,
@@ -3032,6 +4075,24 @@ function checksumOrNull(content: string | undefined): string | null {
   return content === undefined ? null : sha256Base64(content);
 }
 
+async function inspectFileTransactionCleanup(
+  journal: FileTransactionJournal,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  for (const entry of journal.entries) {
+    for (const { kind, temporaryPath } of transactionTemporaryPaths(journal, entry)) {
+      await inspectOwnedTransactionTemporary(
+        transactionCleanupOperationPath(entry.filePath, temporaryPath, fileSystem),
+        temporaryPath,
+        journal,
+        entry,
+        kind,
+        'inspect'
+      );
+    }
+  }
+}
+
 async function removeTemporaryFilesBeforeJournal(
   journalPath: string,
   journal: FileTransactionJournal,
@@ -3040,21 +4101,14 @@ async function removeTemporaryFilesBeforeJournal(
   const temporaryDirectories = new Set<string>();
 
   for (const entry of journal.entries) {
-    for (const [kind, temporaryPath] of [
-      ['stage', entry.stagedPath],
-      ['backup', entry.backupPath],
-      ['retired', entry.retiredPath],
-      ['rollback', transactionSiblingPath(entry.filePath, journal.id, 'rollback')],
-    ] as const) {
-      if (temporaryPath !== undefined) {
-        const operationPath = transactionCleanupOperationPath(
-          entry.filePath,
-          temporaryPath,
-          fileSystem
-        );
-        await removeOwnedTransactionTemporary(operationPath, temporaryPath, entry, kind);
-        temporaryDirectories.add(path.dirname(temporaryPath));
-      }
+    for (const { kind, temporaryPath } of transactionTemporaryPaths(journal, entry)) {
+      const operationPath = transactionCleanupOperationPath(
+        entry.filePath,
+        temporaryPath,
+        fileSystem
+      );
+      await removeOwnedTransactionTemporary(operationPath, temporaryPath, journal, entry, kind);
+      temporaryDirectories.add(path.dirname(temporaryPath));
     }
   }
 
@@ -3069,11 +4123,16 @@ async function removeTemporaryFilesBeforeJournal(
     patchDirectories.map((directory) => path.join(directory, '.'))
   );
   const journalOperationPath = fileSystem?.pathFor(journalPath) ?? journalPath;
-  const journalGeneration = await readOwnedTransactionTemporaryGeneration(
+  const journalGeneration = await settleDurableMetadataPublication(
     journalOperationPath,
-    journalPath,
-    sha256Base64(serializeDurableJson(journal))
+    `transaction journal '${journalPath}'`
   );
+  if (
+    journalGeneration.kind === 'present' &&
+    checksumOrNull(journalGeneration.content) !== sha256Base64(serializeDurableJson(journal))
+  ) {
+    throwUnexpectedTransactionEvidence(journalPath);
+  }
   await removeFileDurably(journalOperationPath, { incompleteRecovery: true }, journalGeneration);
 }
 
@@ -3089,63 +4148,166 @@ function transactionCleanupOperationPath(
   if (belongsToPatchSession) return fileSystem.pathFor(temporaryPath);
   throw new IslandShellFailure(
     'corrupt',
-    `Tyrian v4 transaction cleanup target escapes its admitted filesystem at '${targetPath}'.`,
+    `Tyrian transaction cleanup target escapes its admitted filesystem at '${targetPath}'.`,
     { mutation: { incompleteRecovery: true } }
   );
+}
+
+type TransactionTemporaryKind = 'stage' | 'backup' | 'retired' | 'publication' | 'rollback';
+type TransactionTemporaryPolicy = 'disposable' | 'sealed' | 'impossible';
+
+function transactionTemporaryPaths(
+  journal: FileTransactionJournal,
+  entry: FileTransactionEntry
+): Array<{ kind: TransactionTemporaryKind; temporaryPath: string }> {
+  const paths: Array<{ kind: TransactionTemporaryKind; temporaryPath: string }> = [];
+
+  if (journal.version === 4) {
+    paths.push({ kind: 'retired', temporaryPath: (entry as FileTransactionEntryV4).retiredPath });
+  } else {
+    const version5Entry = entry as FileTransactionEntryV5;
+    // A prepared v5 publication is a hardlink to stage. Dispose it while
+    // stage still exists so the proof survives recovery cleanup.
+    if (version5Entry.publicationPath !== undefined) {
+      paths.push({ kind: 'publication', temporaryPath: version5Entry.publicationPath });
+    }
+    if (version5Entry.retiredPath !== undefined) {
+      paths.push({ kind: 'retired', temporaryPath: version5Entry.retiredPath });
+    }
+  }
+
+  paths.push({
+    kind: 'rollback',
+    temporaryPath: transactionSiblingPath(entry.filePath, journal.id, 'rollback'),
+  });
+  if (entry.backupPath !== undefined) {
+    paths.push({ kind: 'backup', temporaryPath: entry.backupPath });
+  }
+  if (entry.stagedPath !== undefined) {
+    paths.push({ kind: 'stage', temporaryPath: entry.stagedPath });
+  }
+
+  return paths;
 }
 
 async function removeOwnedTransactionTemporary(
   operationPath: string,
   displayPath: string,
-  entry: FileTransactionJournal['entries'][number],
-  kind: 'stage' | 'backup' | 'retired' | 'rollback'
+  journal: FileTransactionJournal,
+  entry: FileTransactionEntry,
+  kind: TransactionTemporaryKind
 ): Promise<void> {
-  const expectedChecksum =
-    kind === 'stage' || kind === 'rollback' ? entry.desiredChecksum : entry.originalChecksum;
-  const generation = await readOwnedTransactionTemporaryGeneration(
+  await settleDurableMetadataPublication(
+    operationPath,
+    `transaction cleanup evidence '${displayPath}'`
+  );
+  const generation = await inspectOwnedTransactionTemporary(
     operationPath,
     displayPath,
-    expectedChecksum
+    journal,
+    entry,
+    kind,
+    'remove'
   );
-  if (generation.kind === 'absent') return;
-  if (
-    kind === 'retired' &&
-    (generation.device !== entry.originalDevice ||
-      generation.inode !== entry.originalInode ||
-      generation.mode !== entry.originalMode)
-  ) {
+  if (generation.kind !== 'absent') {
+    await removeFileDurably(operationPath, { incompleteRecovery: true }, generation);
+  }
+}
+
+async function inspectOwnedTransactionTemporary(
+  operationPath: string,
+  displayPath: string,
+  journal: FileTransactionJournal,
+  entry: FileTransactionEntry,
+  kind: TransactionTemporaryKind,
+  purpose: 'inspect' | 'remove'
+): Promise<RegularFileGeneration> {
+  const generation = await readDurableMetadataGeneration(
+    operationPath,
+    `transaction cleanup evidence '${displayPath}'`
+  );
+  if (generation.kind === 'absent') return generation;
+
+  const policy = transactionTemporaryPolicy(journal, kind);
+  if (policy === 'disposable') return generation;
+  if (policy === 'impossible') {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian transaction found impossible ${kind} evidence while its preparing phase owns no target mutation at '${displayPath}'.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+
+  if (journal.version === 5 && kind === 'publication') {
+    const version5Entry = entry as FileTransactionEntryV5;
+    const expectsOriginal =
+      journal.phase === 'verified' ||
+      (purpose === 'inspect' &&
+        journal.phase === 'committing' &&
+        isOriginalTransactionGeneration(generation, version5Entry));
+    if (expectsOriginal) {
+      if (!isOriginalTransactionGeneration(generation, version5Entry)) {
+        throwUnexpectedTransactionEvidence(displayPath);
+      }
+      return generation;
+    }
+    if (
+      !isDesiredTransactionGeneration(generation, version5Entry) ||
+      version5Entry.stagedPath === undefined
+    ) {
+      throwUnexpectedTransactionEvidence(displayPath);
+    }
+    const staged = await readDurableMetadataGeneration(
+      path.join(path.dirname(operationPath), path.basename(version5Entry.stagedPath)),
+      `staged transaction generation '${version5Entry.stagedPath}'`
+    );
+    if (!sameRegularFileGeneration(generation, staged))
+      throwUnexpectedTransactionEvidence(displayPath);
+    return generation;
+  }
+
+  const expectedChecksum =
+    kind === 'stage' || kind === 'rollback' ? entry.desiredChecksum : entry.originalChecksum;
+  if (checksumOrNull(generation.content) !== expectedChecksum) {
+    throwUnexpectedTransactionEvidence(displayPath);
+  }
+  if (kind === 'retired' && !isOriginalTransactionGeneration(generation, entry)) {
     throw new IslandShellFailure(
       'blocked',
       `Tyrian transaction cleanup found a replacement retired generation at '${displayPath}' and left it untouched.`,
       { mutation: { externalDrift: true, incompleteRecovery: true } }
     );
   }
-  await removeFileDurably(operationPath, { incompleteRecovery: true }, generation);
+  return generation;
 }
 
-async function readOwnedTransactionTemporaryGeneration(
-  operationPath: string,
-  displayPath: string,
-  expectedChecksum: string | null | undefined
-): Promise<RegularFileGeneration> {
-  const generation = await readRegularFileGeneration(
-    operationPath,
-    `transaction cleanup evidence '${displayPath}'`
+/**
+ * A preparing journal is durable before any target mutation. Its UUID-named
+ * staging files may therefore be incomplete if the writer died mid-write and
+ * are disposable. Once prepared is durable, each artifact becomes evidence
+ * that must still match the sealed transaction generation.
+ */
+function transactionTemporaryPolicy(
+  journal: FileTransactionJournal,
+  kind: TransactionTemporaryKind
+): TransactionTemporaryPolicy {
+  if (journal.phase !== 'preparing') return 'sealed';
+  if (kind === 'retired' || kind === 'rollback') return 'impossible';
+  return 'disposable';
+}
+
+function throwUnexpectedTransactionEvidence(displayPath: string): never {
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian transaction cleanup found replacement evidence at '${displayPath}' and left it untouched.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
   );
-  if (generation.kind === 'present' && checksumOrNull(generation.content) !== expectedChecksum) {
-    throw new IslandShellFailure(
-      'blocked',
-      `Tyrian transaction cleanup found replacement evidence at '${displayPath}' and left it untouched.`,
-      { mutation: { externalDrift: true, incompleteRecovery: true } }
-    );
-  }
-  return generation;
 }
 
 function transactionSiblingPath(
   filePath: string,
   transactionId: string,
-  kind: 'backup' | 'stage' | 'restore' | 'retired' | 'rollback'
+  kind: 'backup' | 'stage' | 'restore' | 'retired' | 'publication' | 'recovery' | 'rollback'
 ): string {
   return path.join(
     path.dirname(filePath),
@@ -3161,7 +4323,7 @@ async function withIslandRootLock<T>(
     recoveryPhysicalChanged: boolean,
     fileSystem: IslandPatchFileSystem | undefined
   ) => Promise<T>,
-  readinessGate?: () => Promise<void>
+  readinessGate?: (fileSystem: IslandPatchFileSystem | undefined) => Promise<void>
 ): Promise<T> {
   await assertPatchPathAncestorsOwned(appRoot);
   const fileSystem =
@@ -3175,7 +4337,7 @@ async function withIslandRootLock<T>(
       let recoveryPhysicalChanged = false;
       try {
         const initialization = await withRegistryLock(environment, async () => {
-          await readinessGate?.();
+          await readinessGate?.(fileSystem);
           await fileSystem?.assertNamespaceCurrent();
           const changed = await initializeManagedRootsForMutationUnlocked(environment);
           return islandMutationFacts({ registryChanged: changed });
@@ -3242,19 +4404,14 @@ async function recoverFileTransaction(
   fileSystem?: IslandPatchFileSystem
 ): Promise<boolean> {
   const journalOperationPath = fileSystem?.pathFor(journalPath) ?? journalPath;
-  const journalStats = await lstatIfExists(journalOperationPath);
-  if (journalStats !== undefined && (!journalStats.isFile() || journalStats.isSymbolicLink())) {
-    throw new IslandShellFailure(
-      'corrupt',
-      `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
-      { mutation: { incompleteRecovery: true } }
-    );
-  }
-  const content = await readTextFileIfExists(journalOperationPath);
-
-  if (content === undefined) {
+  const journalGeneration = await settleDurableMetadataPublication(
+    journalOperationPath,
+    `transaction journal '${journalPath}'`
+  );
+  if (journalGeneration.kind === 'absent') {
     return false;
   }
+  const content = journalGeneration.content;
 
   let journal: FileTransactionJournal;
   try {
@@ -3281,21 +4438,16 @@ async function inspectIslandTransactionHealth(
   fileSystem?: IslandPatchFileSystem
 ): Promise<IslandTransactionHealth> {
   const journalOperationPath = fileSystem?.pathFor(journalPath) ?? journalPath;
-  const journalStats = await lstatIfExists(journalOperationPath);
-  if (journalStats === undefined) return { kind: 'clean', recoverability: 'none' };
-  if (!journalStats.isFile() || journalStats.isSymbolicLink()) {
-    return {
-      kind: 'corrupt',
-      recoverability: 'manual',
-      journalPath,
-      reason: `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
-    };
-  }
-
+  let journalGeneration: RegularFileGeneration;
   let journal: FileTransactionJournal;
   try {
+    journalGeneration = await readDurableMetadataGeneration(
+      journalOperationPath,
+      `transaction journal '${journalPath}'`
+    );
+    if (journalGeneration.kind === 'absent') return { kind: 'clean', recoverability: 'none' };
     journal = parseFileTransactionJournal(
-      await fs.readFile(journalOperationPath, 'utf8'),
+      journalGeneration.content,
       journalPath,
       islandTransactionAllowedTargets(appRoot),
       appRoot
@@ -3310,45 +4462,26 @@ async function inspectIslandTransactionHealth(
     };
   }
 
-  if (journal.phase === 'committing') {
-    for (const entry of journal.entries) {
-      let currentChecksum: string | null;
-      try {
-        currentChecksum = checksumOrNull(await readTransactionTarget(entry.filePath));
-      } catch (error) {
-        return {
-          kind: 'corrupt',
-          recoverability: 'manual',
-          journalPath,
-          reason: error instanceof Error ? error.message : String(error),
-        };
-      }
-      if (currentChecksum !== entry.originalChecksum && currentChecksum !== entry.desiredChecksum) {
-        return {
-          kind: 'external-drift',
-          recoverability: 'manual',
-          journalPath,
-          reason: `Tyrian transaction recovery found external drift at '${entry.filePath}' and will leave it untouched.`,
-        };
-      }
-
-      if (currentChecksum === entry.desiredChecksum && entry.existed) {
-        const backupStats = await lstatIfExists(entry.backupPath);
-        if (
-          backupStats === undefined ||
-          !backupStats.isFile() ||
-          backupStats.isSymbolicLink() ||
-          checksumOrNull(await fs.readFile(entry.backupPath, 'utf8')) !== entry.originalChecksum
-        ) {
-          return {
-            kind: 'corrupt',
-            recoverability: 'manual',
-            journalPath,
-            reason: `Tyrian file transaction recovery has no trustworthy backup at '${entry.backupPath}'.`,
-          };
+  try {
+    if (journal.phase === 'committing') {
+      if (journal.version === 5 && journal.recovery !== undefined) {
+        await inspectVersion5RecoveryAttempt(journal, fileSystem);
+      } else {
+        for (const entry of journal.entries) {
+          await planFileTransactionEntryRecovery(journal.version, entry, fileSystem);
         }
       }
     }
+    await inspectFileTransactionCleanup(journal, fileSystem);
+  } catch (error) {
+    if (isPermissionError(error)) throw error;
+    const failure = describeIslandShellFailure(error);
+    return {
+      kind: failure.code === 'blocked' ? 'external-drift' : 'corrupt',
+      recoverability: 'manual',
+      journalPath,
+      reason: failure.reason,
+    };
   }
 
   return {
@@ -3361,6 +4494,34 @@ async function inspectIslandTransactionHealth(
   };
 }
 
+/**
+ * Read-only Doctor never revokes a publication source. A fencing record is
+ * therefore advisory until a lock owner resumes it, while a ready record has
+ * already revoked every helper source and can safely plan target recovery.
+ */
+async function inspectVersion5RecoveryAttempt(
+  journal: FileTransactionJournalV5,
+  fileSystem?: IslandPatchFileSystem
+): Promise<void> {
+  const recovery = journal.recovery;
+  if (recovery === undefined) return;
+  if (recovery.phase === 'fencing') {
+    await assertVersion5FencingAttemptTopology(journal, fileSystem);
+    return;
+  }
+  if (recovery.phase === 'ready') {
+    await assertVersion5ReadyAttemptTopology(journal, fileSystem);
+    for (const entry of journal.entries) {
+      await planVersion5FileTransactionEntryRecovery(
+        version5RecoveryEntry(entry, recovery),
+        fileSystem
+      );
+    }
+    return;
+  }
+  await assertVersion5RecoveryComplete(journal, fileSystem);
+}
+
 async function tryReadFileTransactionJournal(
   journalPath: string,
   allowedTargets: ReadonlySet<string>,
@@ -3368,21 +4529,16 @@ async function tryReadFileTransactionJournal(
   fileSystem?: IslandPatchFileSystem
 ): Promise<FileTransactionJournal | undefined> {
   const journalOperationPath = fileSystem?.pathFor(journalPath) ?? journalPath;
-  const journalStats = await lstatIfExists(journalOperationPath);
-  if (journalStats !== undefined && (!journalStats.isFile() || journalStats.isSymbolicLink())) {
-    throw new IslandShellFailure(
-      'corrupt',
-      `Tyrian file transaction journal is not a regular file at '${journalPath}'.`,
-      { mutation: { incompleteRecovery: true } }
-    );
-  }
-  const content = await readTextFileIfExists(journalOperationPath);
-  if (content === undefined) {
+  const generation = await settleDurableMetadataPublication(
+    journalOperationPath,
+    `transaction journal '${journalPath}'`
+  );
+  if (generation.kind === 'absent') {
     return undefined;
   }
 
   try {
-    return parseFileTransactionJournal(content, journalPath, allowedTargets, appRoot);
+    return parseFileTransactionJournal(generation.content, journalPath, allowedTargets, appRoot);
   } catch (error) {
     throw new IslandShellFailure(
       'corrupt',
@@ -3398,23 +4554,39 @@ function parseFileTransactionJournal(
   allowedTargets: ReadonlySet<string>,
   expectedAppRoot?: string
 ): FileTransactionJournal {
-  let parsed: Partial<FileTransactionJournal>;
+  let parsed: Record<string, unknown>;
 
   try {
-    parsed = JSON.parse(content) as Partial<FileTransactionJournal>;
+    const value: unknown = JSON.parse(content);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('not an object');
+    }
+    parsed = value as Record<string, unknown>;
   } catch {
     throw new Error(`Tyrian file transaction journal is invalid JSON at '${journalPath}'.`);
   }
 
   if (
-    parsed.version !== 4 ||
+    (parsed.version !== 4 && parsed.version !== 5) ||
     typeof parsed.id !== 'string' ||
     !/^[0-9a-f-]{36}$/iu.test(parsed.id) ||
-    !['preparing', 'prepared', 'committing', 'verified'].includes(parsed.phase ?? '') ||
+    typeof parsed.phase !== 'string' ||
+    !['preparing', 'prepared', 'committing', 'verified'].includes(parsed.phase) ||
     !Array.isArray(parsed.entries) ||
     parsed.entries.length === 0
   ) {
     throw new Error(`Tyrian file transaction journal is invalid at '${journalPath}'.`);
+  }
+  if (
+    parsed.version === 5 &&
+    !isValidVersion5RecoveryAttempt(
+      parsed.recovery,
+      parsed.phase as FileTransactionJournal['phase']
+    )
+  ) {
+    throw new Error(
+      `Tyrian file transaction journal has invalid recovery state at '${journalPath}'.`
+    );
   }
 
   if (
@@ -3431,44 +4603,147 @@ function parseFileTransactionJournal(
     if (
       typeof entry !== 'object' ||
       entry === null ||
-      typeof entry.filePath !== 'string' ||
-      typeof entry.backupPath !== 'string' ||
-      (entry.stagedPath !== undefined && typeof entry.stagedPath !== 'string') ||
-      typeof entry.existed !== 'boolean' ||
-      (entry.originalChecksum !== null &&
-        (typeof entry.originalChecksum !== 'string' ||
-          !/^[A-Za-z0-9+/]+$/u.test(entry.originalChecksum))) ||
-      (entry.desiredChecksum !== null &&
-        (typeof entry.desiredChecksum !== 'string' ||
-          !/^[A-Za-z0-9+/]+$/u.test(entry.desiredChecksum))) ||
-      (entry.existed &&
-        (!Number.isInteger(entry.originalMode) ||
-          typeof entry.originalDevice !== 'string' ||
-          !/^\d+$/u.test(entry.originalDevice) ||
-          typeof entry.originalInode !== 'string' ||
-          !/^\d+$/u.test(entry.originalInode))) ||
-      (!entry.existed &&
-        (entry.originalMode !== undefined ||
-          entry.originalDevice !== undefined ||
-          entry.originalInode !== undefined)) ||
-      typeof entry.retiredPath !== 'string' ||
-      !path.isAbsolute(entry.filePath) ||
-      targets.has(entry.filePath) ||
-      !allowedTargets.has(entry.filePath) ||
-      entry.backupPath !== transactionSiblingPath(entry.filePath, parsed.id, 'backup') ||
-      entry.retiredPath !== transactionSiblingPath(entry.filePath, parsed.id, 'retired') ||
-      (entry.stagedPath !== undefined &&
-        entry.stagedPath !== transactionSiblingPath(entry.filePath, parsed.id, 'stage'))
+      Array.isArray(entry) ||
+      !isValidTransactionEntryCommon(entry, parsed.id, allowedTargets, targets)
     ) {
       throw new Error(
         `Tyrian file transaction journal contains an invalid entry at '${journalPath}'.`
       );
     }
 
-    targets.add(entry.filePath);
+    const record = entry as Record<string, unknown>;
+    const validVersionSpecificEntry =
+      parsed.version === 4
+        ? isValidVersion4TransactionEntry(record, parsed.id)
+        : isValidVersion5TransactionEntry(record, parsed.id);
+    if (!validVersionSpecificEntry) {
+      throw new Error(
+        `Tyrian file transaction journal contains an invalid entry at '${journalPath}'.`
+      );
+    }
+
+    targets.add(record.filePath as string);
   }
 
   return parsed as FileTransactionJournal;
+}
+
+function isValidTransactionEntryCommon(
+  entry: object,
+  transactionId: string,
+  allowedTargets: ReadonlySet<string>,
+  targets: ReadonlySet<string>
+): boolean {
+  const record = entry as Record<string, unknown>;
+  const filePath = record.filePath;
+  const backupPath = record.backupPath;
+  const stagedPath = record.stagedPath;
+  const originalChecksum = record.originalChecksum;
+  const desiredChecksum = record.desiredChecksum;
+  if (
+    typeof filePath !== 'string' ||
+    typeof backupPath !== 'string' ||
+    (stagedPath !== undefined && typeof stagedPath !== 'string') ||
+    typeof record.existed !== 'boolean' ||
+    !isTransactionChecksum(originalChecksum) ||
+    !isTransactionChecksum(desiredChecksum) ||
+    !path.isAbsolute(filePath) ||
+    targets.has(filePath) ||
+    !allowedTargets.has(filePath) ||
+    backupPath !== transactionSiblingPath(filePath, transactionId, 'backup') ||
+    (stagedPath !== undefined &&
+      stagedPath !== transactionSiblingPath(filePath, transactionId, 'stage'))
+  ) {
+    return false;
+  }
+  if (record.existed) {
+    return (
+      Number.isInteger(record.originalMode) &&
+      typeof record.originalDevice === 'string' &&
+      /^\d+$/u.test(record.originalDevice) &&
+      typeof record.originalInode === 'string' &&
+      /^\d+$/u.test(record.originalInode)
+    );
+  }
+  return (
+    record.originalMode === undefined &&
+    record.originalDevice === undefined &&
+    record.originalInode === undefined
+  );
+}
+
+function isTransactionChecksum(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && /^[A-Za-z0-9+/]+$/u.test(value));
+}
+
+function isValidVersion4TransactionEntry(
+  entry: Record<string, unknown>,
+  transactionId: string
+): boolean {
+  return (
+    typeof entry.filePath === 'string' &&
+    typeof entry.retiredPath === 'string' &&
+    entry.retiredPath === transactionSiblingPath(entry.filePath, transactionId, 'retired') &&
+    entry.publicationPath === undefined
+  );
+}
+
+function isValidVersion5TransactionEntry(
+  entry: Record<string, unknown>,
+  transactionId: string
+): boolean {
+  if (typeof entry.filePath !== 'string' || typeof entry.existed !== 'boolean') return false;
+  const desired = entry.desiredChecksum;
+  const hasDesired = typeof desired === 'string';
+  const stagedPath = entry.stagedPath;
+  const publicationPath = entry.publicationPath;
+  const retiredPath = entry.retiredPath;
+  if (
+    (hasDesired &&
+      (typeof stagedPath !== 'string' ||
+        stagedPath !== transactionSiblingPath(entry.filePath, transactionId, 'stage'))) ||
+    (!hasDesired && stagedPath !== undefined) ||
+    (!entry.existed && !hasDesired)
+  ) {
+    return false;
+  }
+
+  const requiresPublication = entry.existed && hasDesired;
+  if (
+    (requiresPublication &&
+      (typeof publicationPath !== 'string' ||
+        publicationPath !==
+          transactionSiblingPath(entry.filePath, transactionId, 'publication'))) ||
+    (!requiresPublication && publicationPath !== undefined)
+  ) {
+    return false;
+  }
+
+  const requiresRetired = entry.existed && !hasDesired;
+  return (
+    (requiresRetired &&
+      typeof retiredPath === 'string' &&
+      retiredPath === transactionSiblingPath(entry.filePath, transactionId, 'retired')) ||
+    (!requiresRetired && retiredPath === undefined)
+  );
+}
+
+function isValidVersion5RecoveryAttempt(
+  value: unknown,
+  transactionPhase: FileTransactionJournal['phase']
+): boolean {
+  if (value === undefined) return true;
+  if (transactionPhase !== 'committing') return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const attempt = value as Record<string, unknown>;
+  return (
+    typeof attempt.id === 'string' &&
+    /^[0-9a-f-]{36}$/iu.test(attempt.id) &&
+    (attempt.previousId === undefined ||
+      (typeof attempt.previousId === 'string' && /^[0-9a-f-]{36}$/iu.test(attempt.previousId))) &&
+    attempt.previousId !== attempt.id &&
+    (attempt.phase === 'fencing' || attempt.phase === 'ready' || attempt.phase === 'complete')
+  );
 }
 
 function readDesiredThemeId(registration: ManagedRootRegistration): string | null | undefined {
@@ -3618,6 +4893,16 @@ async function openIslandPatchFileSystem(appRoot: string): Promise<IslandPatchFi
           `Tyrian patch mutation escapes its admitted directories at '${filePath}'.`
         );
       },
+      parentDescriptorFor(filePath: string): number {
+        const resolved = path.resolve(filePath);
+        const parent = path.dirname(resolved);
+        if (parent === appRoot) return appRootHandle.fd;
+        if (parent === paths.workbenchDirPath) return workbenchHandle.fd;
+        throw new IslandShellFailure(
+          'blocked',
+          `Tyrian atomic publication escapes its admitted directories at '${filePath}'.`
+        );
+      },
       async assertNamespaceCurrent(): Promise<void> {
         const [visibleRoot, heldRoot, visibleWorkbench, heldWorkbench] = await Promise.all([
           fs.lstat(appRoot),
@@ -3740,14 +5025,312 @@ function sameRegularFileGeneration(
   right: RegularFileGeneration
 ): boolean {
   return (
+    sameRegularFileIdentity(left, right) &&
+    (left.kind === 'absent' || (right.kind === 'present' && left.content === right.content))
+  );
+}
+
+type DurableMetadataPaths = {
+  canonicalPath: string;
+  retiredPath: string;
+  candidatePath: string;
+};
+
+type DurableMetadataState = DurableMetadataTopology<RegularFileGeneration>;
+
+type DurableMetadataTopology<T = RegularFileIdentity> = DurableMetadataPaths & {
+  canonical: T;
+  retired: T;
+  candidate: T;
+};
+
+/**
+ * Metadata publication has one bounded namespace. The canonical name is the
+ * reader authority; its fixed retired predecessor keeps the last complete
+ * record readable across the only intentional canonical-name gap, and the
+ * fixed candidate is disposable until it is linked into canonical.
+ */
+function durableMetadataPaths(filePath: string): DurableMetadataPaths {
+  const directory = path.dirname(filePath);
+  const baseName = path.basename(filePath);
+  return {
+    canonicalPath: filePath,
+    retiredPath: path.join(directory, `.tyrian-night-retired-${baseName}.tmp`),
+    candidatePath: path.join(directory, `.tyrian-night-candidate-${baseName}.tmp`),
+  };
+}
+
+/**
+ * Before metadata publication used a UUID-named retirement path. It cannot
+ * prove which generation was moved after a crash, so current owners preserve
+ * that bounded legacy evidence and require manual recovery rather than
+ * treating its missing canonical name as clean.
+ */
+async function assertNoLegacyDurableRemovalEvidence(
+  filePath: string,
+  description: string
+): Promise<void> {
+  const directoryPath = path.dirname(filePath);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(directoryPath);
+  } catch (error) {
+    if (isFileNotFoundError(error)) return;
+    throw error;
+  }
+  const baseName = escapeRegExp(path.basename(filePath));
+  const legacyPattern = new RegExp(
+    String.raw`^\.tyrian-night-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}-retired-${baseName}\.tmp$`,
+    'iu'
+  );
+  const legacyName = entries.find((entry) => legacyPattern.test(entry));
+  if (legacyName === undefined) return;
+  const legacyPath = path.join(directoryPath, legacyName);
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian ${description} has legacy unproved deletion evidence at '${legacyPath}' and left it intact.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+async function readDurableMetadataState(
+  filePath: string,
+  description = 'durable metadata target'
+): Promise<DurableMetadataState> {
+  await assertNoLegacyDurableRemovalEvidence(filePath, description);
+  const paths = durableMetadataPaths(filePath);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const before = await readDurableMetadataTopology(filePath, description);
+    try {
+      const [canonical, retired, candidate] = await Promise.all([
+        readRegularFileGeneration(paths.canonicalPath, description),
+        readRegularFileGeneration(paths.retiredPath, `retired ${description}`),
+        readRegularFileGeneration(paths.candidatePath, `candidate ${description}`),
+      ]);
+      const after = await readDurableMetadataTopology(filePath, description);
+      if (
+        sameDurableMetadataTopology(before, after) &&
+        sameRegularFileIdentity(canonical, after.canonical) &&
+        sameRegularFileIdentity(retired, after.retired) &&
+        sameRegularFileIdentity(candidate, after.candidate)
+      ) {
+        return { ...paths, canonical, retired, candidate };
+      }
+    } catch (error) {
+      if (!isFileNotFoundError(error)) throw error;
+    }
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian ${description} changed while reading its durable metadata publication.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+/** Read-only callers never recreate a canonical name. */
+async function readDurableMetadataGeneration(
+  filePath: string,
+  description = 'durable metadata target'
+): Promise<RegularFileGeneration> {
+  const state = await readDurableMetadataState(filePath, description);
+  assertDurableMetadataReadable(state, sameRegularFileGeneration, description);
+  return state.canonical.kind === 'present' ? state.canonical : state.retired;
+}
+
+async function readRegularFileIdentity(
+  filePath: string,
+  description: string
+): Promise<RegularFileIdentity> {
+  const stats = await lstatIfExists(filePath);
+  if (stats === undefined) return { kind: 'absent' };
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian ${description} is not an owned regular file at '${filePath}'.`
+    );
+  }
+  return {
+    kind: 'present',
+    device: String(stats.dev),
+    inode: String(stats.ino),
+    mode: Number(stats.mode),
+  };
+}
+
+function sameRegularFileIdentity(left: RegularFileIdentity, right: RegularFileIdentity): boolean {
+  return (
     left.kind === right.kind &&
     (left.kind === 'absent' ||
       (right.kind === 'present' &&
         left.device === right.device &&
         left.inode === right.inode &&
-        left.mode === right.mode &&
-        left.content === right.content))
+        left.mode === right.mode))
   );
+}
+
+async function readDurableMetadataTopology(
+  filePath: string,
+  description: string
+): Promise<DurableMetadataTopology> {
+  const paths = durableMetadataPaths(filePath);
+  // Canonical first is intentional. A writer moves canonical to retired in
+  // one rename, so this order cannot manufacture a false both-absent state
+  // by sampling retired before that rename and canonical after it.
+  const canonical = await readRegularFileIdentity(paths.canonicalPath, description);
+  const retired = await readRegularFileIdentity(paths.retiredPath, `retired ${description}`);
+  const candidate = await readRegularFileIdentity(paths.candidatePath, `candidate ${description}`);
+  return { ...paths, canonical, retired, candidate };
+}
+
+function sameDurableMetadataTopology(
+  left: DurableMetadataTopology,
+  right: DurableMetadataTopology
+): boolean {
+  return (
+    sameRegularFileIdentity(left.canonical, right.canonical) &&
+    sameRegularFileIdentity(left.retired, right.retired) &&
+    sameRegularFileIdentity(left.candidate, right.candidate)
+  );
+}
+
+async function readStableDurableMetadataTopology(
+  filePath: string,
+  description: string
+): Promise<DurableMetadataTopology> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const before = await readDurableMetadataTopology(filePath, description);
+    const after = await readDurableMetadataTopology(filePath, description);
+    if (sameDurableMetadataTopology(before, after)) return after;
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian ${description} changed while reading its durable metadata topology.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+/** Both content reads and path-only discovery use this publication admission rule. */
+function assertDurableMetadataReadable<T extends RegularFileIdentity>(
+  topology: DurableMetadataTopology<T>,
+  sameGeneration: (left: T, right: T) => boolean,
+  description: string
+): void {
+  if (topology.canonical.kind === 'absent' || topology.retired.kind === 'absent') return;
+  if (sameGeneration(topology.canonical, topology.retired)) return;
+  if (
+    topology.candidate.kind !== 'absent' &&
+    sameGeneration(topology.canonical, topology.candidate)
+  ) {
+    return;
+  }
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian ${description} has ambiguous canonical and retired generations and left both intact.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+/** Choose a readable logical source without consuming its content twice. */
+async function durableMetadataSourcePath(
+  filePath: string,
+  description = 'durable metadata target'
+): Promise<string | undefined> {
+  await assertNoLegacyDurableRemovalEvidence(filePath, description);
+  const topology = await readStableDurableMetadataTopology(filePath, description);
+  assertDurableMetadataReadable(topology, sameRegularFileIdentity, description);
+  if (topology.canonical.kind === 'present') return topology.canonicalPath;
+  if (topology.retired.kind === 'present') return topology.retiredPath;
+  return undefined;
+}
+
+/**
+ * A lock owner resolves only the bounded publication states. Candidate-only
+ * evidence is pre-publication scratch. A canonical replacement that does not
+ * match its candidate is left intact as external ambiguity.
+ */
+async function settleDurableMetadataPublication(
+  filePath: string,
+  description = 'durable metadata target'
+): Promise<RegularFileGeneration> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let state = await readDurableMetadataState(filePath, description);
+    assertDurableMetadataReadable(state, sameRegularFileGeneration, description);
+
+    if (state.canonical.kind === 'absent') {
+      if (state.retired.kind === 'absent') {
+        if (state.candidate.kind !== 'absent') {
+          await removeDurableMetadataScratch(state.candidatePath, state.candidate, description);
+          continue;
+        }
+        return state.canonical;
+      }
+
+      try {
+        await fs.link(state.retiredPath, state.canonicalPath);
+      } catch (error) {
+        if (isAlreadyExistsError(error)) continue;
+        throw error;
+      }
+      await syncDirectory(path.dirname(filePath));
+      state = await readDurableMetadataState(filePath, description);
+      if (!sameRegularFileGeneration(state.canonical, state.retired)) {
+        throw new IslandShellFailure(
+          'blocked',
+          `Tyrian durable metadata predecessor changed while reifying '${filePath}'.`,
+          { mutation: { externalDrift: true, incompleteRecovery: true } }
+        );
+      }
+
+      // Reification produces canonical == retired. Use the same cleanup below
+      // whether this owner linked it or a previous owner stopped after linking.
+    }
+
+    if (state.retired.kind !== 'absent') {
+      if (sameRegularFileGeneration(state.canonical, state.retired)) {
+        if (state.candidate.kind !== 'absent') {
+          await removeDurableMetadataScratch(state.candidatePath, state.candidate, description);
+        }
+        await removeDurableMetadataScratch(state.retiredPath, state.retired, description);
+        continue;
+      }
+      // Admission proved canonical == candidate. Keep that proof until the
+      // predecessor is gone, including across a crash during cleanup.
+      await removeDurableMetadataScratch(state.retiredPath, state.retired, description);
+      await removeDurableMetadataScratch(state.candidatePath, state.candidate, description);
+      continue;
+    }
+
+    if (state.candidate.kind !== 'absent') {
+      await removeDurableMetadataScratch(state.candidatePath, state.candidate, description);
+      continue;
+    }
+
+    return state.canonical;
+  }
+
+  throw new IslandShellFailure(
+    'blocked',
+    `Tyrian durable metadata publication did not settle at '${filePath}'.`,
+    { mutation: { externalDrift: true, incompleteRecovery: true } }
+  );
+}
+
+async function removeDurableMetadataScratch(
+  filePath: string,
+  expected: RegularFileGeneration,
+  description: string
+): Promise<void> {
+  const current = await readRegularFileGeneration(filePath, `cleanup ${description}`);
+  if (!sameRegularFileGeneration(current, expected)) {
+    throw new IslandShellFailure(
+      'blocked',
+      `Tyrian durable metadata scratch changed before cleanup at '${filePath}'.`,
+      { mutation: { externalDrift: true, incompleteRecovery: true } }
+    );
+  }
+  if (current.kind === 'absent') return;
+  await fs.unlink(filePath);
+  await syncDirectory(path.dirname(filePath));
 }
 
 async function writeDurableTextFile(
@@ -3756,18 +5339,8 @@ async function writeDurableTextFile(
   expectedGeneration: RegularFileGeneration | typeof ANY_FILE_GENERATION = ANY_FILE_GENERATION
 ): Promise<RegularFileGeneration> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const retiredPath = path.join(
-    path.dirname(filePath),
-    `.tyrian-night-retired-${path.basename(filePath)}.tmp`
-  );
-  if ((await lstatIfExists(retiredPath)) !== undefined) {
-    throw new IslandShellFailure(
-      'blocked',
-      `Tyrian durable publication has pending retired evidence at '${retiredPath}'.`,
-      { mutation: { incompleteRecovery: true } }
-    );
-  }
-  const initialGeneration = await readRegularFileGeneration(filePath);
+  const paths = durableMetadataPaths(filePath);
+  const initialGeneration = await settleDurableMetadataPublication(filePath);
   if (
     expectedGeneration !== ANY_FILE_GENERATION &&
     !sameRegularFileGeneration(initialGeneration, expectedGeneration)
@@ -3778,23 +5351,24 @@ async function writeDurableTextFile(
       { mutation: { externalDrift: true, incompleteRecovery: true } }
     );
   }
-  const tempPath = path.join(
-    path.dirname(filePath),
-    `.tyrian-night-${crypto.randomUUID()}-${path.basename(filePath)}.tmp`
-  );
-
   let published = false;
   let retired = false;
   let primaryFailure: unknown;
 
   try {
-    await writeDurableFileExclusive(tempPath, content);
+    await writeDurableFileExclusive(paths.candidatePath, content);
+    await syncDirectory(path.dirname(filePath));
+    const candidateGeneration = await readRegularFileGeneration(
+      paths.candidatePath,
+      `candidate durable publication '${filePath}'`
+    );
     if (initialGeneration.kind === 'present') {
-      await fs.rename(filePath, retiredPath);
+      await fs.rename(paths.canonicalPath, paths.retiredPath);
       retired = true;
-      const movedGeneration = await readRegularFileGeneration(retiredPath);
+      await syncDirectory(path.dirname(filePath));
+      const movedGeneration = await readRegularFileGeneration(paths.retiredPath);
       if (!sameRegularFileGeneration(movedGeneration, initialGeneration)) {
-        retired = !(await restoreRetiredGeneration(retiredPath, filePath));
+        retired = !(await restoreRetiredGeneration(paths.retiredPath, paths.canonicalPath));
         throw new IslandShellFailure(
           'blocked',
           `Tyrian durable publication target changed across retirement at '${filePath}'.`,
@@ -3803,7 +5377,7 @@ async function writeDurableTextFile(
       }
     }
     try {
-      await fs.link(tempPath, filePath);
+      await fs.link(paths.candidatePath, paths.canonicalPath);
     } catch (error) {
       if (!isAlreadyExistsError(error)) throw error;
       throw new IslandShellFailure(
@@ -3813,11 +5387,20 @@ async function writeDurableTextFile(
       );
     }
     published = true;
-    await fs.unlink(tempPath);
+    await syncDirectory(path.dirname(filePath));
+    const currentGeneration = await readRegularFileGeneration(paths.canonicalPath);
+    if (!sameRegularFileGeneration(currentGeneration, candidateGeneration)) {
+      throw new IslandShellFailure(
+        'blocked',
+        `Tyrian durable publication target changed across canonical link at '${filePath}'.`,
+        { mutation: { externalDrift: true, incompleteRecovery: true } }
+      );
+    }
     if (retired) {
-      await fs.unlink(retiredPath);
+      await fs.unlink(paths.retiredPath);
       retired = false;
     }
+    await fs.unlink(paths.candidatePath);
     await syncDirectory(path.dirname(filePath));
   } catch (error) {
     if (published) {
@@ -3834,39 +5417,15 @@ async function writeDurableTextFile(
     }
   }
 
-  try {
-    await fs.rm(tempPath, { force: true });
-  } catch (cleanupFailure) {
-    if (primaryFailure !== undefined) {
-      throw new AggregateError(
-        [primaryFailure, cleanupFailure],
-        `Tyrian durable write and temporary cleanup both failed at '${filePath}'.`
-      );
-    }
-
-    if (published) {
-      const failure = describeIslandShellFailure(cleanupFailure);
-      throw new IslandDurablePublicationFailure(
-        filePath,
-        new IslandShellFailure(failure.code, failure.reason, {
-          cause: cleanupFailure,
-          mutation: { incompleteRecovery: true },
-        })
-      );
-    }
-
-    throw cleanupFailure;
-  }
-
   if (retired && primaryFailure !== undefined) {
     throw new IslandShellFailure(
       'blocked',
-      `Tyrian durable publication preserved its prior generation at '${retiredPath}'.`,
+      `Tyrian durable publication preserved its prior generation at '${paths.retiredPath}'.`,
       { cause: primaryFailure, mutation: { externalDrift: true, incompleteRecovery: true } }
     );
   }
   if (primaryFailure !== undefined) throw primaryFailure;
-  return readRegularFileGeneration(filePath);
+  return readRegularFileGeneration(paths.canonicalPath);
 }
 
 async function syncFile(filePath: string): Promise<void> {
@@ -3896,13 +5455,10 @@ async function syncDirectories(directoryPaths: string[]): Promise<void> {
 async function removeFileDurably(
   filePath: string,
   mutation: Partial<IslandMutationFacts> = {},
-  expectedGeneration: RegularFileGeneration | typeof ANY_FILE_GENERATION = ANY_FILE_GENERATION
+  expectedGeneration: RegularFileGeneration
 ): Promise<boolean> {
-  const initialGeneration = await readRegularFileGeneration(filePath, 'removal target');
-  if (
-    expectedGeneration !== ANY_FILE_GENERATION &&
-    !sameRegularFileGeneration(initialGeneration, expectedGeneration)
-  ) {
+  const initialGeneration = await settleDurableMetadataPublication(filePath, 'removal target');
+  if (!sameRegularFileGeneration(initialGeneration, expectedGeneration)) {
     throw new IslandShellFailure(
       'blocked',
       `Tyrian removal target changed before retirement at '${filePath}'.`,
@@ -3910,23 +5466,24 @@ async function removeFileDurably(
     );
   }
   if (initialGeneration.kind === 'absent') return false;
-  const retiredPath = path.join(
-    path.dirname(filePath),
-    `.tyrian-night-${crypto.randomUUID()}-retired-${path.basename(filePath)}.tmp`
+  const paths = durableMetadataPaths(filePath);
+  await fs.rename(filePath, paths.retiredPath);
+  await syncDirectory(path.dirname(filePath));
+  const movedGeneration = await readRegularFileGeneration(
+    paths.retiredPath,
+    'retired removal target'
   );
-  await fs.rename(filePath, retiredPath);
-  const movedGeneration = await readRegularFileGeneration(retiredPath, 'retired removal target');
   if (!sameRegularFileGeneration(movedGeneration, initialGeneration)) {
-    const restored = await restoreRetiredGeneration(retiredPath, filePath);
+    const restored = await restoreRetiredGeneration(paths.retiredPath, filePath);
     throw new IslandShellFailure(
       'blocked',
-      `Tyrian removal target changed across retirement at '${filePath}'${restored ? '.' : `; the moved generation remains at '${retiredPath}'.`}`,
+      `Tyrian removal target changed across retirement at '${filePath}'${restored ? '.' : `; the moved generation remains at '${paths.retiredPath}'.`}`,
       { mutation: { externalDrift: true, incompleteRecovery: !restored } }
     );
   }
-  await fs.unlink(retiredPath);
 
   try {
+    await fs.unlink(paths.retiredPath);
     await syncDirectory(path.dirname(filePath));
   } catch (error) {
     const failure = describeIslandShellFailure(error);
@@ -3945,7 +5502,7 @@ async function writeIfChanged(
   mutation: Partial<IslandMutationFacts> = {},
   expectedGeneration: RegularFileGeneration | typeof ANY_FILE_GENERATION = ANY_FILE_GENERATION
 ): Promise<boolean> {
-  const currentGeneration = await readRegularFileGeneration(filePath);
+  const currentGeneration = await settleDurableMetadataPublication(filePath);
   if (
     expectedGeneration !== ANY_FILE_GENERATION &&
     !sameRegularFileGeneration(currentGeneration, expectedGeneration)
@@ -3960,7 +5517,7 @@ async function writeIfChanged(
     currentGeneration.kind === 'present' ? currentGeneration.content : undefined;
 
   if (currentContent === content) {
-    const confirmedGeneration = await readRegularFileGeneration(filePath);
+    const confirmedGeneration = await readDurableMetadataGeneration(filePath);
     if (!sameRegularFileGeneration(confirmedGeneration, currentGeneration)) {
       throw new IslandShellFailure(
         'blocked',

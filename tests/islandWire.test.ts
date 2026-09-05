@@ -3,10 +3,70 @@ import { expect, test } from 'bun:test';
 import type { IslandShellStatus } from '../apps/vscode/src/islandShell';
 import {
   decodeIslandReconciliationStatus,
+  decodeIslandApplyResult,
+  decodeIslandDirectRestoreResult,
+  decodeIslandRestoreResult,
+  projectIslandApplyResult,
+  projectIslandDirectRestoreResult,
   decodeIslandSupervisorInventory,
   projectIslandReconciliationStatus,
   projectIslandSupervisorInventory,
 } from '../apps/vscode/src/islandWire';
+
+test('mutation projections include the current protocol version and omit producer state', () => {
+  const apply = projectIslandApplyResult({
+    kind: 'permission-required',
+    physicalChanged: true,
+    reason: 'needs write access',
+    writeAccess: { blockedPaths: [{ path: '/app', reason: 'read-only' }] },
+  } as never);
+  const restore = projectIslandDirectRestoreResult({
+    active: false,
+    physicalChanged: true,
+    incompleteRecovery: false,
+  });
+
+  expect(apply).toEqual({
+    version: 2,
+    kind: 'permission-required',
+    physicalChanged: true,
+    reason: 'needs write access',
+    writeAccess: { blockedPaths: [{ path: '/app', reason: 'read-only' }] },
+  });
+  expect(apply).not.toHaveProperty('status');
+  expect(decodeIslandApplyResult(apply)).toEqual(apply);
+  expect(restore).toEqual({
+    version: 2,
+    active: false,
+    physicalChanged: true,
+    incompleteRecovery: false,
+  });
+  expect(decodeIslandDirectRestoreResult(restore)).toEqual(restore);
+});
+
+test('mutation decoders reject missing or mismatched protocol versions', () => {
+  const apply = { kind: 'applied', physicalChanged: false };
+  expect(() => decodeIslandApplyResult(apply)).toThrow('Island apply result.version');
+  expect(() => decodeIslandApplyResult({ ...apply, version: 1 })).toThrow(
+    'Unsupported Island apply result protocol version 1; expected current version 2.'
+  );
+  expect(() =>
+    decodeIslandRestoreResult({
+      version: 2,
+      kind: 'blocked',
+      physicalChanged: false,
+      reason: 'blocked',
+      failedAppRoots: 'invalid',
+    })
+  ).toThrow('Island restore result.failedAppRoots');
+  expect(() =>
+    decodeIslandDirectRestoreResult({
+      version: 2,
+      active: false,
+      physicalChanged: false,
+    })
+  ).toThrow('Island direct restore result.incompleteRecovery');
+});
 
 test('reconciliation projection makes registration relations structural', () => {
   const absent = projectIslandReconciliationStatus(shellStatus());
@@ -150,7 +210,6 @@ function shellStatus(overrides: Partial<IslandShellStatus> = {}): IslandShellSta
     registered: false,
     classification: 'clean',
     verificationPassed: true,
-    canSelfHeal: false,
     transaction: { kind: 'clean', recoverability: 'none' },
     restoreProof: 'none',
     workbenchChecksum: 'workbench-checksum',

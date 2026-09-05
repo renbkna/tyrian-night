@@ -19,7 +19,7 @@ test('production preview projects every catalog theme from resolved source roles
     previews.filter(({ energy }) => energy === 'canonical family center').map(({ id }) => id)
   ).toEqual([family.canonical]);
   for (const source of catalogSources) {
-    const theme = readSourceTheme(source, repository.root, repository.definition);
+    const theme = readSourceTheme(source, repository);
     const preview = previews.find(({ id }) => id === source.slug);
     expect(preview).toBeDefined();
     if (!preview) continue;

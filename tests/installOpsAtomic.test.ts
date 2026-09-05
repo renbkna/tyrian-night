@@ -168,6 +168,497 @@ test('rollback refuses external drift and retains its recovery evidence', () => 
   }
 });
 
+test('a directory snapshot rejects incremental child mutation before creating any paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-directory-snapshot-boundary-'));
+  const target = path.join(root, 'published');
+  const backup = path.join(root, 'backup');
+
+  try {
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, 'original'), 'original');
+    const receipt = snapshotOwnedPaths([target], backup, { ownerRoot: root });
+    try {
+      expect(() =>
+        writeTextFileRaw(path.join(target, 'new/child'), 'partial', { ownerRoot: root })
+      ).toThrow('complete-generation replacement');
+      expect(fs.readdirSync(target)).toEqual(['original']);
+      expect(fs.readFileSync(path.join(target, 'original'), 'utf8')).toBe('original');
+    } finally {
+      receipt.discard();
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('directory recovery fences orphaned original and recovery exchanges before observing targets', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-directory-exchange-recovery-'));
+  const targetPath = path.join(root, 'owned-directory');
+  const replacementPath = path.join(root, 'replacement-directory');
+  const backupRoot = path.join(root, 'backups/recovery');
+  const recoveryTargetPath = path.join(root, 'recovery-owned-directory');
+  const recoveryReplacementPath = path.join(root, 'recovery-replacement-directory');
+  const recoveryBackupRoot = path.join(root, 'backups/interrupted-recovery');
+  const fakeBin = path.join(root, 'fake-bin');
+  const snapshotId = '11111111-1111-4111-8111-111111111111';
+  const recoverySnapshotId = '33333333-3333-4333-8333-333333333333';
+  const snapshotScratchPath = (identity: string, ownedPath: string): string =>
+    path.join(root, `.tyrian-night-${identity}-${path.basename(ownedPath)}.tmp`);
+  const scratchPath = snapshotScratchPath(snapshotId, targetPath);
+  const retiredScratchPath = `${scratchPath}.retired`;
+  const legacyUnknownScratchPath = path.join(
+    root,
+    `.${path.basename(targetPath)}.22222222-2222-4222-8222-222222222222.tmp`
+  );
+  const originalLstat = fs.lstatSync;
+  const originalRename = fs.renameSync;
+  const owners = new Set<ReturnType<typeof Bun.spawn>>();
+  const releasePaths = new Set<string>();
+  const wrapperPids = new Set<number>();
+
+  const waitForPath = async (filePath: string, timeoutMs: number): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (!fs.existsSync(filePath) && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+    expect(fs.existsSync(filePath)).toBe(true);
+  };
+  const processIsAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const restoreProcessEnvironment = (name: string, value: string | undefined): void => {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  };
+
+  try {
+    fs.mkdirSync(targetPath);
+    fs.writeFileSync(path.join(targetPath, 'generation'), 'A\n');
+    fs.mkdirSync(replacementPath);
+    fs.writeFileSync(path.join(replacementPath, 'generation'), 'B\n');
+    fs.mkdirSync(fakeBin);
+    const fakeMv = path.join(fakeBin, 'mv');
+    fs.writeFileSync(
+      fakeMv,
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "--help" ]; then',
+        '  printf "%s\\n" "--exchange"',
+        '  exit 0',
+        'fi',
+        'publish_result() {',
+        '  printf "%s\\n" "$1" > "$TYRIAN_RESULT_PATH.next"',
+        '  /usr/bin/mv -f "$TYRIAN_RESULT_PATH.next" "$TYRIAN_RESULT_PATH"',
+        '}',
+        'if [ "$TYRIAN_BLOCK_EXCHANGE" = "1" ]; then',
+        '  printf "%s\\n" "$$" > "$TYRIAN_WRAPPER_PID_PATH"',
+        '  : > "$TYRIAN_READY_PATH"',
+        '  attempts=0',
+        '  while [ ! -f "$TYRIAN_RELEASE_PATH" ] && [ "$attempts" -lt 400 ]; do',
+        '    sleep 0.01',
+        '    attempts=$((attempts + 1))',
+        '  done',
+        '  if [ ! -f "$TYRIAN_RELEASE_PATH" ]; then',
+        '    publish_result "timeout"',
+        '    exit 70',
+        '  fi',
+        'fi',
+        'if [ -n "$TYRIAN_MV_ARGUMENTS_PATH" ]; then',
+        '  printf "%s\\n" "$@" > "$TYRIAN_MV_ARGUMENTS_PATH"',
+        'fi',
+        'if [ -n "$TYRIAN_ERROR_PATH" ]; then',
+        '  /usr/bin/mv "$@" 2> "$TYRIAN_ERROR_PATH"',
+        'else',
+        '  /usr/bin/mv "$@"',
+        'fi',
+        'status=$?',
+        'if [ "$TYRIAN_BLOCK_EXCHANGE" = "1" ]; then',
+        '  publish_result "$status"',
+        'fi',
+        'exit "$status"',
+        '',
+      ].join('\n')
+    );
+    fs.chmodSync(fakeMv, 0o755);
+
+    const startBlockedExchange = async (
+      name: string,
+      program: string,
+      environment: Record<string, string>
+    ) => {
+      const exchangeRoot = path.join(root, 'exchanges', name);
+      const readyPath = path.join(exchangeRoot, 'ready');
+      const releasePath = path.join(exchangeRoot, 'release');
+      const errorPath = path.join(exchangeRoot, 'error');
+      const resultPath = path.join(exchangeRoot, 'result');
+      const wrapperPidPath = path.join(exchangeRoot, 'wrapper-pid');
+      fs.mkdirSync(exchangeRoot, { recursive: true });
+      releasePaths.add(releasePath);
+
+      const owner = Bun.spawn({
+        cmd: [process.execPath, '-e', program],
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ...environment,
+          PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+          TYRIAN_BLOCK_EXCHANGE: '1',
+          TYRIAN_ERROR_PATH: errorPath,
+          TYRIAN_READY_PATH: readyPath,
+          TYRIAN_RELEASE_PATH: releasePath,
+          TYRIAN_RESULT_PATH: resultPath,
+          TYRIAN_WRAPPER_PID_PATH: wrapperPidPath,
+        },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      owners.add(owner);
+
+      await waitForPath(readyPath, 1_000);
+      const wrapperPid = Number(fs.readFileSync(wrapperPidPath, 'utf8').trim());
+      expect(Number.isSafeInteger(wrapperPid)).toBe(true);
+      expect(processIsAlive(wrapperPid)).toBe(true);
+      wrapperPids.add(wrapperPid);
+
+      return { errorPath, owner, releasePath, resultPath, wrapperPid };
+    };
+    const assertOrphanRejected = async (resultPath: string, errorPath: string): Promise<void> => {
+      await waitForPath(resultPath, 1_000);
+      const exchangeResult = fs.readFileSync(resultPath, 'utf8').trim();
+      expect(exchangeResult).not.toBe('timeout');
+      expect(Number(exchangeResult)).not.toBe(0);
+      expect(fs.readFileSync(errorPath, 'utf8')).toMatch(/no such file|enoent/i);
+    };
+    const restoreAfterFencing = (
+      requestedBackupRoot: string,
+      recoveryTargetPath: string,
+      recoverySnapshotId: string,
+      blockedScratchPath: string,
+      releasePath: string
+    ): void => {
+      const retiredBlockedScratchPath = `${blockedScratchPath}.retired`;
+      let fenceObserved = false;
+      let targetObservedAfterFence = false;
+      fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+        if (
+          resolveMutationPath(oldPath) === blockedScratchPath &&
+          resolveMutationPath(newPath) === retiredBlockedScratchPath
+        ) {
+          const result = originalRename(oldPath, newPath);
+          fenceObserved = true;
+          fs.writeFileSync(releasePath, 'release\n');
+          return result;
+        }
+
+        return originalRename(oldPath, newPath);
+      }) as typeof fs.renameSync;
+      fs.lstatSync = ((filePath: fs.PathLike) => {
+        if (resolveMutationPath(filePath) === recoveryTargetPath) {
+          expect(fenceObserved).toBe(true);
+          targetObservedAfterFence = true;
+        }
+
+        return originalLstat(filePath);
+      }) as typeof fs.lstatSync;
+
+      try {
+        restoreOwnedPathSnapshot(requestedBackupRoot, {
+          allowedRoots: [root],
+          expectedTargetPaths: [recoveryTargetPath],
+          snapshotId: recoverySnapshotId,
+        });
+      } finally {
+        fs.lstatSync = originalLstat;
+        fs.renameSync = originalRename;
+      }
+
+      expect(fenceObserved).toBe(true);
+      expect(targetObservedAfterFence).toBe(true);
+    };
+    const withLoggedFakeMv = (argumentsPath: string, action: () => void): void => {
+      const originalPath = process.env.PATH;
+      const originalBlockExchange = process.env.TYRIAN_BLOCK_EXCHANGE;
+      const originalArgumentsPath = process.env.TYRIAN_MV_ARGUMENTS_PATH;
+      const originalErrorPath = process.env.TYRIAN_ERROR_PATH;
+      process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+      process.env.TYRIAN_BLOCK_EXCHANGE = '0';
+      process.env.TYRIAN_MV_ARGUMENTS_PATH = argumentsPath;
+      delete process.env.TYRIAN_ERROR_PATH;
+
+      try {
+        action();
+      } finally {
+        restoreProcessEnvironment('PATH', originalPath);
+        restoreProcessEnvironment('TYRIAN_BLOCK_EXCHANGE', originalBlockExchange);
+        restoreProcessEnvironment('TYRIAN_MV_ARGUMENTS_PATH', originalArgumentsPath);
+        restoreProcessEnvironment('TYRIAN_ERROR_PATH', originalErrorPath);
+      }
+    };
+
+    const originalPublisher = await startBlockedExchange(
+      'original-publisher',
+      [
+        "const module = await import('./scripts/installOps.mjs');",
+        'module.snapshotOwnedPaths([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
+        '  ownerRoot: process.env.OWNER_ROOT,',
+        '  snapshotId: process.env.SNAPSHOT_ID,',
+        '});',
+        "module.installManagedPathRaw('copy', process.env.REPLACEMENT_PATH, process.env.TARGET_PATH, {",
+        '  ownerRoot: process.env.OWNER_ROOT,',
+        '});',
+        'process.exit(42);',
+      ].join(' '),
+      {
+        BACKUP_ROOT: backupRoot,
+        OWNER_ROOT: root,
+        REPLACEMENT_PATH: replacementPath,
+        SNAPSHOT_ID: snapshotId,
+        TARGET_PATH: targetPath,
+      }
+    );
+
+    expect(fs.readFileSync(path.join(scratchPath, 'generation'), 'utf8')).toBe('B\n');
+
+    originalPublisher.owner.kill('SIGKILL');
+    expect(await originalPublisher.owner.exited).not.toBe(0);
+    owners.delete(originalPublisher.owner);
+    expect(processIsAlive(originalPublisher.wrapperPid)).toBe(true);
+    expect(fs.readFileSync(path.join(targetPath, 'generation'), 'utf8')).toBe('A\n');
+    restoreAfterFencing(
+      backupRoot,
+      targetPath,
+      snapshotId,
+      scratchPath,
+      originalPublisher.releasePath
+    );
+
+    await assertOrphanRejected(originalPublisher.resultPath, originalPublisher.errorPath);
+    wrapperPids.delete(originalPublisher.wrapperPid);
+    expect(fs.readFileSync(path.join(targetPath, 'generation'), 'utf8')).toBe('A\n');
+    expect(fs.existsSync(scratchPath)).toBe(false);
+    expect(fs.existsSync(retiredScratchPath)).toBe(false);
+    expect(fs.existsSync(backupRoot)).toBe(true);
+
+    fs.mkdirSync(recoveryTargetPath);
+    fs.writeFileSync(path.join(recoveryTargetPath, 'generation'), 'A\n');
+    fs.mkdirSync(recoveryReplacementPath);
+    fs.writeFileSync(path.join(recoveryReplacementPath, 'generation'), 'B\n');
+    const recoveryReceipt = snapshotOwnedPaths([recoveryTargetPath], recoveryBackupRoot, {
+      ownerRoot: root,
+      snapshotId: recoverySnapshotId,
+    });
+    installManagedPathRaw('copy', recoveryReplacementPath, recoveryTargetPath, { ownerRoot: root });
+    recoveryReceipt.seal();
+    expect(fs.readFileSync(path.join(recoveryTargetPath, 'generation'), 'utf8')).toBe('B\n');
+
+    const interruptedRecovery = await startBlockedExchange(
+      'interrupted-recovery',
+      [
+        "const module = await import('./scripts/installOps.mjs');",
+        'module.restoreOwnedPathSnapshot(process.env.BACKUP_ROOT, {',
+        '  allowedRoots: [process.env.OWNER_ROOT],',
+        '  expectedTargetPaths: [process.env.TARGET_PATH],',
+        '  snapshotId: process.env.SNAPSHOT_ID,',
+        '});',
+      ].join(' '),
+      {
+        BACKUP_ROOT: recoveryBackupRoot,
+        OWNER_ROOT: root,
+        SNAPSHOT_ID: recoverySnapshotId,
+        TARGET_PATH: recoveryTargetPath,
+      }
+    );
+    const recoveryManifestPath = path.join(recoveryBackupRoot, 'snapshot.json');
+    const interruptedRecoveryManifest = JSON.parse(fs.readFileSync(recoveryManifestPath, 'utf8'));
+    const interruptedRecoveryId = interruptedRecoveryManifest.recoveryId;
+    expect(typeof interruptedRecoveryId).toBe('string');
+    const interruptedRecoveryScratchPath = snapshotScratchPath(
+      `${recoverySnapshotId}-recovery-${interruptedRecoveryId}`,
+      recoveryTargetPath
+    );
+    expect(fs.readFileSync(path.join(interruptedRecoveryScratchPath, 'generation'), 'utf8')).toBe(
+      'A\n'
+    );
+
+    interruptedRecovery.owner.kill('SIGKILL');
+    expect(await interruptedRecovery.owner.exited).not.toBe(0);
+    owners.delete(interruptedRecovery.owner);
+    expect(processIsAlive(interruptedRecovery.wrapperPid)).toBe(true);
+    expect(fs.readFileSync(path.join(recoveryTargetPath, 'generation'), 'utf8')).toBe('B\n');
+
+    const freshRecoveryArgumentsPath = path.join(root, 'fresh-recovery-mv-arguments');
+    withLoggedFakeMv(freshRecoveryArgumentsPath, () => {
+      restoreAfterFencing(
+        recoveryBackupRoot,
+        recoveryTargetPath,
+        recoverySnapshotId,
+        interruptedRecoveryScratchPath,
+        interruptedRecovery.releasePath
+      );
+    });
+
+    await assertOrphanRejected(interruptedRecovery.resultPath, interruptedRecovery.errorPath);
+    wrapperPids.delete(interruptedRecovery.wrapperPid);
+    const freshRecoveryManifest = JSON.parse(fs.readFileSync(recoveryManifestPath, 'utf8'));
+    const freshRecoveryId = freshRecoveryManifest.recoveryId;
+    expect(typeof freshRecoveryId).toBe('string');
+    expect(freshRecoveryId).not.toBe(interruptedRecoveryId);
+    const freshRecoveryScratchPath = snapshotScratchPath(
+      `${recoverySnapshotId}-recovery-${freshRecoveryId}`,
+      recoveryTargetPath
+    );
+    const freshRecoveryArguments = fs.readFileSync(freshRecoveryArgumentsPath, 'utf8');
+    expect(freshRecoveryArguments).toContain(path.basename(freshRecoveryScratchPath));
+    expect(freshRecoveryArguments).not.toContain(path.basename(interruptedRecoveryScratchPath));
+    expect(fs.readFileSync(path.join(recoveryTargetPath, 'generation'), 'utf8')).toBe('A\n');
+    expect(fs.readdirSync(root).filter((name) => name.startsWith('.tyrian-night-'))).toEqual([]);
+    expect(fs.existsSync(recoveryBackupRoot)).toBe(true);
+
+    const manifestPath = path.join(backupRoot, 'snapshot.json');
+    const legacyManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    legacyManifest.version = 5;
+    delete legacyManifest.recoveryId;
+    for (const entry of legacyManifest.entries) {
+      delete entry.disposable;
+      delete entry.publishedGeneration;
+    }
+    fs.writeFileSync(manifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`);
+    fs.mkdirSync(legacyUnknownScratchPath);
+    fs.writeFileSync(path.join(legacyUnknownScratchPath, 'generation'), 'unknown B\n');
+
+    expect(() =>
+      restoreOwnedPathSnapshot(backupRoot, {
+        allowedRoots: [root],
+        expectedTargetPaths: [targetPath],
+        snapshotId,
+      })
+    ).toThrow('Legacy snapshot has unrecorded publication evidence');
+
+    expect(fs.readFileSync(path.join(legacyUnknownScratchPath, 'generation'), 'utf8')).toBe(
+      'unknown B\n'
+    );
+    expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).version).toBe(5);
+    expect(fs.readFileSync(path.join(targetPath, 'generation'), 'utf8')).toBe('A\n');
+  } finally {
+    fs.lstatSync = originalLstat;
+    fs.renameSync = originalRename;
+    for (const releasePath of releasePaths) {
+      if (!fs.existsSync(releasePath)) fs.writeFileSync(releasePath, 'release\n');
+    }
+    for (const owner of owners) {
+      owner.kill('SIGKILL');
+    }
+    for (const owner of owners) {
+      await Promise.race([owner.exited, Bun.sleep(250)]);
+    }
+    for (const wrapperPid of wrapperPids) {
+      if (processIsAlive(wrapperPid)) process.kill(wrapperPid, 'SIGKILL');
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('SIGKILL during snapshot-owned directory deletion leaves absence and recoverable whole A', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-directory-delete-recovery-'));
+  const targetPath = path.join(root, 'owned-directory');
+  const backupRoot = path.join(root, 'backups/recovery');
+  const readyPath = path.join(root, 'deletion-ready');
+  const snapshotId = '44444444-4444-4444-8444-444444444444';
+  const scratchPath = path.join(
+    root,
+    `.tyrian-night-${snapshotId}-${path.basename(targetPath)}.tmp`
+  );
+  let remover: ReturnType<typeof Bun.spawn> | undefined;
+
+  const waitForPath = async (filePath: string, timeoutMs: number): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (!fs.existsSync(filePath) && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+    expect(fs.existsSync(filePath)).toBe(true);
+  };
+
+  try {
+    fs.mkdirSync(path.join(targetPath, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(targetPath, 'first'), 'first from A\n');
+    fs.writeFileSync(path.join(targetPath, 'nested/second'), 'second from A\n');
+
+    remover = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "const fs = (await import('node:fs')).default;",
+          "const path = (await import('node:path')).default;",
+          "const module = await import('./scripts/installOps.mjs');",
+          'module.snapshotOwnedPaths([process.env.TARGET_PATH], process.env.BACKUP_ROOT, {',
+          '  ownerRoot: process.env.OWNER_ROOT,',
+          '  snapshotId: process.env.SNAPSHOT_ID,',
+          '});',
+          'const originalRm = fs.rmSync;',
+          'fs.rmSync = (requestedPath, options) => {',
+          '  const basename = path.basename(String(requestedPath));',
+          '  if (basename === process.env.TARGET_BASENAME || basename === process.env.SCRATCH_BASENAME) {',
+          "    fs.unlinkSync(path.join(String(requestedPath), 'first'));",
+          '    fs.writeFileSync(process.env.READY_PATH, basename);',
+          "    process.kill(process.pid, 'SIGKILL');",
+          '  }',
+          '  return originalRm(requestedPath, options);',
+          '};',
+          'module.removeOwnedPathRaw(process.env.OWNER_ROOT, process.env.TARGET_PATH);',
+        ].join(' '),
+      ],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BACKUP_ROOT: backupRoot,
+        OWNER_ROOT: root,
+        READY_PATH: readyPath,
+        SCRATCH_BASENAME: path.basename(scratchPath),
+        SNAPSHOT_ID: snapshotId,
+        TARGET_BASENAME: path.basename(targetPath),
+        TARGET_PATH: targetPath,
+      },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    await waitForPath(readyPath, 1_000);
+    expect(await remover.exited).not.toBe(0);
+    remover = undefined;
+    expect(fs.readFileSync(readyPath, 'utf8')).toBe(path.basename(scratchPath));
+    expect(fs.existsSync(targetPath)).toBe(false);
+    expect(fs.existsSync(path.join(scratchPath, 'first'))).toBe(false);
+    expect(fs.readFileSync(path.join(scratchPath, 'nested/second'), 'utf8')).toBe(
+      'second from A\n'
+    );
+
+    restoreOwnedPathSnapshot(backupRoot, {
+      allowedRoots: [root],
+      expectedTargetPaths: [targetPath],
+      snapshotId,
+    });
+
+    expect(fs.readFileSync(path.join(targetPath, 'first'), 'utf8')).toBe('first from A\n');
+    expect(fs.readFileSync(path.join(targetPath, 'nested/second'), 'utf8')).toBe('second from A\n');
+    expect(fs.existsSync(scratchPath)).toBe(false);
+    expect(fs.existsSync(`${scratchPath}.retired`)).toBe(false);
+    expect(fs.existsSync(backupRoot)).toBe(true);
+  } finally {
+    remover?.kill('SIGKILL');
+    if (remover) await Promise.race([remover.exited, Bun.sleep(250)]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('persisted recovery restores declared target absence without claiming parent directories', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-atomic-absence-'));
   const targetPath = path.join(root, '.config/tyrian/nested/owned.conf');

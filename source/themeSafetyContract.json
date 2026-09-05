@@ -115,7 +115,7 @@
         "brackets:depth5",
         "brackets:depth6"
       ],
-      "pairing": "adjacent-cycle"
+      "pairing": "all"
     },
     {
       "id": "ansi-warm-states",

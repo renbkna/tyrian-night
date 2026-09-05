@@ -1,6 +1,8 @@
 // @ts-check
 
-import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
+import path from 'node:path';
+
+import { loadThemeInspectionRepository, readInspectionTheme } from './themeSources.mjs';
 import {
   auditThemeSafety,
   readThemeSafetyContract,
@@ -10,14 +12,25 @@ import { auditThemePigmentPolicy, readThemePigmentPolicy } from './themePigmentP
 
 const args = process.argv.slice(2);
 const unsupported = args.find(
-  (entry) => entry !== '--diagnostics' && !entry.startsWith('--theme=')
+  (entry) =>
+    entry !== '--diagnostics' && !entry.startsWith('--root=') && !entry.startsWith('--theme=')
 );
 if (unsupported) throw new Error(`Unknown color audit option '${unsupported}'.`);
 const requestedTheme = args.find((entry) => entry.startsWith('--theme='))?.slice('--theme='.length);
+const requestedRoot = args.find((entry) => entry.startsWith('--root='))?.slice('--root='.length);
+if (requestedRoot !== undefined && requestedRoot.length === 0) {
+  throw new Error('Color audit --root must be a non-empty path.');
+}
 const showDiagnostics = args.includes('--diagnostics');
-const repository = loadThemeRepository();
-const contract = readThemeSafetyContract();
-const pigmentPolicy = readThemePigmentPolicy();
+const repository = loadThemeInspectionRepository(requestedRoot);
+const contract = readThemeSafetyContract(
+  path.join(repository.root, 'source/themeSafetyContract.json'),
+  repository.definition
+);
+const pigmentPolicy = readThemePigmentPolicy(
+  path.join(repository.root, 'source/themePigmentPolicy.json'),
+  repository.definition
+);
 const sources = requestedTheme
   ? repository.sources.filter(({ slug }) => slug === requestedTheme)
   : repository.sources;
@@ -25,7 +38,7 @@ const sources = requestedTheme
 if (sources.length === 0) throw new Error(`Unknown source theme '${requestedTheme}'.`);
 let failed = false;
 for (const source of sources) {
-  const theme = readSourceTheme(source, repository.root, repository.definition);
+  const theme = readInspectionTheme(source, repository);
   const violations = auditThemeSafety(theme, contract);
   const pigmentViolations = auditThemePigmentPolicy(theme, pigmentPolicy);
   const diagnostics = reportThemeColorDiagnostics(theme, source.slug, contract);

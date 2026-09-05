@@ -12,6 +12,7 @@ import {
   isDesktopThemeId,
   writeDesktopThemeAssets,
 } from './desktopThemes.mjs';
+import { resolveDesktopXdgRoots } from './desktopPaths.mjs';
 import {
   admitOwnedDirectories,
   admitOwnedPaths,
@@ -23,7 +24,6 @@ import {
   isSameOrDescendant,
   operation,
   publishStagedOwnedPathRaw,
-  recordOwnedPathGeneration,
   removeOwnedEmptyDirectoriesRaw,
   removeOwnedPathRaw,
   resolvePathIdentity,
@@ -59,7 +59,7 @@ export const LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH =
 const PLASMA_LIFECYCLE_RELATIVE_PATH = '.local/state/tyrian-night/plasma-lifecycle.json';
 const LIVE_INSTALL_TARGETS = new Set(['plasma', 'caelestia']);
 const HYPRLAND_MODES = new Set(['lua', 'legacy']);
-/** @type {Map<string, { depth: number; owner: 'live' | 'rice' | 'layout'; targetPaths: string[] }>} */
+/** @type {Map<string, { depth: number; owner: 'live' | 'rice' | 'layout'; targetPaths: string[]; temporaryPaths: string[] }>} */
 const activeHomeTransactions = new Map();
 
 /**
@@ -103,7 +103,7 @@ const activeHomeTransactions = new Map();
  * @typedef {{ target: 'caelestia'; caelestiaSequences: string }} PreparedCaelestiaInstall
  * @typedef {{ common: PreparedCommonInstall; desktop: PreparedPlasmaInstall | PreparedCaelestiaInstall }} PreparedLiveInstall
  * @typedef {{ common: string[]; plasma: string[]; caelestia: string[] }} LiveOwnedRegistry
- * @typedef {{ configRoot: string; dataRoot: string; stateRoot: string }} XdgRoots
+ * @typedef {import('./desktopPaths.mjs').DesktopXdgRoots} XdgRoots
  * @typedef {{ common: XdgRoots; plasma: XdgRoots; caelestia: XdgRoots }} LiveOwnedRoots
  * @typedef {{ paths: LiveOwnedRegistry; roots: LiveOwnedRoots }} LiveOwnedState
  * @typedef {{ backupRoot: string; rollback: () => void }} LiveInstallReceipt
@@ -272,7 +272,7 @@ export function buildLiveInstallPlan(options) {
   const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
   const userHome = resolvePathIdentity(options.home ?? home);
   const target = requireLiveInstallTarget(options.target);
-  const xdgRoots = resolveXdgRoots(
+  const xdgRoots = resolveDesktopXdgRoots(
     userHome,
     options.environment ?? (options.home === undefined ? process.env : {})
   );
@@ -320,13 +320,7 @@ export function buildLiveInstallPlan(options) {
             target: path.join(installRoot, 'assets/wallpaper-tyrian.png'),
           },
         ];
-  const commonOwnedPaths = buildCommonOwnedPaths(
-    livePaths,
-    terminalThemeSlugs,
-    mode,
-    installRoot,
-    materializedRoots
-  );
+  const commonOwnedPaths = buildCommonOwnedPaths(livePaths, terminalThemeSlugs, installRoot);
   const targetOwnedPaths = buildTargetOwnedPaths(target, livePaths, hyprlandMode);
   const ownershipManifestPath = path.join(userHome, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH);
 
@@ -483,7 +477,7 @@ export function withLiveInstallLock(requestedHome, action, options = {}) {
 /**
  * @template T
  * @param {string} requestedHome
- * @param {{ targetPaths: string[]; backupRoot: string; owner: 'live' | 'rice' | 'layout'; shouldLeavePrepared?: (error: unknown) => boolean; afterRollback?: () => void; afterCommit?: () => void; testFailCommit?: boolean }} transaction
+ * @param {{ targetPaths: string[]; temporaryPaths?: string[]; backupRoot: string; owner: 'live' | 'rice' | 'layout'; shouldLeavePrepared?: (error: unknown) => boolean; afterRollback?: () => void; afterCommit?: () => void; testFailCommit?: boolean }} transaction
  * @param {() => T} action
  * @returns {{ result: T; receipt?: LiveInstallReceipt }}
  */
@@ -499,6 +493,10 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
           possibleAncestor !== candidate && isSameOrDescendant(possibleAncestor, candidate)
       )
   );
+  const temporaryPaths = canonicalizeOwnedHomePaths(userHome, transaction.temporaryPaths ?? []);
+  if (temporaryPaths.some((target) => !targetPaths.includes(target))) {
+    throw new Error('Disposable transaction paths must be complete snapshot targets');
+  }
   const [backupRoot] = canonicalizeOwnedHomePaths(userHome, [transaction.backupRoot]);
   admitOwnedDirectories(userHome, [backupRoot], `${transaction.owner} backup container`);
 
@@ -515,6 +513,9 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
         throw new Error(`Nested home transaction target is outside its owner: ${outsideOwner}`);
       }
 
+      if (temporaryPaths.some((target) => !active.temporaryPaths.includes(target))) {
+        throw new Error('Nested disposable transaction paths must be admitted by the owner');
+      }
       active.depth += 1;
 
       try {
@@ -527,21 +528,26 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
     assertAtomicDirectoryExchangeAvailable();
 
     const snapshotId = randomUUID();
-    /** @type {{ version: 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating'; backupRoot: string; snapshotId: string; targetPaths: string[] }} */
+    /** @type {{ version: 4; owner: 'live' | 'rice' | 'layout'; phase: 'allocating'; backupRoot: string; snapshotId: string; targetPaths: string[]; temporaryPaths: string[] }} */
     const allocatingPointer = {
-      version: 3,
+      version: 4,
       owner: transaction.owner,
       phase: 'allocating',
       backupRoot: path.relative(userHome, backupRoot),
       snapshotId,
       targetPaths: targetPaths.map((targetPath) => path.relative(userHome, targetPath)),
+      temporaryPaths: temporaryPaths.map((targetPath) => path.relative(userHome, targetPath)),
     };
     writeLiveInstallTransaction(userHome, allocatingPointer);
     /** @type {ReturnType<typeof snapshotOwnedPaths> | undefined} */
     let snapshot;
 
     try {
-      snapshot = snapshotOwnedPaths(targetPaths, backupRoot, { ownerRoot: userHome, snapshotId });
+      snapshot = snapshotOwnedPaths(targetPaths, backupRoot, {
+        ownerRoot: userHome,
+        snapshotId,
+        temporaryPaths,
+      });
       syncPathsDurably([backupRoot, path.dirname(backupRoot)]);
       writeLiveInstallTransaction(userHome, { ...allocatingPointer, phase: 'prepared' });
     } catch (error) {
@@ -552,7 +558,12 @@ export function withHomeFilesystemTransaction(requestedHome, transaction, action
 
     const pointer = { ...allocatingPointer, phase: /** @type {const} */ ('prepared') };
 
-    activeHomeTransactions.set(userHome, { depth: 1, owner: transaction.owner, targetPaths });
+    activeHomeTransactions.set(userHome, {
+      depth: 1,
+      owner: transaction.owner,
+      targetPaths,
+      temporaryPaths,
+    });
     /** @type {T | undefined} */
     let result;
 
@@ -699,6 +710,7 @@ function installLiveTyrianOwned(plan, options) {
     plan.home,
     {
       targetPaths,
+      temporaryPaths: [plan.stagingRoot],
       backupRoot: plan.backupRoot,
       owner: 'live',
       shouldLeavePrepared: (error) => error instanceof SimulatedLiveInstallInterruption,
@@ -766,14 +778,13 @@ function resolveLiveInstallTransactionScope(plan) {
   ];
   const desiredActivePaths = [...desiredOwnedRegistry.common, ...desiredOwnedRegistry[plan.target]];
   const staleOwnedPaths = previousActivePaths.filter(
-    (ownedPath) => !desiredActivePaths.includes(ownedPath)
+    (ownedPath) =>
+      !desiredActivePaths.some((desiredPath) => isSameOrDescendant(desiredPath, ownedPath))
   );
 
   const targetPaths = [
-    ...(plan.mode === 'copy' ? [plan.installRoot, plan.stagingRoot] : []),
-    ...plan.materializedRoots
-      .map(({ target }) => target)
-      .filter((target) => plan.mode !== 'copy' || !isSameOrDescendant(plan.installRoot, target)),
+    plan.installRoot,
+    plan.stagingRoot,
     plan.ownershipManifestPath,
     ...plan.touchedPaths,
     ...staleOwnedPaths,
@@ -1131,16 +1142,26 @@ export function recoverHomeFilesystemTransaction(userHome, options = {}) {
   }
 
   if (transaction.phase === 'prepared') {
+    if (transaction.version === 3) {
+      // Reserve recovery names durably before migrating legacy staging evidence.
+      for (const target of transaction.temporaryPaths) {
+        if (exists(path.resolve(userHome, `${target}.retired`))) {
+          throw new Error('Legacy transaction recovery name is already occupied');
+        }
+      }
+      writeLiveInstallTransaction(userHome, { ...transaction, version: 4 });
+    }
     restoreOwnedPathSnapshot(backupRoot, {
       allowedRoots: [userHome],
       expectedTargetPaths: transaction.targetPaths.map((targetPath) =>
         path.resolve(userHome, targetPath)
       ),
       snapshotId: transaction.snapshotId,
+      temporaryPaths: transaction.temporaryPaths.map((target) => path.resolve(userHome, target)),
     });
     writeLiveInstallTransaction(userHome, {
       ...transaction,
-      version: 3,
+      version: 4,
       phase: 'rolledBack',
     });
   }
@@ -1152,6 +1173,7 @@ export function recoverHomeFilesystemTransaction(userHome, options = {}) {
         path.resolve(userHome, targetPath)
       ),
       snapshotId: transaction.snapshotId,
+      temporaryPaths: transaction.temporaryPaths.map((target) => path.resolve(userHome, target)),
     });
   }
 
@@ -1182,7 +1204,7 @@ export function finishCommittedHomeFilesystemTransaction(userHome) {
 
 /**
  * @param {string} userHome
- * @param {{ version: 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }} transaction
+ * @param {{ version: 4; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[]; temporaryPaths: string[] }} transaction
  * @returns {void}
  */
 function writeLiveInstallTransaction(userHome, transaction) {
@@ -1207,7 +1229,7 @@ function writeLiveInstallTransaction(userHome, transaction) {
 
 /**
  * @param {string} userHome
- * @returns {{ version: 3; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[] }}
+ * @returns {{ version: 3 | 4; owner: 'live' | 'rice' | 'layout'; phase: 'allocating' | 'prepared' | 'committed' | 'rolledBack'; backupRoot: string; snapshotId: string; targetPaths: string[]; temporaryPaths: string[] }}
  */
 function readLiveInstallTransaction(userHome) {
   const transactionPath = path.join(userHome, LIVE_INSTALL_TRANSACTION_RELATIVE_PATH);
@@ -1218,8 +1240,8 @@ function readLiveInstallTransaction(userHome) {
   }
 
   const candidate = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
-  if (candidate?.version !== 3) {
-    throw new Error('Live install transaction pointer must use version 3');
+  if (candidate?.version !== 3 && candidate?.version !== 4) {
+    throw new Error('Live install transaction pointer must use version 3 or 4');
   }
   const backupBase = path.join(userHome, '.local/state/tyrian-night/backups');
   const backupRoot =
@@ -1269,8 +1291,37 @@ function readLiveInstallTransaction(userHome) {
     throw new Error('Live install transaction pointer is corrupt');
   }
 
+  // Version 3 predates explicit scratch ownership. Only the generated staging
+  // names used by those writers qualify; snapshot validation also proves absence
+  // at allocation. Arbitrary targets retain generation-sensitive recovery.
+  const temporaryPaths =
+    candidate.version === 3
+      ? targetPaths
+          .filter(
+            (target) =>
+              (path.dirname(target) === path.join(userHome, '.local/share') &&
+                /^tyrian-night\.stage-[0-9a-f-]{36}$/iu.test(path.basename(target))) ||
+              /^\.(?:plasma-org\.kde\.plasma\.desktop-appletsrc|plasmashellrc)\.tyrian-[0-9a-f-]{36}\.tmp$/iu.test(
+                path.basename(target)
+              )
+          )
+          .map((target) => path.relative(userHome, target))
+      : candidate.temporaryPaths;
+  if (
+    !Array.isArray(temporaryPaths) ||
+    new Set(temporaryPaths).size !== temporaryPaths.length ||
+    temporaryPaths.some(
+      (target) =>
+        typeof target !== 'string' ||
+        target !== path.relative(userHome, path.resolve(userHome, target)) ||
+        !targetPaths.includes(path.resolve(userHome, target))
+    )
+  ) {
+    throw new Error('Live install transaction has invalid disposable-path authority');
+  }
   return {
     version: candidate.version,
+    temporaryPaths,
     owner: candidate.owner,
     phase: candidate.phase,
     backupRoot: path.relative(userHome, backupRoot),
@@ -1298,40 +1349,6 @@ function removeLiveInstallTransaction(userHome) {
   }
 
   removeOwnedEmptyDirectoriesRaw(userHome, absentParents);
-}
-
-/**
- * @param {string} userHome
- * @param {NodeJS.ProcessEnv} environment
- * @returns {{ configRoot: string; dataRoot: string; stateRoot: string }}
- */
-function resolveXdgRoots(userHome, environment) {
-  /**
-   * @param {'XDG_CONFIG_HOME' | 'XDG_DATA_HOME' | 'XDG_STATE_HOME'} variable
-   * @param {string} fallback
-   * @returns {string}
-   */
-  const resolveRoot = (variable, fallback) => {
-    const configured = environment[variable];
-
-    if (configured !== undefined && !path.isAbsolute(configured)) {
-      throw new Error(`${variable} must be an absolute path`);
-    }
-
-    const root = resolvePathIdentity(configured ?? path.join(userHome, fallback));
-
-    if (!isSameOrDescendant(userHome, root)) {
-      throw new Error(`${variable} outside the destination home is unsupported for recovery`);
-    }
-
-    return root;
-  };
-
-  return {
-    configRoot: resolveRoot('XDG_CONFIG_HOME', '.config'),
-    dataRoot: resolveRoot('XDG_DATA_HOME', '.local/share'),
-    stateRoot: resolveRoot('XDG_STATE_HOME', '.local/state'),
-  };
 }
 
 /**
@@ -1452,16 +1469,13 @@ function buildSourcePaths(sourceRoot, hyprlandMode, desktopThemeAssets) {
 /**
  * @param {Record<string, string>} livePaths
  * @param {string[]} themeSlugs
- * @param {InstallMode} mode
  * @param {string} installRoot
- * @param {CopyRoot[]} materializedRoots
  * @returns {string[]}
  */
-function buildCommonOwnedPaths(livePaths, themeSlugs, mode, installRoot, materializedRoots) {
+function buildCommonOwnedPaths(livePaths, themeSlugs, installRoot) {
   return [
     ...new Set([
-      ...(mode === 'copy' ? [installRoot] : []),
-      ...materializedRoots.map(({ target }) => target),
+      installRoot,
       livePaths.ghosttyConfig,
       ...themeSlugs.map((slug) => path.join(livePaths.ghosttyThemes, slug)),
       livePaths.footConfig,
@@ -1749,41 +1763,20 @@ function prepareLiveInstallPreview(plan) {
  * @returns {void}
  */
 function materializeSourceRoot(plan) {
-  if (plan.mode === 'copy') {
-    operation(plan.apply, `copy Tyrian install source to ${plan.installRoot}`, () => {
-      const stagingRoot = plan.stagingRoot;
-
-      try {
-        for (const root of plan.materializedRoots) {
-          const relativeTarget = path.relative(plan.installRoot, root.target);
-          installManagedPathWithMode('copy', root.source, path.join(stagingRoot, relativeTarget), {
-            ownerRoot: plan.home,
-          });
-        }
-
-        recordOwnedPathGeneration(plan.home, stagingRoot);
-        publishStagedOwnedPathRaw(plan.home, stagingRoot, plan.installRoot);
-      } catch (error) {
-        if (exists(stagingRoot)) {
-          removeOwnedPathRaw(plan.home, stagingRoot);
-        }
-        throw error;
+  operation(plan.apply, `${plan.mode} Tyrian install source to ${plan.installRoot}`, () => {
+    const stagingRoot = plan.stagingRoot;
+    try {
+      for (const root of plan.materializedRoots) {
+        const relativeTarget = path.relative(plan.installRoot, root.target);
+        installManagedPathWithMode(plan.mode, root.source, path.join(stagingRoot, relativeTarget), {
+          ownerRoot: plan.home,
+        });
       }
-    });
-    return;
-  }
-
-  try {
-    for (const root of plan.materializedRoots) {
-      installManagedPath(plan, root.source, root.target);
+      publishStagedOwnedPathRaw(plan.home, stagingRoot, plan.installRoot);
+    } finally {
+      if (exists(stagingRoot)) removeOwnedPathRaw(plan.home, stagingRoot);
     }
-  } finally {
-    if (plan.apply) {
-      // Link mode publishes several descendants under one installer-owned root.
-      // Snapshot the root generation so rollback observes that ownership boundary.
-      recordOwnedPathGeneration(plan.home, plan.installRoot);
-    }
-  }
+  });
 }
 
 /**

@@ -24,10 +24,19 @@ const PAIRINGS = new Set(['adjacent', 'adjacent-cycle', 'all']);
 /** @typedef {{ id: string; pairing: string; roles: string[] }} SafetyStateComparison */
 /** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; schemaVersion: 3; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
-/** @param {string} [contractPath] @returns {ThemeSafetyContract} */
-export function readThemeSafetyContract(contractPath = THEME_SAFETY_CONTRACT_PATH) {
+/**
+ * @param {string} [contractPath]
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @returns {ThemeSafetyContract}
+ */
+export function readThemeSafetyContract(
+  contractPath = THEME_SAFETY_CONTRACT_PATH,
+  definition = loadThemeDefinitionContext(path.resolve(path.dirname(contractPath), '..'))
+) {
   const root = path.resolve(path.dirname(contractPath), '..');
-  const definition = loadThemeDefinitionContext(root);
+  if (definition.root !== root) {
+    throw new Error('Theme safety contract and definition roots must match.');
+  }
   return validateThemeSafetyContract(JSON.parse(fs.readFileSync(contractPath, 'utf8')), definition);
 }
 

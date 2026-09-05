@@ -14,7 +14,12 @@ import {
   recoverLiveTyrian,
   withHomeFilesystemTransaction,
 } from '../scripts/installLiveTyrian.mjs';
-import { exists, syncPathsDurably, withTokenFileLock } from '../scripts/installOps.mjs';
+import {
+  exists,
+  syncPathsDurably,
+  withTokenFileLock,
+  writeTextFileRaw,
+} from '../scripts/installOps.mjs';
 import {
   TYRIAN_BACKUP_HOME,
   TYRIAN_INSTALL_HOME,
@@ -1406,7 +1411,7 @@ test('live recovery is explicit after a process interruption', () => {
       })
     ).toThrow('Simulated interruption');
     expect(fs.existsSync(transactionPath)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).version).toBe(3);
+    expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8')).version).toBe(4);
     expect(fs.existsSync(installMarker)).toBe(false);
     const interruptedState = snapshotTree(home);
 
@@ -1419,6 +1424,401 @@ test('live recovery is explicit after a process interruption', () => {
     expect(fs.readFileSync(liveConfig, 'utf8')).toBe('original live config\n');
     expect(fs.readFileSync(installMarker, 'utf8')).toBe('original install root\n');
     expect(fs.existsSync(transactionPath)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+for (const mode of ['copy', 'link'] as const) {
+  test(`live ${mode} staging recovery removes a partially materialized disposable root`, async () => {
+    const repositoryRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), `tyrian-live-${mode}-crash-repo-`)
+    );
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), `tyrian-live-${mode}-crash-home-`));
+    const transactionPath = path.join(
+      home,
+      '.local/state/tyrian-night/live-install-transaction.json'
+    );
+
+    try {
+      copyLiveInstallRepoFixture(repositoryRoot);
+      const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
+      fs.mkdirSync(installRoot, { recursive: true });
+      fs.writeFileSync(
+        path.join(installRoot, 'preexisting.txt'),
+        'preexisting install generation\n'
+      );
+      const plan = buildLiveInstallPlan({
+        repoRoot: repositoryRoot,
+        home,
+        link: mode === 'link',
+        target: 'plasma',
+      });
+      const [firstRoot, secondRoot] = plan.materializedRoots;
+      if (!firstRoot || !secondRoot) throw new Error('Live fixture has too few materialized roots');
+      const installBefore = snapshotTree(installRoot);
+      const child = Bun.spawn({
+        cmd: [
+          process.execPath,
+          '-e',
+          [
+            "import fs from 'node:fs';",
+            "import path from 'node:path';",
+            "const module = await import('./scripts/installLiveTyrian.mjs');",
+            'const killAtSecondMaterializedRoot = (source) => {',
+            '  if (path.resolve(String(source)) === process.env.KILL_SOURCE) {',
+            "    process.kill(process.pid, 'SIGKILL');",
+            '  }',
+            '};',
+            "if (process.env.INSTALL_MODE === 'copy') {",
+            '  const originalCopy = fs.cpSync;',
+            '  fs.cpSync = (source, destination, ...options) => {',
+            '    killAtSecondMaterializedRoot(source);',
+            '    return originalCopy.call(fs, source, destination, ...options);',
+            '  };',
+            '} else {',
+            '  const originalLink = fs.symlinkSync;',
+            '  fs.symlinkSync = (source, destination, ...options) => {',
+            '    killAtSecondMaterializedRoot(source);',
+            '    return originalLink.call(fs, source, destination, ...options);',
+            '  };',
+            '}',
+            "module.installLiveTyrian({ repoRoot: process.env.REPOSITORY_ROOT, home: process.env.HOME_ROOT, apply: true, link: process.env.INSTALL_MODE === 'link', target: 'plasma' });",
+            'process.exit(42);',
+          ].join(' '),
+        ],
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          HOME_ROOT: home,
+          INSTALL_MODE: mode,
+          KILL_SOURCE: secondRoot.source,
+          REPOSITORY_ROOT: repositoryRoot,
+        },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+
+      const exitCode = await child.exited;
+      expect(exitCode).not.toBe(0);
+      expect(exitCode).not.toBe(42);
+
+      const transaction = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
+      expect(transaction).toMatchObject({ version: 4, owner: 'live', phase: 'prepared' });
+      expect(transaction.temporaryPaths).toHaveLength(1);
+      expect(transaction.targetPaths).toContain(transaction.temporaryPaths[0]);
+      const stagingRoot = path.resolve(home, transaction.temporaryPaths[0]);
+      const snapshot = JSON.parse(
+        fs.readFileSync(path.join(home, transaction.backupRoot, 'snapshot.json'), 'utf8')
+      );
+      expect(snapshot.entries).toContainEqual(
+        expect.objectContaining({ targetPath: stagingRoot, existed: false, disposable: true })
+      );
+      const firstStagedPath = path.join(
+        stagingRoot,
+        path.relative(plan.installRoot, firstRoot.target)
+      );
+      expect(fs.lstatSync(stagingRoot).isDirectory()).toBe(true);
+      expect(fs.existsSync(firstStagedPath)).toBe(true);
+      expect(
+        fs.existsSync(path.join(stagingRoot, path.relative(plan.installRoot, secondRoot.target)))
+      ).toBe(false);
+      if (mode === 'copy') {
+        expect(fs.lstatSync(firstStagedPath).isFile()).toBe(true);
+      } else {
+        expect(fs.lstatSync(firstStagedPath).isSymbolicLink()).toBe(true);
+      }
+
+      await recoverLiveHomeInFreshProcess(home);
+
+      expect(snapshotTree(installRoot)).toEqual(installBefore);
+      expect(fs.existsSync(stagingRoot)).toBe(false);
+      expect(fs.existsSync(transactionPath)).toBe(false);
+      expect(fs.existsSync(path.resolve(home, transaction.backupRoot))).toBe(false);
+    } finally {
+      fs.rmSync(repositoryRoot, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
+
+test('live recovery removes a partially populated bounded raw-file scratch after process death', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-raw-scratch-home-'));
+  const targetPath = path.join(home, '.config/owned.conf');
+  const backupRoot = path.join(home, TYRIAN_BACKUP_HOME, 'live-tyrian-apply-raw-scratch');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'original generation\n');
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "import fs from 'node:fs';",
+          "const live = await import('./scripts/installLiveTyrian.mjs');",
+          "const ops = await import('./scripts/installOps.mjs');",
+          'const home = process.env.HOME_ROOT;',
+          'const target = process.env.TARGET_PATH;',
+          'const originalOpen = fs.openSync;',
+          'let scratchDescriptor;',
+          'fs.openSync = (filePath, flags, ...options) => {',
+          '  const descriptor = originalOpen.call(fs, filePath, flags, ...options);',
+          '  if (String(filePath).endsWith(process.env.SCRATCH_SUFFIX)) scratchDescriptor = descriptor;',
+          '  return descriptor;',
+          '};',
+          'const originalWrite = fs.writeFileSync;',
+          'fs.writeFileSync = (filePath, content, ...options) => {',
+          '  if (filePath === scratchDescriptor) {',
+          "    originalWrite.call(fs, filePath, 'partial raw scratch\\n');",
+          '    fs.fsyncSync(filePath);',
+          "    process.kill(process.pid, 'SIGKILL');",
+          '  }',
+          '  return originalWrite.call(fs, filePath, content, ...options);',
+          '};',
+          'live.withHomeFilesystemTransaction(home, {',
+          '  targetPaths: [target],',
+          '  backupRoot: process.env.BACKUP_ROOT,',
+          "  owner: 'live',",
+          '  shouldLeavePrepared: () => true,',
+          '}, () => {',
+          "  ops.writeTextFileRaw(target, 'new generation\\n', { ownerRoot: home });",
+          '});',
+          'process.exit(42);',
+        ].join(' '),
+      ],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BACKUP_ROOT: backupRoot,
+        HOME_ROOT: home,
+        SCRATCH_SUFFIX: `-${path.basename(targetPath)}.tmp`,
+        TARGET_PATH: targetPath,
+      },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    const exitCode = await child.exited;
+    expect(exitCode).not.toBe(0);
+    expect(exitCode).not.toBe(42);
+
+    const transaction = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
+    expect(transaction).toMatchObject({ version: 4, owner: 'live', phase: 'prepared' });
+    const scratchPath = path.join(
+      path.dirname(targetPath),
+      `.tyrian-night-${transaction.snapshotId}-${path.basename(targetPath)}.tmp`
+    );
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original generation\n');
+    expect(fs.readFileSync(scratchPath, 'utf8')).toBe('partial raw scratch\n');
+
+    await recoverLiveHomeInFreshProcess(home);
+
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original generation\n');
+    expect(fs.existsSync(scratchPath)).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(backupRoot)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('live recovery retains the last published owned write when death interrupts the next publication', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-second-write-home-'));
+  const targetPath = path.join(home, '.config/owned.conf');
+  const backupRoot = path.join(home, TYRIAN_BACKUP_HOME, 'live-tyrian-apply-second-write');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'original generation\n');
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "import fs from 'node:fs';",
+          "import path from 'node:path';",
+          "const live = await import('./scripts/installLiveTyrian.mjs');",
+          "const ops = await import('./scripts/installOps.mjs');",
+          'const home = process.env.HOME_ROOT;',
+          'const target = process.env.TARGET_PATH;',
+          'const originalRename = fs.renameSync;',
+          'let publications = 0;',
+          'fs.renameSync = (oldPath, newPath) => {',
+          '  const destination = path.join(',
+          '    fs.realpathSync(path.dirname(String(newPath))),',
+          '    path.basename(String(newPath))',
+          '  );',
+          '  if (destination === target && ++publications === 2) {',
+          "    process.kill(process.pid, 'SIGKILL');",
+          '  }',
+          '  return originalRename.call(fs, oldPath, newPath);',
+          '};',
+          'live.withHomeFilesystemTransaction(home, {',
+          '  targetPaths: [target],',
+          '  backupRoot: process.env.BACKUP_ROOT,',
+          "  owner: 'live',",
+          '  shouldLeavePrepared: () => true,',
+          '}, () => {',
+          "  ops.writeTextFileRaw(target, 'first owned generation\\n', { ownerRoot: home });",
+          "  ops.writeTextFileRaw(target, 'second owned generation\\n', { ownerRoot: home });",
+          '});',
+          'process.exit(42);',
+        ].join(' '),
+      ],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BACKUP_ROOT: backupRoot,
+        HOME_ROOT: home,
+        TARGET_PATH: targetPath,
+      },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    const exitCode = await child.exited;
+    expect(exitCode).not.toBe(0);
+    expect(exitCode).not.toBe(42);
+
+    const transaction = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
+    expect(transaction).toMatchObject({ version: 4, owner: 'live', phase: 'prepared' });
+    const scratchPath = path.join(
+      path.dirname(targetPath),
+      `.tyrian-night-${transaction.snapshotId}-${path.basename(targetPath)}.tmp`
+    );
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('first owned generation\n');
+    expect(fs.readFileSync(scratchPath, 'utf8')).toBe('second owned generation\n');
+
+    await recoverLiveHomeInFreshProcess(home);
+
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original generation\n');
+    expect(fs.existsSync(scratchPath)).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(backupRoot)).toBe(false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('live recovery still rejects an external write after an owned transaction write', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-external-drift-home-'));
+  const targetPath = path.join(home, '.config/owned.conf');
+  const backupRoot = path.join(home, TYRIAN_BACKUP_HOME, 'live-tyrian-apply-external-drift');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'original generation\n');
+
+    expect(() =>
+      withHomeFilesystemTransaction(
+        home,
+        {
+          targetPaths: [targetPath],
+          backupRoot,
+          owner: 'live',
+          shouldLeavePrepared: () => true,
+        },
+        () => {
+          writeTextFileRaw(targetPath, 'owned generation\n', { ownerRoot: home });
+          throw new Error('interrupted after owned write');
+        }
+      )
+    ).toThrow('interrupted after owned write');
+
+    fs.writeFileSync(targetPath, 'external generation\n');
+
+    let recoveryFailure: unknown;
+    try {
+      recoverHomeFilesystemTransaction(home);
+    } catch (error) {
+      recoveryFailure = error;
+    }
+    expect(recoveryFailure).toBeInstanceOf(AggregateError);
+    expect((recoveryFailure as AggregateError).errors.map(String).join('\n')).toContain(
+      'external drift'
+    );
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('external generation\n');
+    expect(fs.existsSync(transactionPath)).toBe(true);
+    expect(fs.existsSync(backupRoot)).toBe(true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('legacy transaction pointer 3 and snapshot 5 recover a partial generated stage', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-v3-stage-recovery-'));
+  const ownedPath = path.join(home, '.config/owned.conf');
+  const stagingRoot = path.join(
+    home,
+    '.local/share',
+    'tyrian-night.stage-00000000-0000-0000-0000-000000000001'
+  );
+  const backupRoot = path.join(home, TYRIAN_BACKUP_HOME, 'live-tyrian-apply-legacy-stage');
+  const transactionPath = path.join(
+    home,
+    '.local/state/tyrian-night/live-install-transaction.json'
+  );
+
+  try {
+    fs.mkdirSync(path.dirname(ownedPath), { recursive: true });
+    fs.mkdirSync(path.dirname(stagingRoot), { recursive: true });
+    fs.writeFileSync(ownedPath, 'original generation\n');
+
+    expect(() =>
+      withHomeFilesystemTransaction(
+        home,
+        {
+          targetPaths: [ownedPath, stagingRoot],
+          temporaryPaths: [stagingRoot],
+          backupRoot,
+          owner: 'live',
+          shouldLeavePrepared: () => true,
+        },
+        () => {
+          fs.mkdirSync(stagingRoot);
+          fs.writeFileSync(path.join(stagingRoot, 'partial'), 'partial stage generation\n');
+          throw new Error('interrupted legacy stage');
+        }
+      )
+    ).toThrow('interrupted legacy stage');
+
+    const pointer = JSON.parse(fs.readFileSync(transactionPath, 'utf8'));
+    const manifestPath = path.join(backupRoot, 'snapshot.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    expect(pointer).toMatchObject({ version: 4, phase: 'prepared' });
+    expect(manifest.version).toBe(6);
+    expect(manifest.entries).toContainEqual(
+      expect.objectContaining({ targetPath: stagingRoot, disposable: true })
+    );
+
+    pointer.version = 3;
+    delete pointer.temporaryPaths;
+    fs.writeFileSync(transactionPath, `${JSON.stringify(pointer, null, 2)}\n`);
+    manifest.version = 5;
+    for (const entry of manifest.entries) {
+      delete entry.disposable;
+      delete entry.publishedGeneration;
+    }
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    expect(recoverHomeFilesystemTransaction(home)).toBe('rolledBack');
+    expect(fs.readFileSync(ownedPath, 'utf8')).toBe('original generation\n');
+    expect(fs.existsSync(stagingRoot)).toBe(false);
+    expect(fs.existsSync(transactionPath)).toBe(false);
+    expect(fs.existsSync(backupRoot)).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1622,6 +2022,72 @@ test('token lock reaper never unlinks a replacement generation', async () => {
     ).toThrow('held by live process');
     expect(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token).toBe(replacementToken);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('token lock times out while a live reaper holds a dead generation', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-token-lock-live-reaper-'));
+  const lockPath = path.join(root, 'owner.lock');
+  let claimant: ReturnType<typeof Bun.spawn> | undefined;
+
+  try {
+    await leaveDeadTokenLock(lockPath);
+    const deadOwner = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    const reaperPath = `${lockPath}.reaper-${deadOwner.token}`;
+    const reaperToken = 'live-reaper-generation';
+    const reaperOwnerFileName = `${path.basename(reaperPath)}.owner-${reaperToken}.json`;
+    const liveReaper = `${JSON.stringify({
+      version: 2,
+      pid: process.pid,
+      token: reaperToken,
+      ownerFileName: reaperOwnerFileName,
+      createdAtMs: Date.now(),
+      processIdentity: currentTokenLockProcessIdentity(),
+    })}\n`;
+    const deadLock = fs.readFileSync(lockPath, 'utf8');
+    fs.writeFileSync(reaperPath, liveReaper);
+
+    const startedAt = Date.now();
+    claimant = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        [
+          "const module = await import('./scripts/installOps.mjs');",
+          'try {',
+          '  module.withTokenFileLock(process.env.LOCK_PATH, () => process.exit(3), {',
+          '    ownerRoot: process.env.OWNER_ROOT,',
+          '    timeoutMs: 100,',
+          '  });',
+          '  process.exit(4);',
+          '} catch (error) {',
+          '  if (!String(error).includes("a stale owner awaiting reclamation")) process.exit(5);',
+          '}',
+        ].join(' '),
+      ],
+      cwd: process.cwd(),
+      env: { ...process.env, LOCK_PATH: lockPath, OWNER_ROOT: root },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    const exitCode = await Promise.race([
+      claimant.exited,
+      Bun.sleep(1_000).then(() => 'timed out' as const),
+    ]);
+    if (exitCode === 'timed out') {
+      claimant.kill();
+      await claimant.exited;
+      throw new Error('Lock claimant exceeded its outer one-second safety timeout');
+    }
+
+    expect(exitCode).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(fs.readFileSync(lockPath, 'utf8')).toBe(deadLock);
+    expect(fs.readFileSync(reaperPath, 'utf8')).toBe(liveReaper);
+  } finally {
+    claimant?.kill();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2011,7 +2477,7 @@ test('live transaction publishes allocating ownership before backup allocation',
       ) {
         ownershipObserved = true;
         expect(JSON.parse(fs.readFileSync(transactionPath, 'utf8'))).toMatchObject({
-          version: 3,
+          version: 4,
           owner: 'live',
           phase: 'allocating',
         });
@@ -2120,6 +2586,25 @@ test('lock screen wallpaper patch preserves existing screen locker settings', ()
   );
   expect(patched).not.toContain('/old/wallpaper.png');
 });
+
+async function recoverLiveHomeInFreshProcess(home: string): Promise<void> {
+  const child = Bun.spawn({
+    cmd: [
+      process.execPath,
+      '-e',
+      [
+        "const module = await import('./scripts/installLiveTyrian.mjs');",
+        "if (module.recoverLiveTyrian({ home: process.env.HOME_ROOT }) !== 'rolledBack') process.exit(3);",
+      ].join(' '),
+    ],
+    cwd: process.cwd(),
+    env: { ...process.env, HOME_ROOT: home },
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+
+  expect(await child.exited).toBe(0);
+}
 
 async function leaveDeadTokenLock(lockPath: string): Promise<void> {
   const holder = Bun.spawn({

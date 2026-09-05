@@ -1,8 +1,7 @@
+import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
-import { expect, test } from 'bun:test';
 
 import { opaqueHex } from '../scripts/colorUtils.mjs';
 import {
@@ -11,11 +10,18 @@ import {
 } from '../scripts/portableAssets.mjs';
 import {
   buildFishStartupConfig,
+  buildFootConfig,
+  buildGhosttyConfig,
   buildTerminalThemeAssets,
   writeTerminalThemeAssets,
 } from '../scripts/terminalThemes.mjs';
 import { themeColor } from '../scripts/themeDefinition.mjs';
-import { SOURCE_THEMES, readSourceTheme } from '../scripts/themeSources.mjs';
+import {
+  loadThemeInspectionRepository,
+  loadThemeRepository,
+  readSourceTheme,
+  SOURCE_THEMES,
+} from '../scripts/themeSources.mjs';
 
 const assets = new Map(buildTerminalThemeAssets().map((asset) => [asset.path, asset.content]));
 
@@ -68,6 +74,36 @@ test('Fish startup generation preserves arbitrary checkout roots as literal path
   expect(startup.split('\n')[0]).toBe(
     String.raw`set -gx TYRIAN_NIGHT_ROOT "/tmp/\$PROJECT/it's\\a literal root"`
   );
+});
+
+test('terminal config generators require an admitted repository snapshot', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-terminal-admission-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const admitted = loadThemeRepository(root);
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.json');
+    const recipe = JSON.parse(fs.readFileSync(themePath, 'utf8')) as {
+      oklch: Record<string, [number, number]>;
+    };
+    recipe.oklch['syntax:comment'] = [0.1, 0];
+    fs.writeFileSync(themePath, `${JSON.stringify(recipe)}\n`);
+    const inspection = loadThemeInspectionRepository(root);
+
+    const admittedOptions = { repoRoot: root, repository: admitted };
+    expect(buildGhosttyConfig(admittedOptions)).toContain('theme = dark:');
+    expect(buildFootConfig(admittedOptions)).toContain('initial-color-theme=dark');
+    expect(buildFishStartupConfig(admittedOptions)).toContain('terminal/fish/themes/');
+
+    const inspectionOptions = { repoRoot: root, repository: inspection };
+    for (const buildConfig of [buildGhosttyConfig, buildFootConfig, buildFishStartupConfig]) {
+      expect(() => buildConfig(inspectionOptions)).toThrow(
+        'production-admitted repository snapshot'
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('terminal generation preserves unrelated files in mixed output directories', () => {

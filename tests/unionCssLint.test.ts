@@ -162,6 +162,14 @@ function makeTempRepoFixture(): string {
     'source/themeFamilyContract.json',
     path.join(root, 'source/themeFamilyContract.json')
   );
+  fs.copyFileSync(
+    'source/themeSafetyContract.json',
+    path.join(root, 'source/themeSafetyContract.json')
+  );
+  fs.copyFileSync(
+    'source/themePigmentPolicy.json',
+    path.join(root, 'source/themePigmentPolicy.json')
+  );
   fs.copyFileSync('source/themeCatalog.json', path.join(root, 'source/themeCatalog.json'));
   fs.cpSync('source/themes', path.join(root, 'source/themes'), { recursive: true });
   fs.cpSync('source/union-css', path.join(root, 'source/union-css'), { recursive: true });

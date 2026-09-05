@@ -5,10 +5,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** @typedef {{ targetPath: string; backupPath: string; disposable: boolean; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; publishedGeneration: string; mutationGeneration: string }} SnapshotEntry */
+/** @typedef {{ backupRoot: string; entries: SnapshotEntry[]; missingBackupParents: string[]; ownerRoot: string; snapshotId: string; recoveryId?: string }} OwnedSnapshot */
+
 /** @type {Map<string, { state: 'held'; depth: number; token: string } | { state: 'release-failed'; token: string }>} */
 const heldTokenLocks = new Map();
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 const DEFAULT_CORRUPT_LOCK_STALE_MS = 2_000;
+/** @type {Set<OwnedSnapshot>} */
 const activeOwnedSnapshots = new Set();
 /** @type {boolean | undefined} */
 let atomicDirectoryExchangeSupport;
@@ -264,19 +268,20 @@ function withAnchoredTokenFileLock(lockIdentity, lockPath, action, options) {
           ? !isProcessAlive(generation.owner)
           : Date.now() - generation.stats.mtimeMs >= corruptStaleMs;
 
-        if (reclaimable) {
-          reapLockGeneration(lockPath, generation, options.testBeforeReap);
-          continue;
-        }
-
         if (Date.now() >= deadline) {
-          const ownerLabel = generation.owner
-            ? `live process ${generation.owner.pid}`
-            : 'a not-yet-stale corrupt owner';
+          const ownerLabel = reclaimable
+            ? 'a stale owner awaiting reclamation'
+            : generation.owner
+              ? `live process ${generation.owner.pid}`
+              : 'a not-yet-stale corrupt owner';
           throw new Error(`Lock ${lockPath} is held by ${ownerLabel}`);
         }
 
-        sleepSync(25);
+        if (reclaimable) {
+          reapLockGeneration(lockPath, generation, options.testBeforeReap);
+        } else {
+          sleepSync(25);
+        }
       }
     }
 
@@ -369,6 +374,7 @@ function withAnchoredTokenFileLock(lockIdentity, lockPath, action, options) {
  */
 export function installManagedPathRaw(mode, sourcePath, targetPath, options) {
   requireOwnedMutationOptions(options);
+  assertOwnedMutationBoundary(targetPath);
 
   if (
     fs.lstatSync(sourcePath).isDirectory() ||
@@ -459,6 +465,7 @@ export function writeBinaryFileRaw(filePath, content, options) {
  * @returns {void}
  */
 export function writeOwnedRecoveryCandidateRaw(ownerRoot, candidatePath, content) {
+  assertOwnedMutationBoundary(candidatePath);
   withAnchoredParent(ownerRoot, candidatePath, true, ({ anchoredPath, descriptor }) => {
     if (exists(anchoredPath)) {
       removePathIfReachable(anchoredPath);
@@ -483,7 +490,22 @@ export function writeOwnedRecoveryCandidateRaw(ownerRoot, candidatePath, content
  * @returns {void}
  */
 export function removeOwnedPathRaw(ownerRoot, targetPath) {
+  assertOwnedMutationBoundary(targetPath);
   recordOwnedMutationIntent(targetPath, 'absent');
+  const snapshot = [...activeOwnedSnapshots].find((candidate) =>
+    candidate.entries.some(
+      (entry) => !entry.disposable && entry.targetPath === path.resolve(targetPath)
+    )
+  );
+  if (snapshot !== undefined) {
+    removeSnapshotGeneration(
+      ownerRoot,
+      targetPath,
+      snapshotTemporaryPath(targetPath, snapshot.snapshotId)
+    );
+    recordOwnedMutationCompletion(targetPath, 'absent');
+    return;
+  }
 
   try {
     withAnchoredParent(ownerRoot, targetPath, false, (parent) => {
@@ -491,9 +513,9 @@ export function removeOwnedPathRaw(ownerRoot, targetPath) {
       fsyncDirectoryDescriptor(parent.descriptor);
     });
   } catch (error) {
-    if (error instanceof MissingOwnedParentError) return;
-    throw error;
+    if (!(error instanceof MissingOwnedParentError)) throw error;
   }
+  recordOwnedMutationCompletion(targetPath, 'absent');
 }
 
 /**
@@ -507,6 +529,8 @@ export function removeOwnedPathRaw(ownerRoot, targetPath) {
  * @returns {void}
  */
 export function publishStagedOwnedPathRaw(ownerRoot, stagedPath, targetPath) {
+  assertOwnedMutationBoundary(stagedPath);
+  assertOwnedMutationBoundary(targetPath);
   withAnchoredParent(ownerRoot, stagedPath, false, (sourceParent) => {
     withAnchoredParent(ownerRoot, targetPath, true, (targetParent) => {
       const stagedGeneration = readStableAnchoredGeneration(sourceParent.anchoredPath);
@@ -531,21 +555,10 @@ export function publishStagedOwnedPathRaw(ownerRoot, stagedPath, targetPath) {
       if (sourceParent.descriptor !== targetParent.descriptor) {
         fsyncDirectoryDescriptor(targetParent.descriptor);
       }
+      recordOwnedMutationCompletion(targetPath, stagedGeneration);
+      recordOwnedMutationCompletion(stagedPath, 'absent');
     });
   });
-}
-
-/**
- * Record the current complete generation for a containing transaction target.
- * This is reserved for directory construction whose individual children are
- * not themselves transaction leaves.
- *
- * @param {string} ownerRoot
- * @param {string} targetPath
- * @returns {void}
- */
-export function recordOwnedPathGeneration(ownerRoot, targetPath) {
-  recordOwnedMutationIntent(targetPath, readStablePathGeneration(ownerRoot, targetPath));
 }
 
 /**
@@ -626,7 +639,7 @@ function addDirectoryChain(directories, startDirectory) {
  *
  * @param {string[]} targetPaths
  * @param {string} backupRoot
- * @param {{ ownerRoot: string; snapshotId?: string }} options
+ * @param {{ ownerRoot: string; snapshotId?: string; temporaryPaths?: string[] }} options
  * @returns {{ backupRoot: string; snapshotId: string; targetPaths: string[]; discard: () => void; rollback: () => void; seal: () => void }}
  */
 export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
@@ -635,6 +648,33 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
   const uniquePaths = [...new Set(targetPaths.map((targetPath) => path.resolve(targetPath)))];
   admitOwnedPaths(ownerRoot, uniquePaths, 'Owned filesystem snapshot');
   const snapshotId = options.snapshotId ?? randomUUID();
+  assertSnapshotId(snapshotId);
+  if (
+    uniquePaths.some((target) =>
+      uniquePaths.some((other) => target !== other && isSameOrDescendant(other, target))
+    )
+  ) {
+    throw new Error('Snapshot targets must have independent generation boundaries');
+  }
+  const temporaryPaths = new Set(
+    (options.temporaryPaths ?? []).map((target) => path.resolve(target))
+  );
+  if ([...temporaryPaths].some((target) => !uniquePaths.includes(target) || exists(target))) {
+    throw new Error('Disposable transaction paths must be absent snapshot targets');
+  }
+  const scratchPaths = [
+    ...uniquePaths.map((target) => snapshotTemporaryPath(target, snapshotId)),
+    ...temporaryPaths,
+  ];
+  for (const scratch of scratchPaths) {
+    for (const reserved of [scratch, `${scratch}.retired`]) {
+      if ((!temporaryPaths.has(reserved) && uniquePaths.includes(reserved)) || exists(reserved)) {
+        throw new Error(
+          `Transaction temporary path already exists or overlaps a target: ${reserved}`
+        );
+      }
+    }
+  }
   /** @type {string[]} */
   const missingBackupParents = [];
   let backupParent = path.dirname(backupRoot);
@@ -657,8 +697,10 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
 
     return {
       backupPath: path.join(backupRoot, 'snapshot', String(index)),
+      disposable: temporaryPaths.has(targetPath),
       existed,
       mutationGeneration: originalGeneration,
+      publishedGeneration: originalGeneration,
       originalGeneration,
       targetPath,
       type,
@@ -669,6 +711,7 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
     assertAtomicDirectoryExchangeAvailable();
   }
 
+  /** @type {OwnedSnapshot} */
   const snapshotState = {
     backupRoot: path.resolve(backupRoot),
     entries,
@@ -765,12 +808,10 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
       /** @type {unknown[]} */
       const failures = [];
 
-      // Descendants are restored first so an ancestor snapshot is the final authority.
-      for (const entry of entries.toSorted(
-        (left, right) => right.targetPath.length - left.targetPath.length
-      )) {
+      const recoveryIdentity = prepareSnapshotRecovery(snapshotState, 6);
+      for (const entry of entries) {
         try {
-          restoreSnapshotEntry(entry, ownerRoot);
+          restoreSnapshotEntry(entry, ownerRoot, recoveryIdentity);
         } catch (error) {
           failures.push(error);
         }
@@ -797,7 +838,7 @@ export function snapshotOwnedPaths(targetPaths, backupRoot, options) {
  * that rollback completed.
  *
  * @param {string} requestedBackupRoot
- * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string }} options
+ * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string; temporaryPaths?: string[] }} options
  * @returns {void}
  */
 export function restoreOwnedPathSnapshot(requestedBackupRoot, options) {
@@ -812,22 +853,22 @@ export function restoreOwnedPathSnapshot(requestedBackupRoot, options) {
   ) {
     assertAtomicDirectoryExchangeAvailable();
   }
+  const ownerRoot = options.allowedRoots
+    .map(resolvePathIdentity)
+    .find(
+      (root) =>
+        isSameOrDescendant(root, backupRoot) &&
+        manifest.entries.every((entry) => isSameOrDescendant(root, entry.targetPath))
+    );
+  if (ownerRoot === undefined)
+    throw new Error('Owned filesystem snapshot has no single admitted owner');
+  const snapshot = { ...manifest, backupRoot, ownerRoot, snapshotId: options.snapshotId };
+  const recoveryIdentity = prepareSnapshotRecovery(snapshot, manifest.version);
   /** @type {unknown[]} */
   const failures = [];
-
-  for (const entry of manifest.entries.toSorted(
-    (left, right) => right.targetPath.length - left.targetPath.length
-  )) {
+  for (const entry of manifest.entries) {
     try {
-      const targetOwner = options.allowedRoots
-        .map(resolvePathIdentity)
-        .find((root) => isSameOrDescendant(root, entry.targetPath));
-
-      if (!targetOwner) {
-        throw new Error(`Owned filesystem snapshot has no owner for ${entry.targetPath}`);
-      }
-
-      restoreSnapshotEntry(entry, targetOwner);
+      restoreSnapshotEntry(entry, ownerRoot, recoveryIdentity);
     } catch (error) {
       failures.push(error);
     }
@@ -845,7 +886,7 @@ export function restoreOwnedPathSnapshot(requestedBackupRoot, options) {
  * final transaction phase.
  *
  * @param {string} requestedBackupRoot
- * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string }} options
+ * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string; temporaryPaths?: string[] }} options
  * @returns {void}
  */
 export function discardOwnedPathSnapshot(requestedBackupRoot, options) {
@@ -900,8 +941,8 @@ function snapshotPathType(filePath) {
 
 /**
  * @param {string} backupRoot
- * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string }} options
- * @returns {{ entries: Array<{ targetPath: string; backupPath: string; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; mutationGeneration: string }>; missingBackupParents: string[] }}
+ * @param {{ allowedRoots: string[]; expectedTargetPaths: string[]; snapshotId: string; temporaryPaths?: string[] }} options
+ * @returns {{ version: 5 | 6; entries: SnapshotEntry[]; missingBackupParents: string[]; recoveryId?: string }}
  */
 function readValidatedSnapshotManifest(backupRoot, options) {
   const allowedRoots = options.allowedRoots.map(resolvePathIdentity);
@@ -922,12 +963,24 @@ function readValidatedSnapshotManifest(backupRoot, options) {
   }
 
   const candidate =
-    /** @type {{ version?: unknown; snapshotId?: unknown; entries?: unknown; missingOwnedParents?: unknown; missingBackupParents?: unknown }} */ (
+    /** @type {{ version?: unknown; snapshotId?: unknown; recoveryId?: unknown; entries?: unknown; missingOwnedParents?: unknown; missingBackupParents?: unknown }} */ (
       JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
     );
 
-  if (candidate?.version !== 5) {
-    throw new Error('Owned filesystem snapshot manifest must use version 5');
+  if (candidate?.version !== 5 && candidate?.version !== 6) {
+    throw new Error('Owned filesystem snapshot manifest must use version 5 or 6');
+  }
+  if (candidate.version === 6) assertSnapshotId(options.snapshotId);
+  const recoveryId = candidate.recoveryId;
+  if (recoveryId !== undefined) {
+    if (candidate.version !== 6 || typeof recoveryId !== 'string') {
+      throw new Error('Owned filesystem snapshot has an invalid recovery identity');
+    }
+    assertSnapshotId(recoveryId);
+  }
+  const temporaryPaths = new Set(options.temporaryPaths ?? []);
+  if ([...temporaryPaths].some((target) => !expectedTargetPaths.includes(target))) {
+    throw new Error('Disposable transaction path is outside the snapshot targets');
   }
 
   if (
@@ -944,7 +997,7 @@ function readValidatedSnapshotManifest(backupRoot, options) {
   const seenBackups = new Set();
   const entries = candidate.entries.map((entryCandidate, index) => {
     const entry =
-      /** @type {{ targetPath?: unknown; backupPath?: unknown; existed?: unknown; type?: unknown; originalGeneration?: unknown; mutationGeneration?: unknown }} */ (
+      /** @type {{ targetPath?: unknown; backupPath?: unknown; existed?: unknown; disposable?: unknown; type?: unknown; originalGeneration?: unknown; publishedGeneration?: unknown; mutationGeneration?: unknown }} */ (
         entryCandidate
       );
     if (
@@ -1010,12 +1063,26 @@ function readValidatedSnapshotManifest(backupRoot, options) {
       throw new Error('Owned filesystem snapshot manifest is corrupt');
     }
 
+    const disposable = temporaryPaths.has(targetPath);
+    const publishedGeneration =
+      candidate.version === 5 ? entry.originalGeneration : entry.publishedGeneration;
+    if (typeof publishedGeneration !== 'string' || !isOwnedPathGeneration(publishedGeneration)) {
+      throw new Error('Owned filesystem snapshot has an invalid published generation');
+    }
+    if (
+      (disposable && entry.existed) ||
+      (candidate.version === 6 && entry.disposable !== disposable)
+    ) {
+      throw new Error('Owned filesystem snapshot has invalid disposable-path authority');
+    }
     return {
       targetPath,
       backupPath,
+      disposable,
       existed: entry.existed,
       originalGeneration: entry.originalGeneration,
       mutationGeneration: entry.mutationGeneration,
+      publishedGeneration,
       ...(entry.type !== undefined
         ? { type: /** @type {'file' | 'directory' | 'symlink'} */ (entry.type) }
         : {}),
@@ -1045,6 +1112,8 @@ function readValidatedSnapshotManifest(backupRoot, options) {
     });
 
   return {
+    version: candidate.version,
+    recoveryId,
     entries,
     missingBackupParents: validateBackupParents(candidate.missingBackupParents),
   };
@@ -1152,23 +1221,32 @@ function removePathIfReachable(targetPath) {
  * reader of an existing file therefore sees either the current generation or
  * the complete snapshot generation.
  *
- * @param {{ targetPath: string; backupPath: string; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; mutationGeneration: string }} entry
+ * @param {{ targetPath: string; backupPath: string; disposable: boolean; existed: boolean; type?: 'file' | 'directory' | 'symlink'; originalGeneration: string; publishedGeneration: string; mutationGeneration: string }} entry
  * @param {string} ownerRoot
+ * @param {string} snapshotId
  * @returns {void}
  */
-function restoreSnapshotEntry(entry, ownerRoot) {
+function restoreSnapshotEntry(entry, ownerRoot, snapshotId) {
+  if (entry.disposable) return;
   const currentGeneration = readStablePathGeneration(ownerRoot, entry.targetPath);
 
   if (currentGeneration === entry.originalGeneration) {
     return;
   }
 
-  if (currentGeneration !== entry.mutationGeneration) {
+  if (
+    currentGeneration !== entry.mutationGeneration &&
+    currentGeneration !== entry.publishedGeneration
+  ) {
     throw new Error(`Owned filesystem snapshot found external drift at ${entry.targetPath}`);
   }
 
   if (!entry.existed) {
-    removeOwnedPathRaw(ownerRoot, entry.targetPath);
+    removeSnapshotGeneration(
+      ownerRoot,
+      entry.targetPath,
+      snapshotTemporaryPath(entry.targetPath, snapshotId)
+    );
     return;
   }
 
@@ -1185,7 +1263,8 @@ function restoreSnapshotEntry(entry, ownerRoot) {
           );
         }
       },
-      false
+      false,
+      snapshotId
     );
   });
 
@@ -1194,6 +1273,125 @@ function restoreSnapshotEntry(entry, ownerRoot) {
   if (restoredGeneration !== entry.originalGeneration) {
     throw new Error(`Owned filesystem snapshot could not verify restore for ${entry.targetPath}`);
   }
+}
+
+/**
+ * Deletion publishes absence atomically. Removing a directory recursively at
+ * its live name would leave an unrecognized partial generation after SIGKILL.
+ * @param {string} ownerRoot
+ * @param {string} targetPath
+ * @param {string} scratchPath
+ * @returns {void}
+ */
+function removeSnapshotGeneration(ownerRoot, targetPath, scratchPath) {
+  if (path.dirname(targetPath) !== path.dirname(scratchPath)) {
+    throw new Error('Snapshot deletion scratch must share its target parent');
+  }
+  try {
+    withAnchoredParent(ownerRoot, targetPath, false, (parent) => {
+      const scratch = `/proc/self/fd/${parent.descriptor}/${path.basename(scratchPath)}`;
+      if (exists(scratch)) throw new Error(`Snapshot deletion scratch is occupied: ${scratchPath}`);
+      if (!exists(parent.anchoredPath)) return;
+      fs.renameSync(parent.anchoredPath, scratch);
+      fsyncDirectoryDescriptor(parent.descriptor);
+      removePathIfReachable(scratch);
+      fsyncDirectoryDescriptor(parent.descriptor);
+    });
+  } catch (error) {
+    if (!(error instanceof MissingOwnedParentError)) throw error;
+  }
+}
+
+/**
+ * Fence every previous publisher before reading any target. Recovery uses a
+ * fresh identity, persisted before population, so neither an original helper
+ * nor an orphan from an earlier recovery can publish through a reused name.
+ * The backup is independent authority; revoked candidates can be discarded.
+ * @param {OwnedSnapshot} snapshot
+ * @param {5 | 6} version
+ * @returns {string}
+ */
+function prepareSnapshotRecovery(snapshot, version) {
+  const { ownerRoot, snapshotId, entries } = snapshot;
+  assertSnapshotId(snapshotId);
+  const originalScratch = entries.map(({ targetPath }) =>
+    snapshotTemporaryPath(targetPath, snapshotId)
+  );
+  if (version === 5) {
+    // Legacy writers did not journal UUID publication filenames. Never guess
+    // that an unrecorded candidate is disposable or race an orphan using it.
+    for (const { targetPath } of entries) {
+      const parent = path.dirname(targetPath);
+      if (!exists(parent)) continue;
+      const prefix = `.${path.basename(targetPath)}.`;
+      const candidates = fs
+        .readdirSync(parent)
+        .filter(
+          (name) =>
+            name.startsWith(prefix) && /^[0-9a-f-]{36}\.tmp$/iu.test(name.slice(prefix.length))
+        );
+      if (candidates.length > 0) {
+        throw new Error(
+          `Legacy snapshot has unrecorded publication evidence beside ${targetPath}; leave it intact until its publisher has stopped and the evidence is reconciled`
+        );
+      }
+    }
+    for (const scratch of originalScratch) {
+      if (exists(scratch) || exists(`${scratch}.retired`)) {
+        throw new Error('Legacy snapshot recovery name is already occupied');
+      }
+    }
+  }
+  const oldScratch = [
+    ...originalScratch,
+    ...entries.filter((entry) => entry.disposable).map((entry) => entry.targetPath),
+    ...(snapshot.recoveryId === undefined
+      ? []
+      : entries.map(({ targetPath }) =>
+          snapshotTemporaryPath(targetPath, `${snapshotId}-recovery-${snapshot.recoveryId}`)
+        )),
+  ];
+  for (const scratch of oldScratch) retireSnapshotTemporaryPath(ownerRoot, scratch);
+  const recoveryId = randomUUID();
+  const recoveryIdentity = `${snapshotId}-recovery-${recoveryId}`;
+  for (const { targetPath } of entries) {
+    const scratch = snapshotTemporaryPath(targetPath, recoveryIdentity);
+    if (exists(scratch) || exists(`${scratch}.retired`)) {
+      throw new Error('Snapshot recovery name is already occupied');
+    }
+  }
+  snapshot.recoveryId = recoveryId;
+  writeSnapshotManifest(snapshot);
+  return recoveryIdentity;
+}
+
+/**
+ * Revoke a publication name before observing the target. An mv child can
+ * survive its lock-owning parent: rename serializes with its exchange syscall,
+ * so it either completed before revocation or subsequently fails with ENOENT.
+ * Recursive deletion alone would let that child publish a half-deleted tree.
+ * Both names are reserved by the snapshot owner before mutation.
+ * @param {string} ownerRoot
+ * @param {string} temporaryPath
+ * @returns {void}
+ */
+function retireSnapshotTemporaryPath(ownerRoot, temporaryPath) {
+  const retiredPath = `${temporaryPath}.retired`;
+  removeOwnedPathRaw(ownerRoot, retiredPath);
+  try {
+    withAnchoredParent(ownerRoot, temporaryPath, false, (parent) => {
+      if (exists(parent.anchoredPath)) {
+        fs.renameSync(
+          parent.anchoredPath,
+          `/proc/self/fd/${parent.descriptor}/${parent.leafName}.retired`
+        );
+        fsyncDirectoryDescriptor(parent.descriptor);
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof MissingOwnedParentError)) throw error;
+  }
+  removeOwnedPathRaw(ownerRoot, retiredPath);
 }
 
 /**
@@ -1212,6 +1410,7 @@ function publishRegularFileAtomically(requestedPath, populate, options) {
   const publishPath = options.followFinalSymlink
     ? resolveFinalSymlinkTarget(filePath, options.ownerRoot)
     : filePath;
+  assertOwnedMutationBoundary(publishPath);
 
   withAnchoredParent(options.ownerRoot, publishPath, true, (parent) => {
     const targetStats = exists(parent.anchoredPath) ? fs.lstatSync(parent.anchoredPath) : undefined;
@@ -1367,10 +1566,25 @@ class MissingOwnedParentError extends Error {}
  * @param {string} targetPath
  * @param {(temporaryPath: string) => void} populate
  * @param {boolean} [recordMutation]
+ * @param {string} [snapshotId]
  * @returns {void}
  */
-function publishStagedPathAtomically(parent, targetPath, populate, recordMutation = true) {
-  const temporaryLeaf = `.${parent.leafName}.${randomUUID()}.tmp`;
+function publishStagedPathAtomically(
+  parent,
+  targetPath,
+  populate,
+  recordMutation = true,
+  snapshotId
+) {
+  snapshotId ??= [...activeOwnedSnapshots].find((snapshot) =>
+    snapshot.entries.some(
+      /** @param {{ targetPath: string }} entry */ (entry) => entry.targetPath === targetPath
+    )
+  )?.snapshotId;
+  const temporaryLeaf =
+    snapshotId === undefined
+      ? `.${parent.leafName}.${randomUUID()}.tmp`
+      : path.basename(snapshotTemporaryPath(targetPath, snapshotId));
   const temporaryPath = `/proc/self/fd/${parent.descriptor}/${temporaryLeaf}`;
 
   try {
@@ -1389,12 +1603,27 @@ function publishStagedPathAtomically(parent, targetPath, populate, recordMutatio
     }
 
     fsyncDirectoryDescriptor(parent.descriptor);
+    if (recordMutation) recordOwnedMutationCompletion(targetPath, desiredGeneration);
   } finally {
     if (exists(temporaryPath)) {
       removePathIfReachable(temporaryPath);
       fsyncDirectoryDescriptor(parent.descriptor);
     }
   }
+}
+
+/**
+ * One bounded publication scratch path per admitted snapshot target. It is
+ * reserved absent during allocation and remains disposable through rollback.
+ * @param {string} targetPath
+ * @param {string} snapshotId
+ * @returns {string}
+ */
+function snapshotTemporaryPath(targetPath, snapshotId) {
+  return path.join(
+    path.dirname(targetPath),
+    `.tyrian-night-${snapshotId}-${path.basename(targetPath)}.tmp`
+  );
 }
 
 /**
@@ -1574,6 +1803,36 @@ function hashDirectoryGeneration(directory, hash) {
 }
 
 /**
+ * A snapshot of a published directory owns complete directory generations.
+ * Incremental population belongs in a separately admitted disposable stage.
+ * @param {string} targetPath
+ * @returns {void}
+ */
+function assertOwnedMutationBoundary(targetPath) {
+  const target = path.resolve(targetPath);
+  for (const snapshot of activeOwnedSnapshots) {
+    for (const entry of snapshot.entries) {
+      if (
+        !entry.disposable &&
+        entry.targetPath !== target &&
+        isSameOrDescendant(entry.targetPath, target)
+      ) {
+        throw new Error(
+          `Directory snapshot requires complete-generation replacement: ${entry.targetPath}`
+        );
+      }
+    }
+  }
+}
+
+/** @param {string} snapshotId */
+function assertSnapshotId(snapshotId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(snapshotId)) {
+    throw new Error('Owned filesystem snapshot requires a UUID identity');
+  }
+}
+
+/**
  * @param {string} targetPath
  * @param {string} desiredGeneration
  * @returns {void}
@@ -1587,27 +1846,59 @@ function recordOwnedMutationIntent(targetPath, desiredGeneration) {
         candidate.targetPath === resolvedTarget
     );
 
-    if (!entry) continue;
+    if (!entry || entry.disposable) continue;
     entry.mutationGeneration = desiredGeneration;
     writeSnapshotManifest(snapshot);
   }
 }
 
 /**
- * @param {{ backupRoot: string; entries: Array<{ backupPath: string; existed: boolean; mutationGeneration: string; originalGeneration: string; targetPath: string; type?: 'file' | 'directory' | 'symlink' }>; missingBackupParents: string[]; ownerRoot: string; snapshotId: string }} snapshot
+ * Intent and completed publication are distinct durable facts. A second write
+ * may die after recording its intent while the previous owned generation is
+ * still visible, so recovery must retain both until publication completes.
+ * @param {string} targetPath
+ * @param {string} generation
+ * @returns {void}
+ */
+function recordOwnedMutationCompletion(targetPath, generation) {
+  for (const snapshot of activeOwnedSnapshots) {
+    const entry = snapshot.entries.find(
+      /** @param {{ targetPath: string }} candidate */ (candidate) =>
+        candidate.targetPath === path.resolve(targetPath)
+    );
+    if (!entry || entry.disposable) continue;
+    entry.publishedGeneration = generation;
+    writeSnapshotManifest(snapshot);
+  }
+}
+
+/**
+ * @param {OwnedSnapshot} snapshot
  * @returns {void}
  */
 function writeSnapshotManifest(snapshot) {
   const manifestPath = path.join(snapshot.backupRoot, 'snapshot.json');
   const content = `${JSON.stringify(
     {
-      version: 5,
+      version: 6,
       snapshotId: snapshot.snapshotId,
+      recoveryId: snapshot.recoveryId,
       entries: snapshot.entries.map(
-        ({ backupPath, existed, mutationGeneration, originalGeneration, targetPath, type }) => ({
-          backupPath: path.relative(snapshot.backupRoot, backupPath),
+        ({
+          backupPath,
+          disposable,
           existed,
           mutationGeneration,
+          publishedGeneration,
+          originalGeneration,
+          targetPath,
+          type,
+        }) => ({
+          backupPath: path.relative(snapshot.backupRoot, backupPath),
+          disposable,
+          existed,
+          mutationGeneration,
+          publishedGeneration,
           originalGeneration,
           targetPath,
           ...(type !== undefined ? { type } : {}),

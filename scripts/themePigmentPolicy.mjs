@@ -12,10 +12,19 @@ export const THEME_PIGMENT_POLICY_PATH = path.join(ROOT, 'source/themePigmentPol
 /** @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation */
 /** @typedef {{ reservations: PigmentReservation[]; schemaVersion: 2 }} ThemePigmentPolicy */
 
-/** @param {string} [policyPath] @returns {ThemePigmentPolicy} */
-export function readThemePigmentPolicy(policyPath = THEME_PIGMENT_POLICY_PATH) {
+/**
+ * @param {string} [policyPath]
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @returns {ThemePigmentPolicy}
+ */
+export function readThemePigmentPolicy(
+  policyPath = THEME_PIGMENT_POLICY_PATH,
+  definition = loadThemeDefinitionContext(path.resolve(path.dirname(policyPath), '..'))
+) {
   const root = path.resolve(path.dirname(policyPath), '..');
-  const definition = loadThemeDefinitionContext(root);
+  if (definition.root !== root) {
+    throw new Error('Theme pigment policy and definition roots must match.');
+  }
   return validateThemePigmentPolicy(JSON.parse(fs.readFileSync(policyPath, 'utf8')), definition);
 }
 

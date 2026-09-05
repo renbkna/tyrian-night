@@ -6,7 +6,7 @@ import path from 'node:path';
 import { parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { themeColor } from './themeDefinition.mjs';
-import { SOURCE_THEMES, readSourceTheme, readThemeSources } from './themeSources.mjs';
+import { SOURCE_THEMES, loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
@@ -277,11 +277,12 @@ function neutralDarkIslandTokens() {
 /**
  * @param {IslandCssTheme} theme
  * @param {string} repoRoot
+ * @param {import('./themeSources.mjs').ThemeRepository} repository
  * @returns {string}
  */
-function renderIslandCss(theme, repoRoot) {
+function renderIslandCss(theme, repoRoot, repository) {
   const baseCss = fs.readFileSync(path.join(repoRoot, BASE_TEMPLATE_PATH), 'utf8');
-  const sourceTheme = readSourceTheme(theme.source, repoRoot);
+  const sourceTheme = readSourceTheme(theme.source, repository);
 
   return `${header(theme.label)}
 
@@ -297,9 +298,10 @@ ${baseCss}`;
  * @returns {Array<{ outputPath: string; css: string }>}
  */
 export function buildAllIslandCss(repoRoot = defaultRepoRoot) {
-  return projectIslandCssThemes(readThemeSources(repoRoot)).map((theme) => ({
+  const repository = loadThemeRepository(repoRoot);
+  return projectIslandCssThemes(repository.sources).map((theme) => ({
     outputPath: theme.outputPath,
-    css: renderIslandCss(theme, repoRoot),
+    css: renderIslandCss(theme, repoRoot, repository),
   }));
 }
 

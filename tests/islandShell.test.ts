@@ -33,6 +33,7 @@ import {
   IslandRegistryQuarantineError,
   moveRegistryRecordToQuarantineCore,
 } from '../apps/vscode/src/islandRegistryMutationCore';
+import { applyIslandUiSupervised } from '../apps/vscode/src/islandSupervisor';
 
 let previousHome: string | undefined;
 let registryHome: string;
@@ -96,6 +97,98 @@ test('Doctor inventory reports corrupt registry entries without mutating them', 
   } finally {
     await fs.chmod(unreadablePath, 0o644);
   }
+});
+
+test('Restore quarantines a hash-named corrupt registry symlink without following it', async () => {
+  const missingAppRoot = path.join(testRoot, 'symlinked-hash-record-root');
+  const recordPath = buildManagedRootRecordPath(missingAppRoot, registryHome);
+  const outsideTargetPath = path.join(testRoot, 'hash-record-outside-target');
+  const outsideContent = 'outside hash record target\n';
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(outsideTargetPath, outsideContent, 'utf8');
+  await fs.symlink(outsideTargetPath, recordPath);
+
+  const result = await restoreAllIslandShells({ registryHome });
+
+  expect(result.changed).toBe(true);
+  expect(result.failedAppRoots).toEqual([]);
+  expect(result.quarantinedRecords).toHaveLength(1);
+  const quarantinePath = result.quarantinedRecords[0]!;
+  expect(quarantinePath).toContain('quarantined-managed-app-roots');
+  await expect(fs.lstat(recordPath)).rejects.toThrow();
+  expect(await fs.readFile(outsideTargetPath, 'utf8')).toBe(outsideContent);
+  expect((await fs.lstat(outsideTargetPath)).isFile()).toBe(true);
+  expect((await fs.lstat(quarantinePath)).isSymbolicLink()).toBe(true);
+  expect(await fs.readlink(quarantinePath)).toBe(outsideTargetPath);
+});
+
+test('Restore preserves a corrupt registry symlink when fixed predecessor evidence exists', async () => {
+  const missingAppRoot = path.join(testRoot, 'symlinked-ambiguous-record-root');
+  const recordPath = buildManagedRootRecordPath(missingAppRoot, registryHome);
+  const retiredPath = durableMetadataTestPaths(recordPath).retiredPath;
+  const outsideTargetPath = path.join(testRoot, 'ambiguous-record-outside-target');
+  const outsideContent = 'outside ambiguous record target\n';
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(outsideTargetPath, outsideContent, 'utf8');
+  await fs.symlink(outsideTargetPath, recordPath);
+  await fs.writeFile(retiredPath, 'retired record evidence\n', 'utf8');
+
+  const result = await restoreAllIslandShells({ registryHome });
+
+  expect(result.changed).toBe(false);
+  expect(result.quarantinedRecords).toEqual([]);
+  expect(result.enumerationFailure).toMatchObject({
+    code: 'blocked',
+    reason: expect.stringContaining('durable publication evidence'),
+  });
+  expect((await fs.lstat(recordPath)).isSymbolicLink()).toBe(true);
+  expect(await fs.readFile(outsideTargetPath, 'utf8')).toBe(outsideContent);
+  expect(await fs.readFile(retiredPath, 'utf8')).toBe('retired record evidence\n');
+});
+
+test('Restore quarantines an invalid-name registry symlink without following it', async () => {
+  const registryDirectory = buildManagedRootsDirectoryPath(registryHome);
+  const recordPath = path.join(registryDirectory, 'invalid-registry-symlink');
+  const outsideTargetPath = path.join(testRoot, 'invalid-name-outside-target');
+  const outsideContent = 'outside invalid-name target\n';
+  await fs.mkdir(registryDirectory, { recursive: true });
+  await fs.writeFile(outsideTargetPath, outsideContent, 'utf8');
+  await fs.symlink(outsideTargetPath, recordPath);
+
+  const result = await restoreAllIslandShells({ registryHome });
+
+  expect(result.changed).toBe(true);
+  expect(result.failedAppRoots).toEqual([]);
+  expect(result.quarantinedRecords).toHaveLength(1);
+  const quarantinePath = result.quarantinedRecords[0]!;
+  expect(quarantinePath).toContain('quarantined-managed-app-roots');
+  await expect(fs.lstat(recordPath)).rejects.toThrow();
+  expect(await fs.readFile(outsideTargetPath, 'utf8')).toBe(outsideContent);
+  expect((await fs.lstat(outsideTargetPath)).isFile()).toBe(true);
+  expect((await fs.lstat(quarantinePath)).isSymbolicLink()).toBe(true);
+  expect(await fs.readlink(quarantinePath)).toBe(outsideTargetPath);
+});
+
+test('Doctor reports legacy random registry retirement evidence without treating it as absent', async () => {
+  const missingAppRoot = path.join(testRoot, 'legacy-registry-root');
+  const recordPath = buildManagedRootRecordPath(missingAppRoot, registryHome);
+  const legacyPath = legacyDurableRemovalPath(recordPath);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(
+    legacyPath,
+    JSON.stringify({ version: 2, appRoot: missingAppRoot, desiredThemeId: 'legacy.css' }).concat(
+      '\n'
+    ),
+    'utf8'
+  );
+
+  const inventory = await readAllIslandShellStatusesWithDiagnostics({ registryHome });
+
+  expect(inventory.statuses).toEqual([]);
+  expect(inventory.registryDiagnostics).toEqual([
+    expect.stringContaining('legacy unproved deletion evidence'),
+  ]);
+  expect(await fs.readFile(legacyPath, 'utf8')).toContain(missingAppRoot);
 });
 
 test('supervised CLI commands exit nonzero for typed root-lock release failure', async () => {
@@ -185,7 +278,6 @@ test('status-all reports registered missing roots without mutating the registry'
     managed: false,
     registered: true,
     verificationPassed: false,
-    canSelfHeal: true,
   });
   expect(await fs.readFile(recordPath, 'utf8')).toBe(before);
 });
@@ -496,43 +588,72 @@ test('patch admission rejects a symlinked workbench ancestor before any mutation
   await expect(fs.stat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
 });
 
-test('transaction retirement preserves a replacement generation at the final leaf boundary', async () => {
-  const appRoot = await createAppRoot('replacement-at-retirement');
-  const cssSource = path.join(testRoot, 'replacement-at-retirement.css');
+test('apply rejects an mv without atomic exchange support before any Island mutation', async () => {
+  const appRoot = await createAppRoot('unsupported-atomic-exchange');
   const paths = buildIslandPatchPaths(appRoot);
-  const replacement = 'external replacement generation\n';
-  const originalRename = fs.rename;
-  let injected = false;
+  const cssSource = path.join(testRoot, 'unsupported-atomic-exchange.css');
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   await fs.writeFile(cssSource, '.monaco-workbench { color: red; }\n', 'utf8');
 
-  fs.rename = (async (sourcePath, targetPath) => {
-    if (
-      !injected &&
-      path.basename(String(sourcePath)) === path.basename(paths.workbenchHtmlPath) &&
-      path.basename(String(targetPath)).includes('-retired-workbench.html.tmp')
-    ) {
-      injected = true;
-      const replacementPath = path.join(paths.workbenchDirPath, 'external-replacement.tmp');
-      await fs.writeFile(replacementPath, replacement, 'utf8');
-      await originalRename(replacementPath, paths.workbenchHtmlPath);
-    }
-    return originalRename(sourcePath, targetPath);
-  }) as typeof fs.rename;
-
-  try {
-    await expect(
-      applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
-    ).rejects.toMatchObject({ externalDrift: true, incompleteRecovery: true });
-  } finally {
-    fs.rename = originalRename;
-  }
-
-  expect(injected).toBe(true);
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(replacement);
-  expect((await fs.lstat(paths.transactionJournalPath)).isFile()).toBe(true);
+  const child = await runIslandApplyCli(
+    appRoot,
+    cssSource,
+    await writeIslandTestMv('unsupported-exchange')
+  );
+  expect(child.exitCode).not.toBe(0);
+  expect(JSON.parse(child.stderr.trim())).toMatchObject({
+    code: 'unsupported',
+    reason: expect.stringContaining('requires GNU mv with --exchange'),
+  });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
+  await expect(fs.lstat(buildManagedRootRecordPath(appRoot, registryHome))).rejects.toThrow();
 });
 
-test('descriptor-anchored transaction cannot be redirected by an admitted ancestor swap', async () => {
+test('atomic publication preserves an exchanged external generation as journal evidence', async () => {
+  const appRoot = await createAppRoot('replacement-at-exchange');
+  const cssSource = path.join(testRoot, 'replacement-at-exchange.css');
+  const paths = buildIslandPatchPaths(appRoot);
+  const replacement = 'external replacement generation\n';
+  await fs.writeFile(cssSource, '.monaco-workbench { color: red; }\n', 'utf8');
+  const fakeMvDirectory = await writeIslandTestMv('external-replacement');
+
+  const child = await runIslandApplyCli(appRoot, cssSource, fakeMvDirectory, {
+    targetPath: paths.workbenchHtmlPath,
+    replacement,
+  });
+  expect(child.exitCode).not.toBe(0);
+  expect(JSON.parse(child.stderr.trim())).toMatchObject({
+    code: 'blocked',
+    externalDrift: true,
+    incompleteRecovery: true,
+  });
+
+  const journal = JSON.parse(await fs.readFile(paths.transactionJournalPath, 'utf8')) as {
+    version: number;
+    recovery?: { id: string; phase: string };
+    entries: Array<{ filePath: string; publicationPath?: string }>;
+  };
+  const workbenchEntry = journal.entries.find(
+    ({ filePath }) => filePath === paths.workbenchHtmlPath
+  );
+  expect(journal.version).toBe(5);
+  expect(journal.recovery).toMatchObject({ phase: 'fencing' });
+  expect(workbenchEntry?.publicationPath).toBeDefined();
+  const recoveryEvidencePath = path.join(
+    path.dirname(workbenchEntry!.publicationPath!),
+    `.tyrian-night-${journal.recovery!.id}-recovery-${path.basename(workbenchEntry!.filePath)}.tmp`
+  );
+  expect(await fs.readFile(recoveryEvidencePath, 'utf8')).toBe(replacement);
+  const externalIdentity = JSON.parse(
+    await fs.readFile(`${paths.workbenchHtmlPath}.external-identity.json`, 'utf8')
+  );
+  const preserved = await fs.lstat(recoveryEvidencePath);
+  expect({ device: String(preserved.dev), inode: String(preserved.ino) }).toEqual(externalIdentity);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toContain(TYRIAN_MARKER_START);
+});
+
+test('descriptor-anchored atomic exchange cannot be redirected by an admitted ancestor swap', async () => {
   const appRoot = await createAppRoot('ancestor-swap-at-retirement');
   const cssSource = path.join(testRoot, 'ancestor-swap-at-retirement.css');
   const paths = buildIslandPatchPaths(appRoot);
@@ -541,41 +662,26 @@ test('descriptor-anchored transaction cannot be redirected by an admitted ancest
     path.join(os.tmpdir(), 'tyrian-island-ancestor-external-')
   );
   const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const originalRename = fs.rename;
-  let injected = false;
   await fs.writeFile(path.join(externalWorkbench, 'workbench.html'), originalHtml, 'utf8');
   await fs.writeFile(cssSource, '.monaco-workbench { color: red; }\n', 'utf8');
 
-  fs.rename = (async (sourcePath, targetPath) => {
-    if (
-      !injected &&
-      path.basename(String(sourcePath)) === path.basename(paths.workbenchHtmlPath) &&
-      path.basename(String(targetPath)).includes('-retired-workbench.html.tmp')
-    ) {
-      injected = true;
-      await originalRename(paths.workbenchDirPath, displacedWorkbench);
-      await fs.symlink(externalWorkbench, paths.workbenchDirPath, 'dir');
-    }
-    return originalRename(sourcePath, targetPath);
-  }) as typeof fs.rename;
-
   try {
-    await expect(
-      applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
-    ).rejects.toThrow('patch namespace changed');
-  } finally {
-    fs.rename = originalRename;
-  }
-
-  try {
-    expect(injected).toBe(true);
+    const fakeMvDirectory = await writeIslandTestMv('ancestor-swap');
+    const child = await runIslandApplyCli(appRoot, cssSource, fakeMvDirectory, {
+      workbenchDirectory: paths.workbenchDirPath,
+      displacedWorkbench,
+      externalWorkbench,
+    });
+    expect(child.exitCode).not.toBe(0);
+    expect(JSON.parse(child.stderr.trim())).toMatchObject({
+      code: 'blocked',
+      reason: expect.stringContaining('patch namespace changed'),
+    });
     expect(await fs.readdir(externalWorkbench)).toEqual(['workbench.html']);
     expect(await fs.readFile(path.join(externalWorkbench, 'workbench.html'), 'utf8')).toBe(
       originalHtml
     );
-    expect(await fs.readFile(path.join(displacedWorkbench, 'workbench.html'), 'utf8')).toBe(
-      originalHtml
-    );
+    expect((await fs.lstat(path.join(displacedWorkbench, 'workbench.html'))).isFile()).toBe(true);
   } finally {
     await fs.rm(externalWorkbench, { recursive: true, force: true });
   }
@@ -720,7 +826,6 @@ test('clean roots with semantically correct checksum are not rewritten during re
     classification: 'clean',
     registrationState: 'valid',
     desiredThemeId: null,
-    canSelfHeal: false,
   });
 });
 
@@ -1026,7 +1131,6 @@ test('external checksum mismatches are reported but not treated as Tyrian self-h
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'checksum-mismatch',
     managed: false,
-    canSelfHeal: false,
   });
 });
 
@@ -1039,7 +1143,6 @@ test('restore strips active Island UI when backup evidence is broken', async () 
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'broken-backup',
-    canSelfHeal: true,
   });
 
   await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
@@ -1199,7 +1302,6 @@ test('restore repairs checksum when broken sidecars mask the mismatch classifica
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     active: false,
     classification: 'broken-backup',
-    canSelfHeal: true,
   });
 
   await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
@@ -1229,7 +1331,6 @@ test('status treats a stale Island manifest checksum as self-healable broken sta
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     active: true,
     classification: 'broken-backup',
-    canSelfHeal: true,
     issues: expect.arrayContaining([
       'Tyrian manifest checksum does not match the current workbench HTML.',
     ]),
@@ -1474,7 +1575,6 @@ test('restore refuses incomplete manifest ownership proof before trusting backup
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'broken-backup',
-    canSelfHeal: true,
   });
 
   await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
@@ -1663,9 +1763,10 @@ test('v4 transaction recovery restores the retired generation and removes its ev
   }
 });
 
-test('v4 recovery restores a target retired before staged publication', async () => {
+test('Doctor and supervised apply recover a v4 target retired before staged publication', async () => {
   const appRoot = await createAppRoot('v4-retire-publication-gap');
   const paths = buildIslandPatchPaths(appRoot);
+  const cssSource = path.join(testRoot, 'v4-retire-publication-gap.css');
   const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
   const originalStats = await fs.lstat(paths.workbenchHtmlPath);
   const desiredHtml = `${originalHtml}\n<!-- interrupted desired generation -->\n`;
@@ -1673,6 +1774,7 @@ test('v4 recovery restores a target retired before staged publication', async ()
   const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
   const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
   const retiredPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'retired');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: violet; }\n', 'utf8');
   await fs.writeFile(backupPath, originalHtml, 'utf8');
   await fs.writeFile(stagedPath, desiredHtml, 'utf8');
   await fs.rename(paths.workbenchHtmlPath, retiredPath);
@@ -1705,33 +1807,164 @@ test('v4 recovery restores a target retired before staged publication', async ()
     'utf8'
   );
 
-  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-pending',
+    transaction: {
+      kind: 'recoverable',
+      version: 4,
+      recoverability: 'automatic',
+    },
+  });
+  await expect(
+    applyIslandUiSupervised({
+      appRoot,
+      cssSourcePath: cssSource,
+      themeVersion: 'test',
+      registryHome,
+    })
+  ).resolves.toMatchObject({
+    kind: 'applied',
     physicalChanged: true,
   });
-  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toContain(TYRIAN_MARKER_START);
   for (const ownedPath of [backupPath, stagedPath, retiredPath, paths.transactionJournalPath]) {
     await expect(fs.lstat(ownedPath)).rejects.toThrow();
   }
 });
 
-test('verified cleanup preserves replacement evidence and reports the physical mutation', async () => {
+test('prepared v5 recovery validates its publication before removing the staged proof', async () => {
+  const appRoot = await createAppRoot('v5-prepared-publication');
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const originalStats = await fs.lstat(paths.workbenchHtmlPath);
+  const desiredHtml = `${originalHtml}\n<!-- prepared desired generation -->\n`;
+  const id = crypto.randomUUID();
+  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
+  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
+  const publicationPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'publication');
+  await fs.copyFile(paths.workbenchHtmlPath, backupPath);
+  await fs.writeFile(stagedPath, desiredHtml, 'utf8');
+  await fs.chmod(stagedPath, originalStats.mode);
+  await fs.link(stagedPath, publicationPath);
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify(
+      {
+        version: 5,
+        id,
+        appRoot,
+        phase: 'prepared',
+        entries: [
+          {
+            filePath: paths.workbenchHtmlPath,
+            backupPath,
+            stagedPath,
+            publicationPath,
+            existed: true,
+            originalChecksum: sha256Base64(originalHtml),
+            desiredChecksum: sha256Base64(desiredHtml),
+            originalMode: Number(originalStats.mode),
+            originalDevice: String(originalStats.dev),
+            originalInode: String(originalStats.ino),
+          },
+        ],
+      },
+      null,
+      2
+    ).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-pending',
+    transaction: {
+      kind: 'recoverable',
+      recoverability: 'automatic',
+      version: 5,
+      phase: 'prepared',
+    },
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    physicalChanged: false,
+  });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  for (const evidencePath of [
+    backupPath,
+    stagedPath,
+    publicationPath,
+    paths.transactionJournalPath,
+  ]) {
+    await expect(fs.lstat(evidencePath)).rejects.toThrow();
+  }
+});
+
+test('a SIGKILL during preparing-stage population leaves disposable scratch for Doctor and supervised apply', async () => {
+  const appRoot = await createAppRoot('preparing-stage-kill');
+  const paths = buildIslandPatchPaths(appRoot);
+  const cssSource = path.join(testRoot, 'preparing-stage-kill.css');
+  const preloadPath = await writeIslandPreparingStageKillPreload();
+  await fs.writeFile(cssSource, '.monaco-workbench { color: teal; }\n', 'utf8');
+
+  const child = await runIslandApplyCli(appRoot, cssSource, undefined, { preloadPath });
+  expect(child.exitCode).not.toBe(0);
+
+  const journal = JSON.parse(await fs.readFile(paths.transactionJournalPath, 'utf8')) as {
+    phase: string;
+    entries: Array<{ stagedPath?: string }>;
+  };
+  const stagedPath = journal.entries.find(
+    ({ stagedPath: candidate }) => candidate !== undefined
+  )?.stagedPath;
+  expect(journal.phase).toBe('preparing');
+  expect(stagedPath).toBeDefined();
+  expect(await fs.readFile(stagedPath!, 'utf8')).not.toContain(TYRIAN_MARKER_START);
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-pending',
+    transaction: { kind: 'recoverable', recoverability: 'automatic', version: 5 },
+  });
+  await expect(
+    readIslandShellApplyReadiness({
+      appRoot,
+      cssSourcePath: cssSource,
+      themeVersion: 'test',
+      registryHome,
+    })
+  ).resolves.toMatchObject({ kind: 'ready' });
+  await expect(
+    applyIslandUiSupervised({
+      appRoot,
+      cssSourcePath: cssSource,
+      themeVersion: 'test',
+      registryHome,
+    })
+  ).resolves.toMatchObject({ kind: 'applied' });
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toContain(TYRIAN_MARKER_START);
+  await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
+});
+
+test('verified cleanup preserves a replacement staged generation and reports the completed physical mutation', async () => {
   const appRoot = await createAppRoot('verified-cleanup-replacement');
   const cssSource = path.join(testRoot, 'verified-cleanup-replacement.css');
-  await fs.writeFile(cssSource, '.monaco-workbench { color: violet; }\n', 'utf8');
+  const paths = buildIslandPatchPaths(appRoot);
+  const foreignContent = 'foreign staged generation\n';
   const originalReadFile = fs.readFile;
   const originalRename = fs.rename;
-  const foreignContent = 'foreign staged generation\n';
   let replacementPath: string | undefined;
-  const workbenchDirectory = buildIslandPatchPaths(appRoot).workbenchDirPath;
+  await fs.writeFile(cssSource, '.monaco-workbench { color: violet; }\n', 'utf8');
 
   fs.readFile = (async (...args: Parameters<typeof fs.readFile>) => {
     const [filePath] = args;
-    if (replacementPath === undefined && path.basename(String(filePath)).includes('-stage-')) {
-      const replacementOperationPath = String(filePath);
-      replacementPath = path.join(workbenchDirectory, path.basename(replacementOperationPath));
-      const injectedPath = `${replacementOperationPath}.external`;
+    const operationPath = String(filePath);
+    if (
+      replacementPath === undefined &&
+      path.basename(operationPath).includes('-stage-') &&
+      (await originalReadFile(paths.transactionJournalPath, 'utf8')).includes('"phase": "verified"')
+    ) {
+      replacementPath = path.join(paths.workbenchDirPath, path.basename(operationPath));
+      const injectedPath = `${replacementPath}.external`;
       await fs.writeFile(injectedPath, foreignContent, 'utf8');
-      await originalRename(injectedPath, replacementOperationPath);
+      await originalRename(injectedPath, replacementPath);
     }
     return originalReadFile(...args);
   }) as typeof fs.readFile;
@@ -1751,9 +1984,199 @@ test('verified cleanup preserves replacement evidence and reports the physical m
 
   expect(replacementPath).toBeDefined();
   expect(await fs.readFile(replacementPath!, 'utf8')).toBe(foreignContent);
-  expect((await fs.lstat(buildIslandPatchPaths(appRoot).transactionJournalPath)).isFile()).toBe(
-    true
+  expect((await fs.lstat(paths.transactionJournalPath)).isFile()).toBe(true);
+});
+
+test('SIGKILL before or after atomic exchange leaves each app target at a complete generation', async () => {
+  for (const phase of ['before-exchange', 'after-exchange'] as const) {
+    const appRoot = await createAppRoot(`sigkill-${phase}`);
+    const paths = buildIslandPatchPaths(appRoot);
+    const cssSource = path.join(testRoot, `sigkill-${phase}.css`);
+    const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+    await fs.writeFile(cssSource, '.monaco-workbench { color: crimson; }\n', 'utf8');
+    const fakeMvDirectory = await writeIslandTestMv(phase);
+
+    const child = await runIslandApplyCli(appRoot, cssSource, fakeMvDirectory);
+    expect(child.exitCode).not.toBe(0);
+
+    const journal = JSON.parse(await fs.readFile(paths.transactionJournalPath, 'utf8')) as {
+      entries: Array<{ filePath: string; stagedPath?: string }>;
+    };
+    const htmlEntry = journal.entries.find(({ filePath }) => filePath === paths.workbenchHtmlPath);
+    const stagedHtml = await fs.readFile(htmlEntry!.stagedPath!, 'utf8');
+    expect(stagedHtml).toContain(TYRIAN_MARKER_START);
+    expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(
+      phase === 'before-exchange' ? originalHtml : stagedHtml
+    );
+    expect(await fs.readFile(paths.productJsonPath, 'utf8')).toBe(
+      await fs.readFile(paths.backupProductJsonPath, 'utf8')
+    );
+    await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+      transaction: {
+        kind: 'recoverable',
+        version: 5,
+        recoverability: 'automatic',
+      },
+    });
+
+    await restoreIslandShell({ appRoot, registryHome });
+    expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+    await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
+  }
+});
+
+test('repeated recovery revokes each delayed helper source and never reuses an earlier attempt', async () => {
+  const appRoot = await createAppRoot('delayed-recovery-exchange');
+  const paths = buildIslandPatchPaths(appRoot);
+  const cssSource = path.join(testRoot, 'delayed-recovery-exchange.css');
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: orchid; }\n', 'utf8');
+
+  const publishKillDirectory = await writeIslandTestMv('after-exchange');
+  const initial = await runIslandApplyCli(appRoot, cssSource, publishKillDirectory);
+  expect(initial.exitCode).not.toBe(0);
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toContain(TYRIAN_MARKER_START);
+
+  const recoveryKillDirectory = await writeIslandTestMv('wait-for-revocation');
+  const attempts: Array<{ pid: number; id: string; sourcePath: string; resultPath: string }> = [];
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const waitingPath = path.join(testRoot, `delayed-recovery-${attempt}.waiting.json`);
+      const resultPath = path.join(testRoot, `delayed-recovery-${attempt}.result`);
+      const interruptedRecovery = await runIslandRestoreCli(appRoot, recoveryKillDirectory, {
+        waitingPath,
+        resultPath,
+      });
+      expect(interruptedRecovery.exitCode).not.toBe(0);
+      const waiting = JSON.parse(await waitForIslandTestFile(waitingPath)) as {
+        pid: number;
+        source: string;
+      };
+      const journal = JSON.parse(await fs.readFile(paths.transactionJournalPath, 'utf8')) as {
+        recovery: { id: string; previousId?: string; phase: string };
+        entries: Array<{ filePath: string; publicationPath?: string }>;
+      };
+      const previousAttempt = attempts.at(-1);
+      attempts.push({
+        pid: waiting.pid,
+        id: journal.recovery.id,
+        sourcePath: path.join(paths.workbenchDirPath, path.basename(waiting.source)),
+        resultPath,
+      });
+      expect(journal.recovery).toMatchObject({ phase: 'ready' });
+      expect(journal.recovery.previousId).toBe(previousAttempt?.id);
+      expect(new Set(attempts.map(({ id }) => id)).size).toBe(attempts.length);
+      if (previousAttempt !== undefined) {
+        await expect(fs.lstat(previousAttempt.sourcePath)).rejects.toThrow();
+        expect(Number(await waitForIslandTestFile(previousAttempt.resultPath))).not.toBe(0);
+      }
+      const workbenchEntry = journal.entries.find(
+        ({ filePath }) => filePath === paths.workbenchHtmlPath
+      );
+      expect(workbenchEntry?.publicationPath).toBeDefined();
+      await expect(fs.lstat(workbenchEntry!.publicationPath!)).rejects.toThrow();
+      await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+        transaction: { kind: 'recoverable', recoverability: 'automatic', version: 5 },
+      });
+    }
+
+    await restoreIslandShell({ appRoot, registryHome });
+    expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+    for (const attempt of attempts) {
+      expect(Number(await waitForIslandTestFile(attempt.resultPath))).not.toBe(0);
+      await expect(fs.lstat(attempt.sourcePath)).rejects.toThrow();
+    }
+    await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
+  } finally {
+    for (const { pid } of attempts) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+  }
+});
+
+test('Restore without exchange preserves a pending v5 transaction before any recovery or desired-state mutation', async () => {
+  const appRoot = await createAppRoot('pending-v5-without-exchange');
+  const paths = buildIslandPatchPaths(appRoot);
+  const cssSource = path.join(testRoot, 'pending-v5-without-exchange.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: coral; }\n', 'utf8');
+  const interrupted = await runIslandApplyCli(
+    appRoot,
+    cssSource,
+    await writeIslandTestMv('after-exchange')
   );
+  expect(interrupted.exitCode).not.toBe(0);
+  const captureEvidence = async () => {
+    const evidence = [];
+    for (const directory of [
+      appRoot,
+      paths.workbenchDirPath,
+      buildManagedRootsDirectoryPath(registryHome),
+    ]) {
+      for (const name of (await fs.readdir(directory)).sort()) {
+        const filePath = path.join(directory, name);
+        // The locked admission may reclaim the killed writer's process lock.
+        if (filePath === buildIslandRootLockPath(appRoot)) continue;
+        const stats = await fs.lstat(filePath);
+        evidence.push({
+          filePath,
+          device: String(stats.dev),
+          inode: String(stats.ino),
+          bytes: stats.isFile() ? (await fs.readFile(filePath)).toString('hex') : undefined,
+        });
+      }
+    }
+    return evidence;
+  };
+  const before = await captureEvidence();
+
+  const restored = await runIslandRestoreCli(
+    appRoot,
+    await writeIslandTestMv('unsupported-exchange'),
+    {
+      waitingPath: path.join(testRoot, 'unused-waiting'),
+      resultPath: path.join(testRoot, 'unused-result'),
+    }
+  );
+
+  expect(restored.exitCode).not.toBe(0);
+  expect(JSON.parse(restored.stderr.trim())).toMatchObject({
+    code: 'unsupported',
+    reason: expect.stringContaining('pending v5 transaction'),
+    changed: false,
+    physicalChanged: false,
+    desiredStateChanged: false,
+    registryChanged: false,
+    incompleteRecovery: true,
+  });
+  expect(await captureEvidence()).toEqual(before);
+});
+
+test('a later locked owner retries a SIGKILL-interrupted journal deletion from its predecessor', async () => {
+  const appRoot = await createAppRoot('journal-removal-recovery');
+  const paths = buildIslandPatchPaths(appRoot);
+  const cssSource = path.join(testRoot, 'journal-removal-recovery.css');
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const preloadPath = await writeIslandJournalRemovalKillPreload();
+  const predecessor = durableMetadataTestPaths(paths.transactionJournalPath);
+  await fs.writeFile(cssSource, '.monaco-workbench { color: salmon; }\n', 'utf8');
+
+  const child = await runIslandApplyCli(appRoot, cssSource, undefined, { preloadPath });
+  expect(child.exitCode).not.toBe(0);
+  await expect(fs.lstat(paths.transactionJournalPath)).rejects.toThrow();
+  expect((await fs.lstat(predecessor.retiredPath)).isFile()).toBe(true);
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-pending',
+    transaction: { kind: 'recoverable', recoverability: 'automatic' },
+  });
+
+  await restoreIslandShell({ appRoot, registryHome });
+
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  for (const evidencePath of [paths.transactionJournalPath, predecessor.retiredPath]) {
+    await expect(fs.lstat(evidencePath)).rejects.toThrow();
+  }
 });
 
 test('status exposes corrupt transaction evidence before mutation blocks', async () => {
@@ -1772,6 +2195,86 @@ test('status exposes corrupt transaction evidence before mutation blocks', async
   await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
     'Tyrian file transaction journal is invalid JSON'
   );
+});
+
+test('legacy random journal retirement evidence stays manual and preserves application files', async () => {
+  const appRoot = await createAppRoot('legacy-journal-retirement');
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const legacyPath = legacyDurableRemovalPath(paths.transactionJournalPath);
+  await fs.writeFile(legacyPath, '{ legacy journal retirement\n', 'utf8');
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-blocked',
+    transaction: {
+      recoverability: 'manual',
+      reason: expect.stringContaining('legacy unproved deletion evidence'),
+    },
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
+    'legacy unproved deletion evidence'
+  );
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  expect(await fs.readFile(legacyPath, 'utf8')).toBe('{ legacy journal retirement\n');
+});
+
+test('Doctor preserves legacy random sealed sidecar retirement evidence', async () => {
+  const appRoot = await createAppRoot('legacy-sidecar-retirement');
+  const paths = buildIslandPatchPaths(appRoot);
+  const originalHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const originalStats = await fs.lstat(paths.workbenchHtmlPath);
+  const desiredHtml = `${originalHtml}\n<!-- sealed desired generation -->\n`;
+  const id = crypto.randomUUID();
+  const backupPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'backup');
+  const stagedPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'stage');
+  const publicationPath = transactionTemporaryPath(paths.workbenchHtmlPath, id, 'publication');
+  const legacyStagedPath = legacyDurableRemovalPath(stagedPath);
+  await fs.copyFile(paths.workbenchHtmlPath, backupPath);
+  await fs.writeFile(stagedPath, desiredHtml, 'utf8');
+  await fs.chmod(stagedPath, originalStats.mode);
+  await fs.link(stagedPath, publicationPath);
+  await fs.rename(stagedPath, legacyStagedPath);
+  await fs.writeFile(
+    paths.transactionJournalPath,
+    JSON.stringify(
+      {
+        version: 5,
+        id,
+        appRoot,
+        phase: 'prepared',
+        entries: [
+          {
+            filePath: paths.workbenchHtmlPath,
+            backupPath,
+            stagedPath,
+            publicationPath,
+            existed: true,
+            originalChecksum: sha256Base64(originalHtml),
+            desiredChecksum: sha256Base64(desiredHtml),
+            originalMode: Number(originalStats.mode),
+            originalDevice: String(originalStats.dev),
+            originalInode: String(originalStats.ino),
+          },
+        ],
+      },
+      null,
+      2
+    ).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'transaction-blocked',
+    transaction: {
+      recoverability: 'manual',
+      reason: expect.stringContaining('legacy unproved deletion evidence'),
+    },
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).rejects.toThrow(
+    'legacy unproved deletion evidence'
+  );
+  expect(await fs.readFile(paths.workbenchHtmlPath, 'utf8')).toBe(originalHtml);
+  expect(await fs.readFile(legacyStagedPath, 'utf8')).toBe(desiredHtml);
 });
 
 async function createAppRoot(
@@ -1880,10 +2383,286 @@ async function expectOnlyWorkbenchHtmlSidecarRemains(appRoot: string): Promise<v
 function transactionTemporaryPath(
   filePath: string,
   transactionId: string,
-  kind: 'backup' | 'stage' | 'retired'
+  kind: 'backup' | 'stage' | 'retired' | 'publication'
 ): string {
   return path.join(
     path.dirname(filePath),
     `.tyrian-night-${transactionId}-${kind}-${path.basename(filePath)}.tmp`
   );
+}
+
+function durableMetadataTestPaths(filePath: string): { retiredPath: string } {
+  const directory = path.dirname(filePath);
+  const baseName = path.basename(filePath);
+  return {
+    retiredPath: path.join(directory, `.tyrian-night-retired-${baseName}.tmp`),
+  };
+}
+
+function legacyDurableRemovalPath(filePath: string): string {
+  return path.join(
+    path.dirname(filePath),
+    `.tyrian-night-${crypto.randomUUID()}-retired-${path.basename(filePath)}.tmp`
+  );
+}
+
+type IslandTestMvMode =
+  | 'before-exchange'
+  | 'after-exchange'
+  | 'external-replacement'
+  | 'ancestor-swap'
+  | 'wait-for-revocation'
+  | 'unsupported-exchange';
+
+async function writeIslandTestMv(mode: IslandTestMvMode): Promise<string> {
+  const directory = path.join(testRoot, `fake-mv-${mode}-${crypto.randomUUID()}`);
+  await fs.mkdir(directory);
+  const scriptPath = path.join(directory, 'mv');
+  const script = `#!${process.execPath}
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const args = process.argv.slice(2);
+const mode = process.env.TYRIAN_TEST_MV_MODE;
+if (args.length === 1 && args[0] === '--help') {
+  if (mode === 'unsupported-exchange') {
+    process.stdout.write('usage: mv\\n');
+    process.exit(0);
+  }
+  process.stdout.write('--exchange\\n--no-copy\\n--no-target-directory\\n');
+  process.exit(0);
+}
+if (args.includes('--exchange')) {
+  if (mode === 'before-exchange') {
+    process.kill(process.ppid, 'SIGKILL');
+    process.exit(0);
+  }
+  if (mode === 'external-replacement') {
+    const targetPath = process.env.TYRIAN_TEST_TARGET_PATH;
+    if (!targetPath) throw new Error('missing external replacement target');
+    const externalPath = targetPath.concat('.external');
+    await fs.writeFile(externalPath, process.env.TYRIAN_TEST_REPLACEMENT ?? '', 'utf8');
+    const externalStats = await fs.lstat(externalPath);
+    await fs.writeFile(targetPath.concat('.external-identity.json'), JSON.stringify({
+      device: String(externalStats.dev), inode: String(externalStats.ino),
+    }), 'utf8');
+    await fs.rename(externalPath, targetPath);
+  }
+  if (mode === 'ancestor-swap') {
+    const workbenchDirectory = process.env.TYRIAN_TEST_WORKBENCH_DIRECTORY;
+    const displacedWorkbench = process.env.TYRIAN_TEST_DISPLACED_WORKBENCH;
+    const externalWorkbench = process.env.TYRIAN_TEST_EXTERNAL_WORKBENCH;
+    if (!workbenchDirectory || !displacedWorkbench || !externalWorkbench) {
+      throw new Error('missing ancestor-swap paths');
+    }
+    await fs.rename(workbenchDirectory, displacedWorkbench);
+    await fs.symlink(externalWorkbench, workbenchDirectory, 'dir');
+  }
+  if (mode === 'wait-for-revocation') {
+    const source = args.at(-2);
+    const waitingPath = process.env.TYRIAN_TEST_WAITING_PATH;
+    const resultPath = process.env.TYRIAN_TEST_RESULT_PATH;
+    if (!source || !waitingPath || !resultPath) throw new Error('missing delayed-exchange paths');
+    process.kill(process.ppid, 'SIGKILL');
+    await fs.writeFile(waitingPath.concat('.next'), JSON.stringify({ pid: process.pid, source }), 'utf8');
+    await fs.rename(waitingPath.concat('.next'), waitingPath);
+    while (true) {
+      try {
+        await fs.lstat(source);
+        await delay(10);
+      } catch (error) {
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) {
+          throw error;
+        }
+        break;
+      }
+    }
+    const delayed = spawnSync(process.env.TYRIAN_TEST_REAL_MV ?? '/usr/bin/mv', args, {
+      stdio: ['ignore', 'ignore', 'ignore', 3, 4],
+    });
+    await fs.writeFile(resultPath.concat('.next'), String(delayed.status ?? 1), 'utf8');
+    await fs.rename(resultPath.concat('.next'), resultPath);
+    process.exit(delayed.status ?? 1);
+  }
+  const result = spawnSync(process.env.TYRIAN_TEST_REAL_MV ?? '/usr/bin/mv', args, {
+    stdio: ['inherit', 'inherit', 'inherit', 3, 4],
+  });
+  if (mode === 'after-exchange' && result.status === 0) {
+    process.kill(process.ppid, 'SIGKILL');
+  }
+  process.exit(result.status ?? 1);
+}
+const result = spawnSync(process.env.TYRIAN_TEST_REAL_MV ?? '/usr/bin/mv', args, {
+  stdio: ['inherit', 'inherit', 'inherit', 3, 4],
+});
+process.exit(result.status ?? 1);
+`;
+  await fs.writeFile(scriptPath, script, 'utf8');
+  await fs.chmod(scriptPath, 0o755);
+  return directory;
+}
+
+async function runIslandApplyCli(
+  appRoot: string,
+  cssSourcePath: string,
+  fakeMvDirectory: string | undefined,
+  options: {
+    targetPath?: string;
+    replacement?: string;
+    workbenchDirectory?: string;
+    displacedWorkbench?: string;
+    externalWorkbench?: string;
+    preloadPath?: string;
+    waitingPath?: string;
+    resultPath?: string;
+  } = {}
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  const command = [process.execPath];
+  if (options.preloadPath !== undefined) command.push('--preload', options.preloadPath);
+  command.push(
+    path.resolve('apps/vscode/src/islandCli.ts'),
+    'apply',
+    '--app-root',
+    appRoot,
+    '--css-source',
+    cssSourcePath,
+    '--theme-version',
+    'test'
+  );
+  const child = Bun.spawn(command, {
+    env: {
+      ...process.env,
+      HOME: registryHome,
+      PATH: [fakeMvDirectory, process.env.PATH].filter(Boolean).join(path.delimiter),
+      TYRIAN_TEST_MV_MODE:
+        fakeMvDirectory === undefined ? undefined : islandTestMvModeFromDirectory(fakeMvDirectory),
+      TYRIAN_TEST_TARGET_PATH: options.targetPath,
+      TYRIAN_TEST_REPLACEMENT: options.replacement,
+      TYRIAN_TEST_WORKBENCH_DIRECTORY: options.workbenchDirectory,
+      TYRIAN_TEST_DISPLACED_WORKBENCH: options.displacedWorkbench,
+      TYRIAN_TEST_EXTERNAL_WORKBENCH: options.externalWorkbench,
+      TYRIAN_TEST_WAITING_PATH: options.waitingPath,
+      TYRIAN_TEST_RESULT_PATH: options.resultPath,
+    },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { exitCode, stdout, stderr };
+}
+
+async function runIslandRestoreCli(
+  appRoot: string,
+  fakeMvDirectory: string,
+  options: { waitingPath: string; resultPath: string }
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      path.resolve('apps/vscode/src/islandCli.ts'),
+      'restore',
+      '--app-root',
+      appRoot,
+    ],
+    {
+      env: {
+        ...process.env,
+        HOME: registryHome,
+        PATH: [fakeMvDirectory, process.env.PATH].filter(Boolean).join(path.delimiter),
+        TYRIAN_TEST_MV_MODE: islandTestMvModeFromDirectory(fakeMvDirectory),
+        TYRIAN_TEST_WAITING_PATH: options.waitingPath,
+        TYRIAN_TEST_RESULT_PATH: options.resultPath,
+      },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }
+  );
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { exitCode, stdout, stderr };
+}
+
+async function waitForIslandTestFile(filePath: string, timeoutMs = 5_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      return await fs.readFile(filePath, 'utf8');
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      await delay(10);
+    }
+  }
+  throw new Error(`Timed out waiting for Island test process evidence at '${filePath}'.`);
+}
+
+async function writeIslandPreparingStageKillPreload(): Promise<string> {
+  const preloadPath = path.join(testRoot, 'kill-island-preparing-stage.ts');
+  await fs.writeFile(
+    preloadPath,
+    [
+      "import fs from 'node:fs/promises';",
+      'const open = fs.open.bind(fs);',
+      'fs.open = async (...args) => {',
+      '  const handle = await open(...args);',
+      "  if (String(args[0]).includes('-stage-') && args[1] === 'wx') {",
+      '    handle.writeFile = async (content) => {',
+      "      await handle.write(String(content).slice(0, 1), 'utf8');",
+      "      process.kill(process.pid, 'SIGKILL');",
+      '    };',
+      '  }',
+      '  return handle;',
+      '};',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  return preloadPath;
+}
+
+async function writeIslandJournalRemovalKillPreload(): Promise<string> {
+  const preloadPath = path.join(testRoot, 'kill-island-journal-removal.ts');
+  await fs.writeFile(
+    preloadPath,
+    [
+      "import path from 'node:path';",
+      "import fs from 'node:fs/promises';",
+      'const rename = fs.rename.bind(fs);',
+      'let killed = false;',
+      'fs.rename = async (sourcePath, targetPath) => {',
+      '  const result = await rename(sourcePath, targetPath);',
+      "  if (!killed && path.basename(String(sourcePath)) === 'tyrian-night.transaction.json' && path.basename(String(targetPath)) === '.tyrian-night-retired-tyrian-night.transaction.json.tmp') {",
+      '    killed = true;',
+      "    process.kill(process.pid, 'SIGKILL');",
+      '  }',
+      '  return result;',
+      '};',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  return preloadPath;
+}
+
+function islandTestMvModeFromDirectory(directory: string): IslandTestMvMode {
+  const name = path.basename(directory);
+  const mode = [
+    'before-exchange',
+    'after-exchange',
+    'external-replacement',
+    'ancestor-swap',
+    'wait-for-revocation',
+    'unsupported-exchange',
+  ].find((candidate) => name.startsWith(`fake-mv-${candidate}-`));
+  if (mode === undefined) throw new Error(`Unknown Island test mv directory '${directory}'.`);
+  return mode as IslandTestMvMode;
 }

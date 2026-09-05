@@ -5,7 +5,6 @@ import { expect, test } from 'bun:test';
 import { parseHexColor } from '../scripts/colorUtils.mjs';
 import {
   REQUIRED_THEME_ROLES,
-  VSCODE_PROJECTION,
   bracketColor,
   syntaxColor,
   terminalColor,
@@ -13,6 +12,7 @@ import {
 } from '../scripts/themeDefinition.mjs';
 import { SOURCE_THEMES, getDefaultThemeSource, readSourceTheme } from '../scripts/themeSources.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
+import { VSCODE_PROJECTION } from '../scripts/vscodeProjection.mjs';
 
 test('theme definitions expose one strict consumer-neutral role contract', () => {
   for (const source of SOURCE_THEMES) {

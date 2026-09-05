@@ -386,6 +386,7 @@ test('activation surfaces a typed incomplete reconciliation result', async () =>
   queuedSpawnResponses.push(
     fakeReconciliationStatus({ kind: 'valid', desiredThemeId: 'tyrian-night.css' }, true, true),
     {
+      version: 2,
       kind: 'blocked',
       ...mutationFacts({ incompleteRecovery: true }),
       status: fakeIslandStatus('transaction-blocked'),
@@ -409,6 +410,7 @@ test('restore completes through the supervisor without extra prompts', async () 
   expect(restoreCommand).toBeFunction();
   resetObservations();
   queuedSpawnResponses.push({
+    version: 2,
     kind: 'restored',
     ...mutationFacts({ physicalChanged: true }),
     restoredAppRoots: ['/test-vscode-app-root'],
@@ -427,6 +429,7 @@ test('restore does not request reload for desired-state and registry changes wit
   const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
   resetObservations();
   queuedSpawnResponses.push({
+    version: 2,
     kind: 'restored',
     ...mutationFacts({ desiredStateChanged: true, registryChanged: true }),
     restoredAppRoots: ['/test-vscode-app-root'],
@@ -446,6 +449,7 @@ test('restore reports a structured blocked result without rejecting the command'
   const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
   resetObservations();
   queuedSpawnResponses.push({
+    version: 2,
     kind: 'blocked',
     ...mutationFacts(),
     reason: 'pending transaction requires manual recovery',
@@ -471,6 +475,7 @@ test('repair Island UI handles permission-required supervisor result through Doc
   queuedSpawnResponses.push(
     fakeReconciliationStatus({ kind: 'absent' }),
     {
+      version: 2,
       kind: 'permission-required',
       ...mutationFacts(),
       status: fakeIslandStatus('clean'),
@@ -514,6 +519,7 @@ test('permission-required Island UI prompt can open the public setup guidance', 
   resetObservations();
   queuedWarningResponses.push('I Understand', 'Why This Is Needed');
   queuedSpawnResponses.push(fakeReconciliationStatus({ kind: 'absent' }), {
+    version: 2,
     kind: 'permission-required',
     ...mutationFacts(),
     status: fakeIslandStatus('clean'),
@@ -543,6 +549,7 @@ test('permission-required restore routes only to setup guidance, Doctor, or dism
   resetObservations();
   queuedWarningResponses.push('Later');
   queuedSpawnResponses.push({
+    version: 2,
     kind: 'permission-required',
     ...mutationFacts({ physicalChanged: true }),
     reason: 'EACCES: permission denied',
@@ -709,12 +716,14 @@ function defaultCliResult(args: string[]): unknown {
   switch (args[1]) {
     case 'apply-supervised':
       return {
+        version: 2,
         kind: 'already-current',
         ...mutationFacts(),
         status: fakeIslandStatus('patched'),
       };
     case 'restore-supervised':
       return {
+        version: 2,
         kind: 'already-classic',
         ...mutationFacts(),
         restoredAppRoots: [],
@@ -738,7 +747,7 @@ function defaultCliResult(args: string[]): unknown {
     case 'status':
       return fakeReconciliationStatus({ kind: 'absent' });
     case 'restore':
-      return { ...mutationFacts(), active: false };
+      return { version: 2, ...mutationFacts(), active: false };
     default:
       return { ...mutationFacts(), restoredAppRoots: [], failedAppRoots: [] };
   }
@@ -800,7 +809,6 @@ function fakeIslandStatus(classification: string): {
   desiredThemeId: string | null | undefined;
   classification: string;
   verificationPassed: boolean;
-  canSelfHeal: boolean;
   transaction: { kind: 'clean'; recoverability: 'none' };
   recommendedAction:
     | 'none'
@@ -821,7 +829,6 @@ function fakeIslandStatus(classification: string): {
     desiredThemeId: classification === 'patched' ? 'tyrian-night.css' : undefined,
     classification,
     verificationPassed: classification === 'clean' || classification === 'patched',
-    canSelfHeal: false,
     transaction: { kind: 'clean', recoverability: 'none' },
     recommendedAction:
       classification === 'broken-backup'

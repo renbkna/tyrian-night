@@ -5,16 +5,21 @@ import {
   SOURCE_THEMES,
   loadThemeRepository,
   readSourceTheme,
-  readSourceThemeRecipe,
+  loadThemeInspectionRepository,
+  readInspectionThemeRecipe,
 } from '../scripts/themeSources.mjs';
-import {
-  VSCODE_PROJECTION,
-  syntaxColor,
-  themeColor,
-  uiColor,
-} from '../scripts/themeDefinition.mjs';
+import { syntaxColor, themeColor, uiColor } from '../scripts/themeDefinition.mjs';
 import { buildVscodeTheme } from '../scripts/vscodeThemes.mjs';
+import { VSCODE_PROJECTION } from '../scripts/vscodeProjection.mjs';
 import { buildZedThemeFamily } from '../scripts/zedTheme.mjs';
+
+const inspectionRepository = loadThemeInspectionRepository();
+
+function readDefaultThemeRecipe(source: (typeof SOURCE_THEMES)[number]) {
+  const inspectedSource = inspectionRepository.sources.find(({ slug }) => slug === source.slug);
+  if (!inspectedSource) throw new Error(`Missing inspection source '${source.slug}'.`);
+  return readInspectionThemeRecipe(inspectedSource, inspectionRepository);
+}
 
 test('the family exposes six schema-v5 palettes through one current recipe path', () => {
   expect(SOURCE_THEMES.map(({ slug }) => slug)).toEqual([
@@ -28,7 +33,7 @@ test('the family exposes six schema-v5 palettes through one current recipe path'
 
   expect(
     SOURCE_THEMES.every((source) => {
-      const recipe = readSourceThemeRecipe(source);
+      const recipe = readDefaultThemeRecipe(source);
       return (
         recipe.schemaVersion === 5 &&
         !Object.hasOwn(recipe, 'appearance') &&
@@ -89,10 +94,7 @@ test('the family contract fixes hue identity and proves each declared energy tie
   const themes = Object.fromEntries(
     repository.sources
       .filter(({ slug }) => slug !== 'tyrian-night-old')
-      .map((source) => [
-        source.slug,
-        readSourceTheme(source, repository.root, repository.definition),
-      ])
+      .map((source) => [source.slug, readSourceTheme(source, repository)])
   );
   const semanticColors = (slug: string) => {
     const theme = themes[slug];
@@ -173,7 +175,7 @@ test('the historical-reference branch uses current bindings and opacity policy',
   expect(source).toBeDefined();
   const historical = readSourceTheme(source!);
   const repository = loadThemeRepository();
-  const recipe = readSourceThemeRecipe(source!, repository.root, repository.definition);
+  const recipe = readDefaultThemeRecipe(source!);
   expect(recipe).toEqual(expect.objectContaining({ schemaVersion: 5 }));
   expect(recipe).not.toHaveProperty('appearance');
   expect(recipe).not.toHaveProperty('hueProfile');

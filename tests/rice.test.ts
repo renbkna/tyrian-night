@@ -77,9 +77,17 @@ test('rice snapshot is complete and portable', () => {
 test('capturing rice keeps the requirements manifest pointer', () => {
   const root = makeTempRiceRepo();
   const userHome = path.join(root, 'live-home');
+  const environment = {
+    XDG_CONFIG_HOME: path.join(userHome, 'xdg/config'),
+    XDG_DATA_HOME: path.join(userHome, 'xdg/data'),
+    XDG_STATE_HOME: path.join(userHome, 'xdg/state'),
+  };
   const wallpaperPath = path.join(root, 'live-wallpaper.png');
-  const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
-  const shellLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[1].homePath);
+  const desktopLayoutPath = path.join(
+    environment.XDG_CONFIG_HOME,
+    'plasma-org.kde.plasma.desktop-appletsrc'
+  );
+  const shellLayoutPath = path.join(environment.XDG_CONFIG_HOME, 'plasmashellrc');
 
   try {
     fs.mkdirSync(path.dirname(desktopLayoutPath), { recursive: true });
@@ -129,6 +137,7 @@ test('capturing rice keeps the requirements manifest pointer', () => {
     captureRiceLayout({
       repoRoot: root,
       home: userHome,
+      environment,
       runCommand: (command, args) => {
         if (
           command === 'qdbus6' &&
@@ -143,6 +152,7 @@ test('capturing rice keeps the requirements manifest pointer', () => {
     });
 
     const manifest = JSON.parse(fs.readFileSync(path.join(root, RICE_MANIFEST_PATH), 'utf8')) as {
+      layoutFiles: typeof RICE_LAYOUT_FILES;
       requirements: string;
     };
     const capturedDesktop = fs.readFileSync(
@@ -151,6 +161,8 @@ test('capturing rice keeps the requirements manifest pointer', () => {
     );
 
     expect(manifest.requirements).toBe(RICE_REQUIREMENTS_PATH);
+    expect(manifest.layoutFiles).toEqual(RICE_LAYOUT_FILES);
+    expect(fs.existsSync(path.join(userHome, RICE_LAYOUT_FILES[0].homePath))).toBe(false);
     expect(capturedDesktop).toContain(RICE_WALLPAPER_PLACEHOLDER);
     expect(capturedDesktop).not.toContain('desktop:/private.txt');
     expect(capturedDesktop).not.toContain('/home/example');
@@ -1010,8 +1022,13 @@ test('style-only rice applies the Plasma profile without touching Hyprland or Ca
   }
 });
 
-test('full rice install honors injected home and command runner for style and layout', () => {
+test('full rice install shares injected XDG roots between style and layout', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-rice-full-test-'));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg/state'),
+  };
   const commandCalls: Array<{ command: string; args: string[] }> = [];
 
   try {
@@ -1019,6 +1036,7 @@ test('full rice install honors injected home and command runner for style and la
       installRice({
         repoRoot: process.cwd(),
         home,
+        environment,
         apply: true,
         hasCommand: () => true,
         runCommand: (command, args) => {
@@ -1028,11 +1046,18 @@ test('full rice install honors injected home and command runner for style and la
         },
       })
     ).not.toThrow();
-    const kdeglobals = path.join(home, '.config/kdeglobals');
-    const plasmarc = path.join(home, '.config/plasmarc');
+    const kdeglobals = path.join(environment.XDG_CONFIG_HOME, 'kdeglobals');
+    const plasmarc = path.join(environment.XDG_CONFIG_HOME, 'plasmarc');
 
-    expect(fs.existsSync(path.join(home, '.config/ghostty/config'))).toBe(true);
-    expect(fs.existsSync(path.join(home, '.config/foot/foot.ini'))).toBe(true);
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'ghostty/config'))).toBe(true);
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'foot/foot.ini'))).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(environment.XDG_CONFIG_HOME, 'plasma-org.kde.plasma.desktop-appletsrc')
+      )
+    ).toBe(true);
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'plasmashellrc'))).toBe(true);
+    expect(fs.existsSync(path.join(home, RICE_LAYOUT_FILES[0].homePath))).toBe(false);
     expect(commandCalls.map(({ command }) => command)).toEqual([
       'systemctl',
       'qdbus6',
@@ -1088,6 +1113,59 @@ test('full rice validates layout runtime before mutating style files', () => {
 
 test('Plasma layout restore has its own runtime command contract', () => {
   expect(RICE_LAYOUT_REQUIRED_COMMANDS).toEqual(['qdbus6', 'kscreen-doctor', 'systemctl']);
+});
+
+test('Plasma layout restore resolves targets from the supplied XDG config root', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const environment = {
+    XDG_CONFIG_HOME: path.join(home, 'xdg/config'),
+    XDG_DATA_HOME: path.join(home, 'xdg/data'),
+    XDG_STATE_HOME: path.join(home, 'xdg/state'),
+  };
+
+  try {
+    installPlasmaLayout({
+      repoRoot: root,
+      home,
+      environment,
+      apply: true,
+      runCommand: mockRiceRuntimeCommand,
+    });
+
+    expect(
+      fs.existsSync(
+        path.join(environment.XDG_CONFIG_HOME, 'plasma-org.kde.plasma.desktop-appletsrc')
+      )
+    ).toBe(true);
+    expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'plasmashellrc'))).toBe(true);
+    expect(fs.existsSync(path.join(home, RICE_LAYOUT_FILES[0].homePath))).toBe(false);
+    expect(fs.existsSync(path.join(home, RICE_LAYOUT_FILES[1].homePath))).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Plasma layout rejects an XDG config root outside its destination home', () => {
+  const root = makeTempRiceRepo();
+  const home = path.join(root, 'home');
+  const outsideConfigRoot = path.join(root, 'outside-config');
+
+  try {
+    expect(() =>
+      installPlasmaLayout({
+        repoRoot: root,
+        home,
+        environment: { XDG_CONFIG_HOME: outsideConfigRoot },
+        apply: false,
+        hasCommand: () => true,
+        runCommand: mockRiceRuntimeCommand,
+      })
+    ).toThrow('XDG_CONFIG_HOME outside the destination home is unsupported for recovery');
+    expect(fs.existsSync(outsideConfigRoot)).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Plasma layout restore maps captured panels to the current primary screen', () => {
@@ -1378,7 +1456,9 @@ test('standalone layout rejects physical symlink and wrong-type ancestors before
           runCommand: mockRiceRuntimeCommand,
         })
       ).toThrow(
-        ancestorType === 'symlink' ? 'traverses a symbolic link' : 'non-directory ancestor'
+        ancestorType === 'symlink'
+          ? 'XDG_CONFIG_HOME outside the destination home is unsupported for recovery'
+          : 'non-directory ancestor'
       );
       expect(fs.existsSync(path.join(external, 'plasma-org.kde.plasma.desktop-appletsrc'))).toBe(
         false

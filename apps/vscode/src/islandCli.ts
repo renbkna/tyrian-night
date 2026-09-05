@@ -15,7 +15,11 @@ import {
 } from './islandSupervisor.js';
 import {
   ISLAND_WIRE_PROTOCOL_VERSION,
+  projectIslandApplyResult,
+  projectIslandDirectRestoreResult,
+  projectIslandShellApplyResult,
   projectIslandReconciliationStatus,
+  projectIslandRestoreResult,
   projectIslandSupervisorInventory,
 } from './islandWire.js';
 
@@ -31,34 +35,42 @@ async function main(): Promise<void> {
   switch (command) {
     case 'apply':
       writeJson(
-        await applyIslandShell({
-          appRoot: requireArg(args, 'app-root'),
-          cssSourcePath: requireArg(args, 'css-source'),
-          themeVersion: requireArg(args, 'theme-version'),
-        })
+        projectIslandShellApplyResult(
+          await applyIslandShell({
+            appRoot: requireArg(args, 'app-root'),
+            cssSourcePath: requireArg(args, 'css-source'),
+            themeVersion: requireArg(args, 'theme-version'),
+          })
+        )
       );
       return;
     case 'apply-supervised':
       writeJson(
-        await applyIslandUiSupervised({
-          appRoot: requireArg(args, 'app-root'),
-          cssSourcePath: requireArg(args, 'css-source'),
-          themeVersion: requireArg(args, 'theme-version'),
-        })
+        projectIslandApplyResult(
+          await applyIslandUiSupervised({
+            appRoot: requireArg(args, 'app-root'),
+            cssSourcePath: requireArg(args, 'css-source'),
+            themeVersion: requireArg(args, 'theme-version'),
+          })
+        )
       );
       return;
     case 'restore':
       writeJson(
-        await restoreIslandShell({
-          appRoot: requireArg(args, 'app-root'),
-        })
+        projectIslandDirectRestoreResult(
+          await restoreIslandShell({
+            appRoot: requireArg(args, 'app-root'),
+          })
+        )
       );
       return;
     case 'restore-supervised':
       writeJson(
-        await restoreIslandUiSupervised({
-          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-        })
+        projectIslandRestoreResult(
+          await restoreIslandUiSupervised({
+            preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
+          })
+        )
       );
       return;
     case 'restore-all':

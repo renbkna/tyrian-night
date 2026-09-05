@@ -5,11 +5,12 @@ import path from 'node:path';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { FASTFETCH_IMAGE_CONFIG_PATH } from './portableAssets.mjs';
-import { TERMINAL_ANSI_ROLES, themeColor as requireThemeColor } from './themeDefinition.mjs';
+import { themeColor as requireThemeColor, TERMINAL_ANSI_ROLES } from './themeDefinition.mjs';
 import {
   getTerminalDefaultThemeSource,
   loadThemeRepository,
   readSourceTheme,
+  requireProductionThemeRepository,
 } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
@@ -40,9 +41,7 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
   const repository = loadThemeRepository(repoRoot);
   const sourceThemes = repository.sources.map((source) => ({
     source,
-    theme: /** @type {ThemeDefinition} */ (
-      readSourceTheme(source, repoRoot, repository.definition)
-    ),
+    theme: /** @type {ThemeDefinition} */ (readSourceTheme(source, repository)),
   }));
   const defaultDarkTheme = terminalSourceTheme(sourceThemes, 'dark').theme;
 
@@ -645,7 +644,9 @@ function terminalSourceTheme(sourceThemes, appearance) {
  * @param {import('./themeSources.mjs').ThemeRepository | undefined} repository
  */
 function resolveThemeRepository(root, repository) {
-  const resolvedRepository = repository ?? loadThemeRepository(root);
+  const resolvedRepository = requireProductionThemeRepository(
+    repository ?? loadThemeRepository(root)
+  );
   if (resolvedRepository.root !== path.resolve(root)) {
     throw new Error('Terminal generator theme context does not belong to the requested root.');
   }

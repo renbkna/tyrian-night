@@ -18,6 +18,7 @@ import {
   withHomeFilesystemTransaction,
   withLiveInstallLock,
 } from './installLiveTyrian.mjs';
+import { resolveDesktopXdgConfigPath, resolveDesktopXdgRoots } from './desktopPaths.mjs';
 import {
   admitOwnedPaths,
   escapeRegExp,
@@ -49,6 +50,9 @@ export const RICE_WALLPAPER_PATH = WALLPAPER_ASSET_PATH;
 export const RICE_MANIFEST_PATH = `${RICE_ROOT}/plasma-layout/manifest.json`;
 export const RICE_MANIFEST_OWNER = 'Tyrian Night rice';
 export const RICE_REQUIREMENTS_PATH = `${RICE_ROOT}/plasma-layout/requirements.md`;
+// `homePath` is a persistent manifest key. It describes a logical XDG config
+// location, not a physical path below the destination home. Keep it stable so
+// existing rice snapshots and manifests remain valid.
 export const RICE_LAYOUT_FILES = [
   {
     homePath: '.config/plasma-org.kde.plasma.desktop-appletsrc',
@@ -93,6 +97,7 @@ const PLASMA_LIFECYCLE_CANDIDATE_PATH = `${PLASMA_LIFECYCLE_PATH}.next`;
  * @typedef {{ hiding: string; alignment: string; lengthRatio: number; height: number; location: PanelLocation }} PanelSnapshotState
  * @typedef {PanelSnapshotState & { screen: number }} PanelRuntimeState
  * @typedef {{ activityId: string; screen: number; image: string; wallpaperPlugin: string }} WallpaperRuntimeState
+ * @typedef {import('./desktopPaths.mjs').DesktopXdgRoots} DesktopXdgRoots
  * @typedef {{
  *   apply: boolean;
  *   backupRoot: string;
@@ -116,6 +121,37 @@ const PLASMA_LIFECYCLE_CANDIDATE_PATH = `${PLASMA_LIFECYCLE_PATH}.next`;
  *   testInterruptAfterCommit?: boolean;
  * }} PreparedPlasmaLayoutInstall
  */
+
+/**
+ * Translate the persistent layout key into its physical location for this
+ * destination. The key intentionally remains rooted at `.config/` for
+ * manifest compatibility while the XDG resolver owns the actual root.
+ *
+ * @param {DesktopXdgRoots} xdgRoots
+ * @param {(typeof RICE_LAYOUT_FILES)[number]} file
+ * @returns {string}
+ */
+function resolveRiceLayoutFilePath(xdgRoots, file) {
+  const configPrefix = '.config/';
+
+  if (!file.homePath.startsWith(configPrefix)) {
+    throw new Error(`Rice layout key must be rooted at .config/: ${file.homePath}`);
+  }
+
+  return resolveDesktopXdgConfigPath(xdgRoots, file.homePath.slice(configPrefix.length));
+}
+
+/**
+ * @param {ReturnType<typeof buildLiveInstallPlan>} plan
+ * @returns {DesktopXdgRoots}
+ */
+function getPlanXdgRoots(plan) {
+  return {
+    configRoot: plan.configRoot,
+    dataRoot: plan.dataRoot,
+    stateRoot: plan.stateRoot,
+  };
+}
 
 /**
  * @param {{ repoRoot?: string; home?: string }} [options]
@@ -190,12 +226,14 @@ function checkRiceSnapshotOwned(root, captureHome) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptPublicationAfter?: number; testInterruptAfterStop?: boolean; testInterruptAfterRestart?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; environment?: NodeJS.ProcessEnv; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptPublicationAfter?: number; testInterruptAfterStop?: boolean; testInterruptAfterRestart?: boolean }} [options]
  * @returns {void}
  */
 export function captureRiceLayout(options = {}) {
   const root = resolvePathIdentity(options.repoRoot ?? repoRoot);
   const userHome = resolvePathIdentity(options.home ?? home);
+  const environment = options.environment ?? (options.home === undefined ? process.env : {});
+  const xdgRoots = resolveDesktopXdgRoots(userHome, environment);
   const runCommand = options.runCommand ?? execFileSync;
   const commandExists = options.hasCommand ?? (options.runCommand ? () => true : hasCommand);
   assertCurrentSessionHome(userHome, options.runCommand !== undefined, 'Rice capture');
@@ -222,6 +260,7 @@ export function captureRiceLayout(options = {}) {
         captureRiceLayoutOwned(
           root,
           userHome,
+          xdgRoots,
           runCommand,
           options.testInterruptPublicationAfter,
           options.testInterruptAfterStop,
@@ -236,6 +275,7 @@ export function captureRiceLayout(options = {}) {
 /**
  * @param {string} root
  * @param {string} userHome
+ * @param {DesktopXdgRoots} xdgRoots
  * @param {CommandRunner} runCommand
  * @param {number | undefined} testInterruptPublicationAfter
  * @param {boolean | undefined} testInterruptAfterStop
@@ -245,13 +285,14 @@ export function captureRiceLayout(options = {}) {
 function captureRiceLayoutOwned(
   root,
   userHome,
+  xdgRoots,
   runCommand,
   testInterruptPublicationAfter,
   testInterruptAfterStop,
   testInterruptAfterRestart
 ) {
   assertPlasmaShellActive(runCommand, 'Rice capture');
-  const desktopLayoutPath = path.join(userHome, RICE_LAYOUT_FILES[0].homePath);
+  const desktopLayoutPath = resolveRiceLayoutFilePath(xdgRoots, RICE_LAYOUT_FILES[0]);
   assertRegularSourceFileUnder(userHome, desktopLayoutPath, desktopLayoutPath);
   const beforeStopDesktop = fs.readFileSync(desktopLayoutPath, 'utf8');
   const beforeStopPanels = readSnapshotPanelGenerationById(beforeStopDesktop);
@@ -307,7 +348,7 @@ function captureRiceLayoutOwned(
     const rawLayoutContents = new Map();
 
     for (const file of RICE_LAYOUT_FILES) {
-      const sourcePath = path.join(userHome, file.homePath);
+      const sourcePath = resolveRiceLayoutFilePath(xdgRoots, file);
       assertRegularSourceFileUnder(userHome, sourcePath, sourcePath);
       rawLayoutContents.set(file.snapshotPath, fs.readFileSync(sourcePath, 'utf8'));
     }
@@ -437,7 +478,7 @@ function captureRiceLayoutOwned(
         `${(layoutContents.get(file.snapshotPath) ?? '').replace(/\n?$/u, '')}\n`,
         'utf8'
       ),
-      message: `capture ${path.join(userHome, file.homePath)}`,
+      message: `capture ${resolveRiceLayoutFilePath(xdgRoots, file)}`,
       targetPath: path.join(root, file.snapshotPath),
     })),
     {
@@ -1367,6 +1408,9 @@ export function installRice(options = {}) {
       ? preparePlasmaLayoutInstallOwned({
           repoRoot: root,
           home: userHome,
+          xdgRoots: livePlan
+            ? getPlanXdgRoots(livePlan)
+            : resolveDesktopXdgRoots(userHome, environment),
           runtimeRoot,
           apply,
           runCommand,
@@ -1415,6 +1459,10 @@ export function installRice(options = {}) {
       userHome,
       {
         targetPaths,
+        temporaryPaths: [
+          ...(livePlan ? [livePlan.stagingRoot] : []),
+          ...(preparedLayout?.installEntries.map(({ stagedPath }) => stagedPath) ?? []),
+        ],
         backupRoot,
         owner: 'rice',
         shouldLeavePrepared: (error) =>
@@ -1537,7 +1585,7 @@ class SimulatedRiceCommitInterruption extends Error {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; apply?: boolean; environment?: NodeJS.ProcessEnv; runCommand?: CommandRunner; hasCommand?: (command: string) => boolean; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
  * @returns {void}
  */
 export function installPlasmaLayout(options = {}) {
@@ -1547,6 +1595,8 @@ export function installPlasmaLayout(options = {}) {
     options.runtimeRoot ?? path.join(userHome, TYRIAN_INSTALL_HOME)
   );
   const apply = options.apply ?? false;
+  const environment = options.environment ?? (options.home === undefined ? process.env : {});
+  const xdgRoots = resolveDesktopXdgRoots(userHome, environment);
   const runCommand = options.runCommand ?? execFileSync;
   const commandExists = options.hasCommand ?? (options.runCommand ? () => true : hasCommand);
 
@@ -1565,6 +1615,7 @@ export function installPlasmaLayout(options = {}) {
       preparePlasmaLayoutInstallOwned({
         repoRoot: root,
         home: userHome,
+        xdgRoots,
         runtimeRoot,
         materializeWallpaper: true,
         apply,
@@ -1600,12 +1651,13 @@ export function installPlasmaLayout(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; home?: string; runtimeRoot?: string; materializeWallpaper?: boolean; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} [options]
+ * @param {{ repoRoot?: string; home?: string; xdgRoots: DesktopXdgRoots; runtimeRoot?: string; materializeWallpaper?: boolean; apply?: boolean; runCommand?: CommandRunner; testInterruptAfterStop?: boolean; testInterruptAfterRuntime?: boolean; testInterruptAfterCommit?: boolean }} options
  * @returns {PreparedPlasmaLayoutInstall}
  */
-function preparePlasmaLayoutInstallOwned(options = {}) {
+function preparePlasmaLayoutInstallOwned(options) {
   const root = options.repoRoot ?? repoRoot;
   const userHome = options.home ?? home;
+  const xdgRoots = options.xdgRoots;
   const runtimeRoot = options.runtimeRoot ?? path.join(userHome, TYRIAN_INSTALL_HOME);
   const apply = options.apply ?? false;
   const runCommand = options.runCommand ?? execFileSync;
@@ -1619,7 +1671,7 @@ function preparePlasmaLayoutInstallOwned(options = {}) {
 
   const sourceEntries = RICE_LAYOUT_FILES.map((file) => ({
     file,
-    targetPath: path.join(userHome, file.homePath),
+    targetPath: resolveRiceLayoutFilePath(xdgRoots, file),
     sourceContent: fs.readFileSync(path.join(root, file.snapshotPath), 'utf8'),
   }));
   const currentActivityId = apply ? readCurrentPlasmaActivityId(runCommand) : '';
@@ -1693,6 +1745,7 @@ function installPreparedPlasmaLayout(plan) {
       targetPaths: plan.installEntries
         .flatMap(({ stagedPath, targetPath }) => [targetPath, stagedPath])
         .concat(plan.materializeWallpaper ? [plan.wallpaperPath] : []),
+      temporaryPaths: plan.installEntries.map(({ stagedPath }) => stagedPath),
       backupRoot: plan.backupRoot,
       owner: 'layout',
       shouldLeavePrepared: (error) =>

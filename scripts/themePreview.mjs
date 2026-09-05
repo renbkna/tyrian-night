@@ -20,7 +20,7 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
   const family = repository.definition.familyContract;
 
   return repository.sources.map((source) => {
-    const theme = readSourceTheme(source, repoRoot, repository.definition);
+    const theme = readSourceTheme(source, repository);
     const energyVariant = family.energyLine.variants[source.slug];
     const branch = family.branches[source.slug];
     if (!energyVariant && !branch) {

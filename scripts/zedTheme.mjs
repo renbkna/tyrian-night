@@ -30,7 +30,7 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
     author: 'renbkna',
     themes: repository.sources.map((source) =>
       buildZedTheme(
-        /** @type {ThemeDefinition} */ (readSourceTheme(source, repoRoot, repository.definition)),
+        /** @type {ThemeDefinition} */ (readSourceTheme(source, repository)),
         repository.definition.requiredThemeRoles.brackets
       )
     ),

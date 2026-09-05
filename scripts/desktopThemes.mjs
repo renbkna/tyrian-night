@@ -204,9 +204,7 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const unionCssTemplate = readUnionCssTemplate(repoRoot);
 
   return repository.sources.flatMap((source) => {
-    const theme = /** @type {ThemeDefinition} */ (
-      readSourceTheme(source, repository.root, repository.definition)
-    );
+    const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repository));
     const palette = buildDesktopPalette(theme);
     const desktopAssets = desktopThemeAssetPaths(source.slug);
     const kdeFileName = desktopAssets.themeId;

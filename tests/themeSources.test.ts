@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,20 +8,25 @@ import { expect, test } from 'bun:test';
 
 import {
   getTerminalDefaultThemeSource,
+  loadThemeInspectionRepository,
   loadThemeRepository,
   normalizeThemeCatalog,
+  readInspectionTheme,
+  readInspectionThemeRecipe,
   readSourceTheme,
-  readSourceThemeRecipe,
-  readThemeSources,
 } from '../scripts/themeSources.mjs';
 import {
   loadThemeDefinitionContext,
-  loadVscodeProjection,
   themeColor,
   themePigmentOwner,
   validateThemeRecipe,
 } from '../scripts/themeDefinition.mjs';
 import { collectVscodeThemeAssets } from '../scripts/vscodeThemes.mjs';
+import { loadVscodeProjection } from '../scripts/vscodeProjection.mjs';
+import { auditThemePigmentPolicy, readThemePigmentPolicy } from '../scripts/themePigmentPolicy.mjs';
+import { auditThemeSafety, readThemeSafetyContract } from '../scripts/themeSafety.mjs';
+import { buildTerminalThemeAssets } from '../scripts/terminalThemes.mjs';
+import { buildZedThemeFamily } from '../scripts/zedTheme.mjs';
 
 const VALID_CATALOG = [
   { slug: 'tyrian-test-dark', terminalDefault: true },
@@ -36,6 +42,15 @@ const VALID_CLASSIFICATIONS = {
   'tyrian-test-light': { appearance: 'light', isDefault: false },
 } as const;
 const DEFAULT_DEFINITION = loadThemeDefinitionContext();
+const DEFAULT_INSPECTION_REPOSITORY = loadThemeInspectionRepository();
+
+function readDefaultThemeRecipe(source: { slug: string }) {
+  const inspectedSource = DEFAULT_INSPECTION_REPOSITORY.sources.find(
+    ({ slug }) => slug === source.slug
+  );
+  if (!inspectedSource) throw new Error(`Missing inspection source '${source.slug}'.`);
+  return readInspectionThemeRecipe(inspectedSource, DEFAULT_INSPECTION_REPOSITORY);
+}
 
 test('theme catalog derives identity from recipes and classification from family authority', () => {
   const themes = normalizeThemeCatalog(VALID_CATALOG, readIdentity, readClassification);
@@ -137,7 +152,7 @@ test('theme source reader resolves catalog and identity from the injected reposi
     }
 
     expect(
-      readThemeSources(root).map(({ label, appearance, isDefault }) => [
+      loadThemeInspectionRepository(root).sources.map(({ label, appearance, isDefault }) => [
         label,
         appearance,
         isDefault,
@@ -161,7 +176,7 @@ test('source outputs derive appearance and canonical default from the family con
       : family.branches[source.slug]!.kind === 'light-counterpart'
         ? 'light'
         : 'dark';
-    const recipe = readSourceThemeRecipe(source, repository.root, repository.definition);
+    const recipe = readDefaultThemeRecipe(source);
 
     expect(source.appearance).toBe(expectedAppearance);
     expect(source.isDefault).toBe(source.slug === family.canonical);
@@ -191,7 +206,7 @@ test('theme catalog is the exact authority for source JSON membership', () => {
       JSON.stringify(definitionFor({ name: 'Orphan' }, 'dark'))
     );
 
-    expect(() => readThemeSources(root)).toThrow(
+    expect(() => loadThemeInspectionRepository(root)).toThrow(
       'Source theme files are absent from the catalog: tyrian-orphan.json'
     );
   } finally {
@@ -243,8 +258,8 @@ test('source recipes own pigments once and resolve family-derived alpha projecti
   const repository = loadThemeRepository();
   const source = repository.sources.find(({ slug }) => slug === 'tyrian-nocturne');
   expect(source).toBeDefined();
-  const recipe = readSourceThemeRecipe(source!, repository.root, repository.definition);
-  const theme = readSourceTheme(source!, repository.root, repository.definition);
+  const recipe = readDefaultThemeRecipe(source!);
+  const theme = readSourceTheme(source!, repository);
 
   expect(recipe).not.toHaveProperty('ui');
   expect(recipe).not.toHaveProperty('opacities');
@@ -344,7 +359,7 @@ test('theme source contracts reject non-current schema versions', () => {
 test('theme recipe validation rejects split or incomplete color authority', () => {
   const source = loadThemeRepository().sources.find(({ slug }) => slug === 'tyrian-night');
   expect(source).toBeDefined();
-  const recipe = readSourceThemeRecipe(source!);
+  const recipe = readDefaultThemeRecipe(source!);
 
   const split = structuredClone(recipe) as any;
   split.ui = { 'surface.canvas': '#000000' };
@@ -396,6 +411,186 @@ test('theme recipe validation rejects split or incomplete color authority', () =
     pigments: {},
   };
   expect(() => validateThemeRecipe(retiredHexRecipe, source!.slug)).toThrow('schemaVersion 5');
+});
+
+test('production snapshots reject unreadable palettes while inspection snapshots preserve the violation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-safety-gate-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.json');
+    const recipe = readJson<any>(themePath);
+    recipe.oklch['syntax:comment'] = [0.1, 0];
+    fs.writeFileSync(themePath, `${JSON.stringify(recipe)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Theme 'tyrian-nocturne' violates theme safety policy"
+    );
+    expect(() => collectVscodeThemeAssets(root)).toThrow(
+      "Theme 'tyrian-nocturne' violates theme safety policy"
+    );
+
+    const inspection = loadThemeInspectionRepository(root);
+    const source = inspection.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
+    const theme = readInspectionTheme(source, inspection);
+    const contract = readThemeSafetyContract(
+      path.join(root, 'source/themeSafetyContract.json'),
+      inspection.definition
+    );
+    expect(auditThemeSafety(theme, contract)).toContainEqual(
+      expect.objectContaining({
+        constraint: 'readable-syntax',
+        kind: 'wcag-minimum-contrast',
+        role: 'syntax:comment',
+      })
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('color audit loads an inspection snapshot when production admission rejects the palette', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-audit-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.json');
+    const recipe = readJson<any>(themePath);
+    recipe.oklch['syntax:comment'] = [0.1, 0];
+    fs.writeFileSync(themePath, `${JSON.stringify(recipe)}\n`);
+
+    const audit = spawnSync(
+      process.execPath,
+      ['scripts/themeColorAudit.mjs', `--root=${root}`, '--theme=tyrian-nocturne'],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    );
+
+    expect(audit.status).toBe(1);
+    expect(audit.stdout).toContain('tyrian-nocturne: accessibility=1 violation(s)');
+    expect(audit.stdout).toContain('"role":"syntax:comment"');
+    expect(audit.stderr).toBe('');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production snapshots reject every duplicate bracket depth, including non-adjacent depths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-bracket-gate-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.json');
+    const recipe = readJson<any>(themePath);
+    recipe.oklch['brackets:depth1'] = [0.7, 0];
+    recipe.oklch['brackets:depth3'] = [0.7, 0];
+    fs.writeFileSync(themePath, `${JSON.stringify(recipe)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Theme 'tyrian-nocturne' violates theme safety policy"
+    );
+    expect(() => buildZedThemeFamily(root)).toThrow(
+      "Theme 'tyrian-nocturne' violates theme safety policy"
+    );
+
+    const inspection = loadThemeInspectionRepository(root);
+    const source = inspection.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
+    const contract = readThemeSafetyContract(
+      path.join(root, 'source/themeSafetyContract.json'),
+      inspection.definition
+    );
+    expect(auditThemeSafety(readInspectionTheme(source, inspection), contract)).toContainEqual({
+      constraint: 'bracket-depths',
+      kind: 'identical-independent-state-color',
+      roles: ['brackets:depth1', 'brackets:depth3'],
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production snapshots reject pigment-reservation violations while inspection can report them', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-pigment-gate-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const familyPath = path.join(root, 'source/themeFamilyContract.json');
+    const family = readJson<any>(familyPath);
+    family.pigmentHues['syntax:comment'].core = 146;
+    fs.writeFileSync(familyPath, `${JSON.stringify(family)}\n`);
+
+    expect(() => loadThemeRepository(root)).toThrow('violates theme pigment policy');
+
+    const inspection = loadThemeInspectionRepository(root);
+    const source = inspection.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
+    const policy = readThemePigmentPolicy(
+      path.join(root, 'source/themePigmentPolicy.json'),
+      inspection.definition
+    );
+    expect(auditThemePigmentPolicy(readInspectionTheme(source, inspection), policy)).toContainEqual(
+      expect.objectContaining({
+        reservation: 'green-cyan-reserved',
+        role: 'syntax:comment',
+      })
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('production source reads keep the validated snapshot when editable files change', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-snapshot-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const repository = loadThemeRepository(root);
+    const source = repository.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
+    const theme = readSourceTheme(source, repository);
+    const themePath = path.join(root, source.sourcePath);
+    const recipe = readJson<any>(themePath);
+    recipe.oklch['syntax:comment'] = [0.1, 0];
+    fs.writeFileSync(themePath, `${JSON.stringify(recipe)}\n`);
+
+    expect(readSourceTheme(source, repository)).toBe(theme);
+    expect(Object.isFrozen(theme)).toBe(true);
+    expect(() => loadThemeRepository(root)).toThrow(
+      "Theme 'tyrian-nocturne' violates theme safety policy"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('default source reads promote their captured snapshot without stitching a later recipe by slug', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-default-theme-snapshot-'));
+  try {
+    fs.cpSync('scripts', path.join(root, 'scripts'), { recursive: true });
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'default-snapshot.mjs'),
+      `import fs from 'node:fs';
+import path from 'node:path';
+import { SOURCE_THEMES, readSourceTheme } from './scripts/themeSources.mjs';
+
+const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne');
+if (!source) throw new Error('Default source is absent.');
+const recipePath = path.join(process.cwd(), source.sourcePath);
+const recipe = JSON.parse(fs.readFileSync(recipePath, 'utf8'));
+recipe.name = 'Tyrian Nocturne replacement';
+fs.writeFileSync(recipePath, JSON.stringify(recipe));
+const theme = readSourceTheme(source);
+if (theme.name !== source.label) {
+  throw new Error(\`Default snapshot mixed \${source.label} metadata with \${theme.name} palette.\`);
+}
+console.log(theme.name);
+`
+    );
+
+    const check = spawnSync(process.execPath, ['default-snapshot.mjs'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+
+    expect(check.status).toBe(0);
+    expect(check.stdout).toBe('Tyrian Nocturne\n');
+    expect(check.stderr).toBe('');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('family relationship validation rejects palette energy drift', () => {
@@ -524,7 +719,7 @@ test('family hue mappings are invariant under profile and JSON key reordering', 
   const resolved = (repository: ReturnType<typeof loadThemeRepository>) =>
     repository.sources.map((source) => ({
       slug: source.slug,
-      theme: readSourceTheme(source, repository.root, repository.definition),
+      theme: readSourceTheme(source, repository),
     }));
   const expected = resolved(baseline);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-hue-order-'));
@@ -606,6 +801,19 @@ test('opacity policy owns every derived alpha once and exposes only appearance o
     expect(() => loadThemeDefinitionContext(root)).toThrow(
       'Theme opacity opacities is invalid; missing: ui:selection.primary'
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('terminal and Zed generation do not require the VS Code projection file', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-neutral-projection-boundary-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+
+    expect(fs.existsSync(path.join(root, 'scripts/projections/vscodeColors.json'))).toBe(false);
+    expect(() => buildTerminalThemeAssets(root)).not.toThrow();
+    expect(() => buildZedThemeFamily(root)).not.toThrow();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -734,7 +942,7 @@ test('VS Code generation consumes the projection from the injected repository ro
     };
     const repository = loadThemeRepository(root);
     const source = repository.sources.find(({ slug }) => slug === 'tyrian-night')!;
-    const theme = readSourceTheme(source, root, repository.definition);
+    const theme = readSourceTheme(source, repository);
     expect(generated.colors['injectedOwner.background']).toBe(
       themeColor(theme, 'ui:surface.canvas')
     );

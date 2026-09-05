@@ -6,19 +6,19 @@ import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import {
-  loadVscodeProjection,
   bracketColor,
   syntaxColor,
   terminalColor,
   uiColor,
   vscodeColor,
 } from './themeDefinition.mjs';
+import { loadVscodeProjection } from './vscodeProjection.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- * @param {import('./themeDefinition.mjs').VscodeProjection} projection
+ * @param {import('./vscodeProjection.mjs').VscodeProjection} projection
  */
 export function buildVscodeTheme(theme, projection) {
   /** @type {Record<string, string>} */
@@ -55,7 +55,7 @@ function grammarColor(theme, role) {
 
 /**
  * @param {Record<string, string>} colors
- * @param {import('./themeDefinition.mjs').VscodeProjection['contrastPairs']} pairs
+ * @param {import('./vscodeProjection.mjs').VscodeProjection['contrastPairs']} pairs
  * @param {string} themeName
  */
 function enforceContrastContract(colors, pairs, themeName) {
@@ -80,7 +80,7 @@ export function collectVscodeThemeAssets(root = repoRoot) {
   return repository.sources.map((source) => ({
     path: source.vscodeThemePath,
     content: `${JSON.stringify(
-      buildVscodeTheme(readSourceTheme(source, root, repository.definition), projection),
+      buildVscodeTheme(readSourceTheme(source, repository), projection),
       null,
       2
     )}\n`,

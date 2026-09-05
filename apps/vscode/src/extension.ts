@@ -8,18 +8,18 @@ import {
   getIslandCssFileForTheme,
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
-import type { IslandShellResult } from './islandShell.js';
 import { readIslandApplyPlatformSupport } from './islandPlatform.js';
-import type {
-  IslandUiApplySupervisionResult,
-  IslandUiRestoreSupervisionResult,
-} from './islandSupervisor.js';
 import { IslandProcessFailure, runIslandJsonProcess } from './islandProcess.js';
 import {
   decodeIslandReconciliationStatus,
+  decodeIslandApplyResult,
+  decodeIslandDirectRestoreResult,
+  decodeIslandRestoreResult,
   decodeIslandSupervisorInventory,
+  type IslandApplyResult,
   type IslandDoctorStatus,
   type IslandReconciliationStatus,
+  type IslandRestoreResult,
   type IslandUiRecommendedAction,
 } from './islandWire.js';
 
@@ -36,47 +36,6 @@ const UNINSTALL_WARNING_MESSAGE =
 
 let extContext: vscode.ExtensionContext;
 let syncQueue = Promise.resolve();
-
-type IslandApplyResult = IslandUiApplySupervisionResult extends infer Result
-  ? Result extends IslandUiApplySupervisionResult
-    ? Pick<Result, Extract<keyof Result, 'kind' | 'physicalChanged' | 'reason'>> &
-        (Result extends { writeAccess: infer WriteAccess }
-          ? {
-              writeAccess: Pick<WriteAccess, Extract<keyof WriteAccess, 'blockedPaths'>>;
-            }
-          : object)
-    : never
-  : never;
-
-type IslandRestoreResult = IslandUiRestoreSupervisionResult extends infer Result
-  ? Result extends IslandUiRestoreSupervisionResult
-    ? Pick<Result, Extract<keyof Result, 'kind' | 'physicalChanged' | 'reason'>> &
-        (Result extends { kind: 'permission-required' | 'blocked' }
-          ? {
-              failedAppRoots: Array<Pick<Result['failedAppRoots'][number], 'appRoot' | 'reason'>>;
-            }
-          : object)
-    : never
-  : never;
-
-const APPLY_RESULT_KINDS: {
-  [Kind in IslandUiApplySupervisionResult['kind']]: Kind;
-} = {
-  applied: 'applied',
-  'already-current': 'already-current',
-  'permission-required': 'permission-required',
-  unsupported: 'unsupported',
-  blocked: 'blocked',
-};
-
-const RESTORE_RESULT_KINDS: {
-  [Kind in IslandUiRestoreSupervisionResult['kind']]: Kind;
-} = {
-  restored: 'restored',
-  'already-classic': 'already-classic',
-  'permission-required': 'permission-required',
-  blocked: 'blocked',
-};
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -178,10 +137,13 @@ async function reconcileIslandUi(): Promise<void> {
       notifyWhenUnchanged: false,
       reloadMessage: 'Tyrian Night: Island UI was updated. Reload VS Code to apply it.',
     });
-    if (result.kind !== 'applied' && result.kind !== 'already-current') {
-      throw new Error(`Island UI startup reconciliation is ${result.kind}. ${result.reason}`);
+    switch (result.kind) {
+      case 'applied':
+      case 'already-current':
+        return;
+      default:
+        throw new Error(`Island UI startup reconciliation is ${result.kind}. ${result.reason}`);
     }
-    return;
   }
 
   throw new Error(
@@ -330,7 +292,7 @@ async function applyIslandCssFile(
       '--theme-version',
       String(extContext.extension.packageJSON.version ?? 'unknown'),
     ],
-    validateApplyResult
+    decodeIslandApplyResult
   );
 
   switch (result.kind) {
@@ -520,7 +482,7 @@ async function doctorIslandUi(): Promise<void> {
 async function restoreIslandUi(): Promise<void> {
   const result = await runIslandCli(
     ['restore-supervised', '--app-root', vscode.env.appRoot],
-    validateRestoreResult
+    decodeIslandRestoreResult
   );
 
   if (result.kind === 'permission-required') {
@@ -609,7 +571,7 @@ async function readCurrentIslandStatus(): Promise<IslandReconciliationStatus> {
 async function restoreCurrentIslandUi(): Promise<void> {
   const result = await runIslandCli(
     ['restore', '--app-root', vscode.env.appRoot],
-    validateDirectRestoreResult
+    decodeIslandDirectRestoreResult
   );
 
   if (result.physicalChanged) {
@@ -617,153 +579,6 @@ async function restoreCurrentIslandUi(): Promise<void> {
       'Tyrian Night: Incomplete Island UI state was restored. Reload VS Code to finish reverting.'
     );
   }
-}
-
-function validateApplyResult(value: unknown): IslandApplyResult {
-  const record = requireProtocolRecord(value, 'apply result');
-  const kind = requireProtocolDiscriminant(record.kind, APPLY_RESULT_KINDS, 'apply result.kind');
-  const physicalChanged = requireProtocolBoolean(
-    record.physicalChanged,
-    'apply result.physicalChanged'
-  );
-
-  if (kind === 'applied' || kind === 'already-current') {
-    return { kind, physicalChanged };
-  }
-  if (kind === 'permission-required') {
-    const writeAccess = requireProtocolRecord(record.writeAccess, 'apply result.writeAccess');
-    return {
-      kind,
-      physicalChanged,
-      reason: requireProtocolString(record.reason, 'apply result.reason'),
-      writeAccess: {
-        blockedPaths: validateBlockedPaths(
-          writeAccess.blockedPaths,
-          'apply result.writeAccess.blockedPaths'
-        ),
-      },
-    };
-  }
-  if (kind === 'unsupported' || kind === 'blocked') {
-    return {
-      kind,
-      physicalChanged,
-      reason: requireProtocolString(record.reason, 'apply result.reason'),
-    };
-  }
-  return assertNever(kind);
-}
-
-function validateRestoreResult(value: unknown): IslandRestoreResult {
-  const record = requireProtocolRecord(value, 'restore result');
-  const kind = requireProtocolDiscriminant(
-    record.kind,
-    RESTORE_RESULT_KINDS,
-    'restore result.kind'
-  );
-  const physicalChanged = requireProtocolBoolean(
-    record.physicalChanged,
-    'restore result.physicalChanged'
-  );
-  if (kind === 'restored' || kind === 'already-classic') {
-    return { kind, physicalChanged };
-  }
-  if (kind === 'permission-required' || kind === 'blocked') {
-    return {
-      kind,
-      physicalChanged,
-      reason: requireProtocolString(record.reason, 'restore result.reason'),
-      failedAppRoots: validateFailedAppRoots(record.failedAppRoots),
-    };
-  }
-  return assertNever(kind);
-}
-
-function validateDirectRestoreResult(value: unknown): {
-  physicalChanged: IslandShellResult['physicalChanged'];
-  incompleteRecovery: IslandShellResult['incompleteRecovery'];
-  active: false;
-} {
-  const record = requireProtocolRecord(value, 'direct restore result');
-  if (record.active !== false) throw invalidProtocolField('direct restore result.active');
-  return {
-    physicalChanged: requireProtocolBoolean(
-      record.physicalChanged,
-      'direct restore result.physicalChanged'
-    ),
-    incompleteRecovery: requireProtocolBoolean(
-      record.incompleteRecovery,
-      'direct restore result.incompleteRecovery'
-    ),
-    active: false,
-  };
-}
-
-function validateBlockedPaths(
-  value: unknown,
-  field: string
-): Array<{ path: string; reason: string }> {
-  if (!Array.isArray(value)) throw invalidProtocolField(field);
-  return value.map((entry, index) => {
-    const record = requireProtocolRecord(entry, `${field}[${index}]`);
-    return {
-      path: requireProtocolString(record.path, `${field}[${index}].path`),
-      reason: requireProtocolString(record.reason, `${field}[${index}].reason`),
-    };
-  });
-}
-
-function validateFailedAppRoots(value: unknown): Array<{ appRoot: string; reason: string }> {
-  if (!Array.isArray(value)) throw invalidProtocolField('restore result.failedAppRoots');
-  return value.map((entry, index) => {
-    const record = requireProtocolRecord(entry, `restore result.failedAppRoots[${index}]`);
-    return {
-      appRoot: requireProtocolString(
-        record.appRoot,
-        `restore result.failedAppRoots[${index}].appRoot`
-      ),
-      reason: requireProtocolString(
-        record.reason,
-        `restore result.failedAppRoots[${index}].reason`
-      ),
-    };
-  });
-}
-
-function requireProtocolRecord(value: unknown, field: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw invalidProtocolField(field);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requireProtocolString(value: unknown, field: string): string {
-  if (typeof value !== 'string') throw invalidProtocolField(field);
-  return value;
-}
-
-function requireProtocolBoolean(value: unknown, field: string): boolean {
-  if (typeof value !== 'boolean') throw invalidProtocolField(field);
-  return value;
-}
-
-function requireProtocolDiscriminant<Kind extends string>(
-  value: unknown,
-  kinds: { readonly [Candidate in Kind]: Candidate },
-  field: string
-): Kind {
-  if (typeof value !== 'string' || !Object.hasOwn(kinds, value)) {
-    throw invalidProtocolField(field);
-  }
-  return value as Kind;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unreachable Island protocol variant: ${String(value)}`);
-}
-
-function invalidProtocolField(field: string): Error {
-  return new Error(`Invalid ${field}.`);
 }
 
 function resolveDesiredCssFile(desiredThemeId: string | null | undefined): string | undefined {

@@ -54,16 +54,22 @@ node scripts/installLiveTyrian.mjs --target=plasma --apply --link
 
 Backups are stored under `~/.local/state/tyrian-night/backups/`. Failed non-interrupted operations roll back immediately. A deliberately simulated or real process interruption preserves recovery evidence; run the explicit recovery command before another preview if you want the prior generation restored. Ownership state is profile-scoped v3 data and retains each profile's XDG roots, so moving XDG configuration does not orphan the previous generation. If no ownership manifest exists, the installer only records its current outputs; it does not migrate or clean up historical paths.
 
+Both copy and link mode publish the installer-owned source directory as a complete generation. Transaction pointers use v4 and snapshots use v6: they distinguish published paths from disposable staging paths admitted absent before mutation. Recovery discards incomplete staging, preserves external changes to published paths, and accepts either the last completed write or its pending replacement. Existing v3 pointers and v5 snapshots remain recoverable; only their known generated staging names receive disposable-path treatment.
+
+Recovery revokes old publication filenames before inspecting live targets and records fresh filenames for each retry. This prevents a surviving `mv` child from publishing after its parent dies. Directory deletion similarly retires the complete generation before removing its contents. Legacy v5 snapshots with unrecorded temporary publication files require reconciliation before recovery can proceed; those files are retained because their ownership and publisher lifetime cannot be proved from the old record.
+
 ## Full Rice
 
 The full rice always uses the Plasma profile. It includes the style install and replaces:
 
-- `~/.config/plasma-org.kde.plasma.desktop-appletsrc`;
-- `~/.config/plasmashellrc`;
+- `$XDG_CONFIG_HOME/plasma-org.kde.plasma.desktop-appletsrc`;
+- `$XDG_CONFIG_HOME/plasmashellrc`;
 - current Plasma panel placement and sizing state;
 - current desktop wallpaper state.
 
 It stops and restarts Plasma shell while publishing the layout. Install every declared widget before apply; the installer validates required commands but Plasma itself owns widget package discovery.
+
+Style installation, layout installation, and capture share the same XDG root resolver. `XDG_CONFIG_HOME` defaults to `~/.config`; configured roots must remain inside the selected home. Portable layout manifests retain their logical `.config/` keys regardless of the live config root.
 
 ```sh
 # Read-only plan.

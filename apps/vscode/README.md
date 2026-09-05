@@ -15,7 +15,7 @@ The projection covers a curated set of documented public VS Code colors for cont
 
 - Color themes and the packaged extension support VS Code 1.118 or newer on Linux, macOS, and Windows.
 - Island UI apply and repair support Linux only.
-- Doctor and Restore Classic UI remain available on every platform for current managed installations.
+- Doctor and Restore Classic UI remain available on every platform for current managed installations. A pending version 5 exchange journal needs Linux with GNU `mv` before Restore can recover it.
 - Tyrian never requests administrator privileges or changes file ownership or permissions.
 
 The color themes use the normal VS Code extension contract. Merely installing or selecting a theme does not modify the VS Code application.
@@ -26,13 +26,17 @@ The color themes use the normal VS Code extension contract. Merely installing or
 2. Run **Preferences: Color Theme**.
 3. Select a Tyrian theme.
 
-The repository includes a [`settings.example.json`](settings.example.json) companion for typography and editor preferences. It is not applied automatically.
+The repository includes a [`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) companion for typography and editor preferences. It is not applied automatically.
 
 Tyrian keeps VS Code semantic highlighting disabled by theme default so language-server overlays do not replace callable TextMate scopes with readonly-variable colors. The companion settings use `configuredByTheme`, preserving that choice for Tyrian without forcing it on other themes.
 
 ## Island UI
 
 Island UI is an optional Linux-only workbench patch. Apply and Repair refuse unsupported platforms before filesystem or desired-state admission.
+
+Apply and Repair require GNU `mv` with `--exchange` and `--no-copy` so existing VS Code files can be replaced atomically; systems without that capability report unsupported before writing application files. Classic Restore selects the same version 5 exchange protocol when it is available. On Linux without that capability, and on the existing portable Restore platforms, it records the recoverable version 4 protocol instead. Version 4 can recover an interrupted operation, but an abrupt termination between retirement and publication can temporarily leave the replaced target absent; it does not promise continuous target presence.
+
+Apply and Repair create journal version 5 for atomic file exchange. Doctor and Restore continue to read and recover existing version 4 journals. A pending version 5 journal requires Linux with GNU `mv` supporting `--exchange` and `--no-copy`; Restore reports that prerequisite before changing the managed-root record. Durable journals and managed-root records retain one fixed predecessor and one prepared candidate beside their canonical name. After an interrupted publication or cleanup, Doctor can read the predecessor and the next locked Island command completes its owned recovery. If canonical and predecessor records disagree without the candidate proof that explains the change, Tyrian preserves both generations and reports manual recovery instead of overwriting or deleting either one. Older UUID-named retirement files also remain preserved for manual recovery because their original ownership cannot be proved.
 
 > [!WARNING]
 > Before uninstalling Tyrian Night, run **Tyrian Night: Restore Classic UI**, reload VS Code, and confirm that the custom UI is gone. Uninstalling the extension alone cannot remove an active patch.
@@ -68,4 +72,4 @@ bun run package:vscode
 
 ## License
 
-[Apache License 2.0](../../LICENSE)
+[Apache License 2.0](https://github.com/renbkna/tyrian-night/blob/HEAD/LICENSE)

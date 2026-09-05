@@ -13,11 +13,9 @@ jobs:
   vscode-linux:
     name: VS Code package (Linux)
     runs-on: ubuntu-latest
+    container: node:22.19.0-trixie
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.19.0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
@@ -55,4 +53,7 @@ jobs:
         with:
           bun-version: 1.3.11
       - run: bun install --frozen-lockfile
-      - run: bun run verify:desktop
+      # This is the authoritative repository gate. It checks tracked generated
+      # files before rebuilding anything, then runs every repository check and
+      # the complete isolated test suite (including the Zed projection tests).
+      - run: bun run verify

@@ -97,7 +97,7 @@ export class ThemePreviewController {
     const slug = `tyrian-${mode}`;
     const source = repository.sources.find((candidate) => candidate.slug === slug);
     if (!source) throw new Error(`Unknown preview theme: ${slug}`);
-    const theme = readSourceTheme(source, repository.root, repository.definition);
+    const theme = readSourceTheme(source, repository);
 
     if (!theme.name.includes('Tyrian') || !['dark', 'light'].includes(theme.appearance)) {
       throw new Error(`Unexpected theme name: ${theme.name}`);
