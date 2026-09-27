@@ -1,173 +1,82 @@
-import { spawn, type SpawnOptions } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
-import { ISLAND_WIRE_PROTOCOL_VERSION } from './islandWire.js';
+import { IslandMutationError } from './islandMutationFacts.js';
+import type {
+  IslandShellFailureCode,
+  IslandShellFailureDescription,
+} from './islandShellContract.js';
 
-export type IslandProcessResult = {
-  stdout: string;
-  stderr: string;
-};
+/** A typed Island CLI failure reconstructed from its stderr envelope. */
+export class IslandProcessFailure extends IslandMutationError {
+  readonly code: IslandShellFailureCode;
+  readonly causes: IslandShellFailureDescription['causes'];
 
-export type IslandProcessFailureEnvelope = {
-  version: typeof ISLAND_WIRE_PROTOCOL_VERSION;
-  code: 'permission-required' | 'unsupported' | 'corrupt' | 'blocked';
-  changed: boolean;
-  desiredStateChanged: boolean;
-  registryChanged: boolean;
-  physicalChanged: boolean;
-  externalDrift: boolean;
-  incompleteRecovery: boolean;
-  reason: string;
-  causes: Array<{ code: IslandProcessFailureEnvelope['code']; reason: string }>;
-};
-
-export class IslandProcessFailure extends Error {
-  readonly code: IslandProcessFailureEnvelope['code'];
-  readonly changed: boolean;
-  readonly desiredStateChanged: boolean;
-  readonly registryChanged: boolean;
-  readonly physicalChanged: boolean;
-  readonly externalDrift: boolean;
-  readonly incompleteRecovery: boolean;
-  readonly causes: IslandProcessFailureEnvelope['causes'];
-
-  constructor(failure: IslandProcessFailureEnvelope) {
-    super(failure.reason);
+  constructor(description: IslandShellFailureDescription) {
+    super(description.reason, description);
     this.name = 'IslandProcessFailure';
-    this.code = failure.code;
-    this.changed = failure.changed;
-    this.desiredStateChanged = failure.desiredStateChanged;
-    this.registryChanged = failure.registryChanged;
-    this.physicalChanged = failure.physicalChanged;
-    this.externalDrift = failure.externalDrift;
-    this.incompleteRecovery = failure.incompleteRecovery;
-    this.causes = failure.causes;
+    this.code = description.code;
+    this.causes = description.causes;
   }
 }
 
-export class IslandProcessInvalidOutputError extends Error {
-  constructor(message: string, cause: unknown) {
-    super(message, { cause });
-    this.name = 'IslandProcessInvalidOutputError';
-  }
-}
-
-export async function runIslandProcess(
-  command: string[],
-  options: {
-    env?: NodeJS.ProcessEnv;
-    fallbackMessage: string;
-  }
-): Promise<IslandProcessResult> {
+/**
+ * Run a same-build Island process and return its stdout JSON. A nonzero exit
+ * rejects with the typed failure envelope when the process wrote one, or with
+ * its raw diagnostic when it crashed.
+ */
+export function runIslandJsonProcess<T>(command: string[], env?: NodeJS.ProcessEnv): Promise<T> {
   const [executable, ...args] = command;
 
   return new Promise((resolve, reject) => {
-    const spawnOptions: SpawnOptions = {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    };
-
-    if (options.env) {
-      spawnOptions.env = options.env;
-    }
-
-    const child = spawn(executable, args, spawnOptions);
+    const child = spawn(executable, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
 
-    if (!child.stdout || !child.stderr) {
-      reject(new Error('Tyrian Night process runner failed to open output pipes.'));
-      return;
-    }
-
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
     });
-
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
+    child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
         const output = (stderr || stdout).trim();
-        const failure = parseIslandProcessFailure(output);
-        reject(failure ?? new Error(output || options.fallbackMessage));
+        reject(
+          parseIslandProcessFailure(output) ??
+            new Error(output || 'Island UI CLI failed without an error message.')
+        );
         return;
       }
 
-      resolve({ stdout, stderr });
+      try {
+        resolve(JSON.parse(stdout) as T);
+      } catch (error) {
+        reject(
+          new Error(
+            `Tyrian Night CLI returned invalid output: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error }
+          )
+        );
+      }
     });
   });
 }
 
+/** The envelope is the last output line; anything else is crash text. */
 export function parseIslandProcessFailure(output: string): IslandProcessFailure | undefined {
-  const candidateLine = output
-    .split(/\r?\n/u)
-    .toReversed()
-    .find((line) => line.trim().length > 0);
-  if (candidateLine === undefined) return undefined;
+  const lastLine = output.split(/\r?\n/u).findLast((line) => line.trim().length > 0);
+  if (lastLine === undefined) return undefined;
 
+  let envelope: unknown;
   try {
-    const candidate = JSON.parse(candidateLine) as Partial<IslandProcessFailureEnvelope>;
-    if (
-      candidate.version !== ISLAND_WIRE_PROTOCOL_VERSION ||
-      !['permission-required', 'unsupported', 'corrupt', 'blocked'].includes(
-        candidate.code ?? ''
-      ) ||
-      typeof candidate.changed !== 'boolean' ||
-      typeof candidate.desiredStateChanged !== 'boolean' ||
-      typeof candidate.registryChanged !== 'boolean' ||
-      typeof candidate.physicalChanged !== 'boolean' ||
-      typeof candidate.externalDrift !== 'boolean' ||
-      typeof candidate.incompleteRecovery !== 'boolean' ||
-      candidate.changed !==
-        (candidate.desiredStateChanged || candidate.registryChanged || candidate.physicalChanged) ||
-      typeof candidate.reason !== 'string' ||
-      candidate.reason.length === 0 ||
-      !Array.isArray(candidate.causes) ||
-      candidate.causes.length > 8 ||
-      candidate.causes.some(
-        (cause) =>
-          typeof cause !== 'object' ||
-          cause === null ||
-          !('code' in cause) ||
-          !['permission-required', 'unsupported', 'corrupt', 'blocked'].includes(
-            typeof cause.code === 'string' ? cause.code : ''
-          ) ||
-          !('reason' in cause) ||
-          typeof cause.reason !== 'string' ||
-          cause.reason.length === 0
-      )
-    ) {
-      return undefined;
-    }
-
-    return new IslandProcessFailure(candidate as IslandProcessFailureEnvelope);
+    envelope = JSON.parse(lastLine);
   } catch {
     return undefined;
   }
-}
-
-export async function runIslandJsonProcess<T>(
-  command: string[],
-  options: {
-    env?: NodeJS.ProcessEnv;
-    fallbackMessage: string;
-    invalidOutputMessage: (error: unknown) => string;
-    validate: (value: unknown) => T;
-  }
-): Promise<T> {
-  const { stdout } = await runIslandProcess(command, options);
-
-  try {
-    return options.validate(JSON.parse(stdout));
-  } catch (error) {
-    throw new IslandProcessInvalidOutputError(options.invalidOutputMessage(error), error);
-  }
+  return typeof envelope === 'object' && envelope !== null && !Array.isArray(envelope)
+    ? new IslandProcessFailure(envelope as IslandShellFailureDescription)
+    : undefined;
 }

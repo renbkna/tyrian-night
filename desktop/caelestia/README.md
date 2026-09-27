@@ -12,13 +12,13 @@ Generated outputs:
 On a clean checkout, materialize these generated assets first:
 
 ```sh
-bun run build:desktop-themes
+bun run generate --product=desktop
 ```
 
-For a user-level live install, use Tyrian's transactional publisher:
+For a user-level live install, use Tyrian's installer:
 
 ```sh
-node scripts/installLiveTyrian.mjs --target=caelestia --apply
+node apps/desktop/src/installLiveTyrian.mjs --target=caelestia --apply
 ```
 
 The installer atomically replaces Caelestia's watched `scheme.json`, the current
@@ -44,7 +44,7 @@ load Caelestia. The upstream integration must already consume the matching
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` are resolved once by the
 installer. The defaults below are examples; non-default roots receive the same
 relative Caelestia paths. Roots outside the destination home are rejected because
-the durable recovery record cannot safely authorize an unrelated filesystem tree.
+backups record their targets relative to that home.
 
 The `schemes/tyrian/` tree is packaging input for distributions that choose to
 ship Tyrian in Caelestia's scheme registry. The user installer deliberately does

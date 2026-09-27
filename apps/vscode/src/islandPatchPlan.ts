@@ -2,8 +2,6 @@ import {
   ISLAND_CSS_FILE_NAME,
   type IslandPatchPaths,
   buildIslandPatchPaths,
-  ISLAND_PATCH_CONTRACT_VERSION,
-  ISLAND_PATCH_STRATEGY,
   ISLAND_MANIFEST_FILE_NAME,
   BACKUP_HTML_FILE_NAME,
   BACKUP_PRODUCT_FILE_NAME,
@@ -11,25 +9,18 @@ import {
   TYRIAN_MARKER_END,
   WORKBENCH_CSS_LINK,
   WORKBENCH_CHECKSUM_KEY,
-  type IslandManifestV3,
-  isIslandManifestV3Shape,
+  type IslandManifest,
+  isIslandCssAssetName,
+  isIslandManifestShape,
 } from './islandPatchContract.js';
+import { type IslandShellStatus, IslandShellFailure } from './islandShellContract.js';
+import { type ManagedRootRegistration, readDesiredCssFile } from './islandRegistry.js';
 import {
-  type IslandShellStatus,
-  type IslandTransactionHealth,
-  IslandShellFailure,
-} from './islandShellContract.js';
-import {
-  type ManagedRootRegistration,
-  isCurrentManagedRootRegistration,
-  readDesiredThemeId,
-} from './islandRegistry.js';
-import { sha256Base64, escapeRegExp } from './islandFileSystem.js';
-import {
-  readIslandInstallationFiles,
-  type IslandFileReader,
   type FileMutation,
-} from './islandFileTransaction.js';
+  escapeRegExp,
+  readTextFileIfExists,
+  sha256Base64,
+} from './islandFileSystem.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -44,18 +35,6 @@ const TYRIAN_STYLESHEET_PATTERN = new RegExp(
 
 type ProductJson = {
   checksums?: Record<string, string>;
-};
-
-type ApplyPayload = {
-  desiredThemeId: string;
-  paths: IslandPatchPaths;
-  expectedContents: ReadonlyMap<string, string | undefined>;
-  baseHtml: string;
-  baseProductJson: string;
-  cssSource: string;
-  patchedHtml: string;
-  patchedProductJson: string;
-  manifest: string;
 };
 
 export type IslandRootState = {
@@ -92,30 +71,27 @@ export type RestorePlan =
 
 export async function inspectIslandRoot(
   appRoot: string,
-  registration: ManagedRootRegistration,
-  knownTransaction: IslandTransactionHealth | undefined,
-  files: IslandFileReader = readIslandInstallationFiles(appRoot)
+  registration: ManagedRootRegistration
 ): Promise<IslandRootState> {
-  const registered = isCurrentManagedRootRegistration(registration);
-  const desiredThemeId = readDesiredThemeId(registration);
+  const registered = registration.kind !== 'absent';
+  const desiredCssFile = readDesiredCssFile(registration);
   const paths = buildIslandPatchPaths(appRoot);
-  const transaction = knownTransaction ?? (await files.health());
-  const currentHtml = await files.readRequired(paths.workbenchHtmlPath);
-  const currentProductJson = await files.readRequired(paths.productJsonPath);
-  const backupHtml = await files.read(paths.backupHtmlPath);
-  const backupProductJson = await files.read(paths.backupProductJsonPath);
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
+  const backupHtml = await readTextFileIfExists(paths.backupHtmlPath);
+  const backupProductJson = await readTextFileIfExists(paths.backupProductJsonPath);
   const blockState = readTyrianBlockState(currentHtml);
   const active = blockState !== 'absent';
-  const cssContent = await files.read(paths.islandCssPath);
+  const cssContent = await readTextFileIfExists(paths.islandCssPath);
   const cssExists = cssContent !== undefined;
-  const manifestContent = await files.read(paths.manifestPath);
+  const manifestContent = await readTextFileIfExists(paths.manifestPath);
   const manifest = parseManifest(manifestContent);
   const manifestExists = manifestContent !== undefined;
   const manifestShapeValid = manifestExists && manifest !== undefined;
   const backupHtmlExists = backupHtml !== undefined;
   const backupProductExists = backupProductJson !== undefined;
   const hasTyrianSidecars = cssExists || manifestExists || backupHtmlExists || backupProductExists;
-  const desiredEnabled = registration.kind === 'valid' && registration.desiredThemeId !== null;
+  const desiredEnabled = registration.kind === 'valid' && registration.desiredCssFile !== null;
   const managed = desiredEnabled || hasTyrianSidecars;
   const issues: string[] = [];
   const checksumMatches = doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml);
@@ -154,15 +130,10 @@ export async function inspectIslandRoot(
     blockState === 'malformed' ||
     (active && !registered) ||
     registration.kind === 'corrupt' ||
-    registration.kind === 'unsupported' ||
     (manifest !== undefined &&
-      desiredThemeId !== undefined &&
-      manifest.desiredThemeId !== desiredThemeId);
+      desiredCssFile !== undefined &&
+      manifest.desiredCssFile !== desiredCssFile);
   const hasTyrianEvidence = active || hasTyrianSidecars;
-
-  if (transaction.kind !== 'clean') {
-    issues.push(transaction.reason);
-  }
 
   if (active) {
     issues.push('Tyrian workbench patch evidence is present.');
@@ -180,7 +151,7 @@ export async function inspectIslandRoot(
     issues.push('Tyrian registry contains this app root.');
   }
 
-  if (registration.kind === 'corrupt' || registration.kind === 'unsupported') {
+  if (registration.kind === 'corrupt') {
     issues.push(registration.reason);
   }
 
@@ -190,8 +161,8 @@ export async function inspectIslandRoot(
 
   if (
     manifest !== undefined &&
-    desiredThemeId !== undefined &&
-    manifest.desiredThemeId !== desiredThemeId
+    desiredCssFile !== undefined &&
+    manifest.desiredCssFile !== desiredCssFile
   ) {
     issues.push('Tyrian manifest style does not match the desired-state record.');
   }
@@ -220,15 +191,7 @@ export async function inspectIslandRoot(
 
   let classification: IslandShellStatus['classification'] = 'clean';
 
-  if (
-    transaction.kind === 'corrupt' ||
-    transaction.kind === 'external-drift' ||
-    transaction.kind === 'unavailable'
-  ) {
-    classification = 'transaction-blocked';
-  } else if (transaction.kind === 'recoverable') {
-    classification = 'transaction-pending';
-  } else if (brokenBackup) {
+  if (brokenBackup) {
     classification = 'broken-backup';
   } else if (!checksumMatches) {
     classification = 'checksum-mismatch';
@@ -243,7 +206,7 @@ export async function inspectIslandRoot(
   const productWorkbenchChecksum = tryReadWorkbenchChecksum(currentProductJson);
   const restoreProof =
     active && trustedBackup !== undefined
-      ? 'manifest-v3-backup-pair'
+      ? 'manifest-backup-pair'
       : hasTyrianEvidence
         ? 'strip-tyrian-block'
         : 'none';
@@ -252,9 +215,8 @@ export async function inspectIslandRoot(
       ? undefined
       : {
           installedAt: manifest.installedAt,
-          desiredThemeId: manifest.desiredThemeId,
+          desiredCssFile: manifest.desiredCssFile,
           themeVersion: manifest.themeVersion,
-          patchStrategy: manifest.patchStrategy,
           upstreamWorkbenchChecksum: manifest.upstreamWorkbenchChecksum,
           patchedWorkbenchChecksum: manifest.patchedWorkbenchChecksum,
           cssChecksum: manifest.cssChecksum,
@@ -273,7 +235,7 @@ export async function inspectIslandRoot(
     checksumMatches,
     status: {
       appRoot,
-      desiredThemeId,
+      desiredCssFile,
       registrationState: registration.kind,
       active,
       managed,
@@ -281,7 +243,6 @@ export async function inspectIslandRoot(
       classification,
       verificationPassed,
       restoreProof,
-      transaction,
       workbenchChecksum,
       productWorkbenchChecksum,
       receipt,
@@ -290,15 +251,21 @@ export async function inspectIslandRoot(
   };
 }
 
-async function buildApplyPayload(
-  options: {
-    appRoot: string;
-    cssSourcePath: string;
-    themeVersion: string;
-    registryHome?: string;
-  },
-  files: IslandFileReader = readIslandInstallationFiles(options.appRoot)
-): Promise<ApplyPayload> {
+/**
+ * Plan an apply. Mutation order is part of the contract: the stylesheet and
+ * manifest land before the workbench HTML that references them, so every
+ * prefix of the plan leaves VS Code loadable and a rerun completes it.
+ */
+export async function buildIslandApplyPlan(options: {
+  appRoot: string;
+  cssSourcePath: string;
+  themeVersion: string;
+}): Promise<{
+  desiredCssFile: string;
+  mutations: FileMutation[];
+  changed: boolean;
+  verify: () => Promise<void>;
+}> {
   const paths = buildIslandPatchPaths(options.appRoot);
   const [
     currentHtml,
@@ -309,20 +276,20 @@ async function buildApplyPayload(
     currentIslandCss,
     currentManifest,
   ] = await Promise.all([
-    files.readRequired(paths.workbenchHtmlPath),
-    files.readRequired(paths.productJsonPath),
+    fs.readFile(paths.workbenchHtmlPath, 'utf8'),
+    fs.readFile(paths.productJsonPath, 'utf8'),
     fs.readFile(options.cssSourcePath, 'utf8'),
-    files.read(paths.backupHtmlPath),
-    files.read(paths.backupProductJsonPath),
-    files.read(paths.islandCssPath),
-    files.read(paths.manifestPath),
+    readTextFileIfExists(paths.backupHtmlPath),
+    readTextFileIfExists(paths.backupProductJsonPath),
+    readTextFileIfExists(paths.islandCssPath),
+    readTextFileIfExists(paths.manifestPath),
   ]);
-  const desiredThemeId = path.basename(options.cssSourcePath);
+  const desiredCssFile = path.basename(options.cssSourcePath);
 
-  if (!/^[a-z0-9][a-z0-9-]*\.css$/u.test(desiredThemeId)) {
+  if (!isIslandCssAssetName(desiredCssFile)) {
     throw new IslandShellFailure(
       'unsupported',
-      `Unsupported Tyrian Island CSS asset name '${desiredThemeId}'.`
+      `Unsupported Tyrian Island CSS asset name '${desiredCssFile}'.`
     );
   }
   const existingManifest = parseManifest(currentManifest);
@@ -333,12 +300,10 @@ async function buildApplyPayload(
   const patchedHtml = injectIslandStylesheet(baseHtml, cssHash);
   const patchedProductJson = setWorkbenchChecksum(baseProductJson, patchedHtml);
   const manifest = serializeManifest({
-    version: ISLAND_PATCH_CONTRACT_VERSION,
-    desiredThemeId,
+    desiredCssFile,
     themeVersion: options.themeVersion,
     installedAt: existingManifest?.installedAt ?? new Date().toISOString(),
     appRoot: options.appRoot,
-    patchStrategy: ISLAND_PATCH_STRATEGY,
     upstreamWorkbenchChecksum: sha256Base64(baseHtml),
     upstreamProductChecksum: sha256Base64(baseProductJson),
     cssChecksum: sha256Base64(cssSource),
@@ -351,62 +316,28 @@ async function buildApplyPayload(
       productBackup: BACKUP_PRODUCT_FILE_NAME,
     },
   });
-
-  return {
-    paths,
-    desiredThemeId,
-    expectedContents: new Map([
-      [paths.backupHtmlPath, currentBackupHtml],
-      [paths.backupProductJsonPath, currentBackupProductJson],
-      [paths.islandCssPath, currentIslandCss],
-      [paths.manifestPath, currentManifest],
-      [paths.workbenchHtmlPath, currentHtml],
-      [paths.productJsonPath, currentProductJson],
-    ]),
-    baseHtml,
-    baseProductJson,
-    cssSource,
-    patchedHtml,
-    patchedProductJson,
-    manifest,
-  };
-}
-
-function buildApplyMutation(
-  payload: ApplyPayload,
-  filePath: string,
-  content: string | undefined
-): FileMutation {
-  if (!payload.expectedContents.has(filePath)) {
-    throw new Error(`Missing expected Island transaction input for '${filePath}'.`);
-  }
-
-  return {
-    filePath,
-    content,
-    expectedContent: payload.expectedContents.get(filePath),
-  };
-}
-
-export async function buildIslandApplyPlan(
-  options: { appRoot: string; cssSourcePath: string; themeVersion: string },
-  files: IslandFileReader = readIslandInstallationFiles(options.appRoot)
-) {
-  const payload = await buildApplyPayload(options, files);
-  const { paths, desiredThemeId } = payload;
-  const mutations = [
-    buildApplyMutation(payload, paths.backupHtmlPath, payload.baseHtml),
-    buildApplyMutation(payload, paths.backupProductJsonPath, payload.baseProductJson),
-    buildApplyMutation(payload, paths.islandCssPath, payload.cssSource),
-    buildApplyMutation(payload, paths.manifestPath, payload.manifest),
-    buildApplyMutation(payload, paths.workbenchHtmlPath, payload.patchedHtml),
-    buildApplyMutation(payload, paths.productJsonPath, payload.patchedProductJson),
+  const mutations: FileMutation[] = [
+    { filePath: paths.backupHtmlPath, content: baseHtml, expectedContent: currentBackupHtml },
+    {
+      filePath: paths.backupProductJsonPath,
+      content: baseProductJson,
+      expectedContent: currentBackupProductJson,
+    },
+    { filePath: paths.islandCssPath, content: cssSource, expectedContent: currentIslandCss },
+    { filePath: paths.manifestPath, content: manifest, expectedContent: currentManifest },
+    { filePath: paths.workbenchHtmlPath, content: patchedHtml, expectedContent: currentHtml },
+    {
+      filePath: paths.productJsonPath,
+      content: patchedProductJson,
+      expectedContent: currentProductJson,
+    },
   ];
+
   return {
-    desiredThemeId,
+    desiredCssFile,
     mutations,
     changed: mutations.some(({ content, expectedContent }) => content !== expectedContent),
-    verify: () => verifyAppliedShell(paths, options.appRoot, desiredThemeId, files),
+    verify: () => verifyAppliedShell(paths, options.appRoot, desiredCssFile),
   };
 }
 
@@ -447,14 +378,18 @@ export function buildRestorePlan(state: IslandRootState): RestorePlan {
 async function verifyAppliedShell(
   paths: IslandPatchPaths,
   appRoot: string,
-  desiredThemeId: string,
-  files: IslandFileReader
+  desiredCssFile: string
 ): Promise<void> {
-  const currentHtml = await files.readRequired(paths.workbenchHtmlPath);
-  const currentProductJson = await files.readRequired(paths.productJsonPath);
-  const cssContent = await files.readRequired(paths.islandCssPath);
-  const backupHtml = await files.readRequired(paths.backupHtmlPath);
-  const backupProductJson = await files.readRequired(paths.backupProductJsonPath);
+  const [currentHtml, currentProductJson, cssContent, backupHtml, backupProductJson] =
+    await Promise.all(
+      [
+        paths.workbenchHtmlPath,
+        paths.productJsonPath,
+        paths.islandCssPath,
+        paths.backupHtmlPath,
+        paths.backupProductJsonPath,
+      ].map((filePath) => fs.readFile(filePath, 'utf8'))
+    );
 
   if (readTyrianBlockState(currentHtml) !== 'valid') {
     throw new Error(
@@ -462,7 +397,7 @@ async function verifyAppliedShell(
     );
   }
 
-  const manifest = parseManifest(await files.readRequired(paths.manifestPath));
+  const manifest = parseManifest(await fs.readFile(paths.manifestPath, 'utf8'));
 
   if (!manifest) {
     throw new Error(
@@ -470,7 +405,7 @@ async function verifyAppliedShell(
     );
   }
 
-  if (manifest.desiredThemeId !== desiredThemeId) {
+  if (manifest.desiredCssFile !== desiredCssFile) {
     throw new Error(
       'Tyrian Night verification failed: manifest style does not match desired style.'
     );
@@ -497,12 +432,9 @@ async function verifyAppliedShell(
   }
 }
 
-export async function verifyRestoredShell(
-  paths: IslandPatchPaths,
-  files: IslandFileReader
-): Promise<void> {
-  const currentHtml = await files.readRequired(paths.workbenchHtmlPath);
-  const currentProductJson = await files.readRequired(paths.productJsonPath);
+export async function verifyRestoredShell(paths: IslandPatchPaths): Promise<void> {
+  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
+  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
 
   if (readTyrianBlockState(currentHtml) !== 'absent') {
     throw new Error(
@@ -510,7 +442,7 @@ export async function verifyRestoredShell(
     );
   }
 
-  await verifyManagedStateRemoved(paths, files);
+  await verifyManagedStateRemoved(paths);
 
   if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
     throw new Error(
@@ -519,17 +451,14 @@ export async function verifyRestoredShell(
   }
 }
 
-export async function verifyManagedStateRemoved(
-  paths: IslandPatchPaths,
-  files: IslandFileReader
-): Promise<void> {
+export async function verifyManagedStateRemoved(paths: IslandPatchPaths): Promise<void> {
   for (const filePath of [
     paths.islandCssPath,
     paths.manifestPath,
     paths.backupHtmlPath,
     paths.backupProductJsonPath,
   ]) {
-    if (await files.exists(filePath)) {
+    if ((await readTextFileIfExists(filePath)) !== undefined) {
       throw new Error(
         `Tyrian Night verification failed: '${path.basename(filePath)}' still exists after restore.`
       );
@@ -658,13 +587,13 @@ function parseProductJson(productJsonContent: string): ProductJson & {
   return parsed as ProductJson & { checksums: Record<string, string> };
 }
 
-function serializeManifest(manifest: IslandManifestV3): string {
+function serializeManifest(manifest: IslandManifest): string {
   return JSON.stringify(manifest, null, 2).concat('\n');
 }
 
 function collectManifestRestoreProofIssues(options: {
   appRoot: string;
-  manifest: IslandManifestV3;
+  manifest: IslandManifest;
   currentHtml: string;
   currentProductJson: string;
   cssContent: string | undefined;
@@ -719,28 +648,23 @@ function collectManifestRestoreProofIssues(options: {
   return issues;
 }
 
-function parseManifest(content: string | undefined): IslandManifestV3 | undefined {
+function parseManifest(content: string | undefined): IslandManifest | undefined {
   if (!content) {
     return undefined;
   }
 
   try {
-    const parsed = JSON.parse(content) as Partial<IslandManifestV3>;
-
-    if (parsed.version !== ISLAND_PATCH_CONTRACT_VERSION) {
-      return undefined;
-    }
-
-    if (!isIslandManifestV3Shape(parsed)) {
-      return undefined;
-    }
-
-    return parsed;
+    const parsed = JSON.parse(content) as Partial<IslandManifest>;
+    return isIslandManifestShape(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
 }
 
+/**
+ * Restore mutations. The workbench HTML and product.json are restored before
+ * any sidecar is removed, so the HTML never references a missing stylesheet.
+ */
 export function buildRestoreMutations(state: IslandRootState, plan: RestorePlan): FileMutation[] {
   const mutations: FileMutation[] = [
     {

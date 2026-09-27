@@ -5,13 +5,7 @@ import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
-import {
-  bracketColor,
-  syntaxColor,
-  terminalColor,
-  uiColor,
-  vscodeColor,
-} from './themeDefinition.mjs';
+import { themeColor } from './themeDefinition.mjs';
 import { loadVscodeProjection } from './vscodeProjection.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -23,11 +17,17 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 export function buildVscodeTheme(theme, projection) {
   /** @type {Record<string, string>} */
   const colors = {};
-  projectColors(colors, projection.brackets, (role) => bracketColor(theme, role));
-  projectColors(colors, projection.ui, (role) => uiColor(theme, role));
-  projectColors(colors, projection.syntax, (role) => syntaxColor(theme, role));
-  projectColors(colors, projection.terminal, (role) => terminalColor(theme, role));
-  projectColors(colors, projection.vscode, (role) => vscodeColor(theme, role));
+  for (const namespace of /** @type {const} */ ([
+    'brackets',
+    'ui',
+    'syntax',
+    'terminal',
+    'vscode',
+  ])) {
+    projectColors(colors, projection[namespace], (role) =>
+      themeColor(theme, `${namespace}:${role}`)
+    );
+  }
   enforceContrastContract(colors, projection.contrastPairs, theme.name);
 
   const tokenColors = projection.tokenColors.map((token) => ({
@@ -50,7 +50,7 @@ export function buildVscodeTheme(theme, projection) {
 /** @param {import('./themeDefinition.mjs').ThemeDefinition} theme @param {string | undefined} role */
 function grammarColor(theme, role) {
   if (!role) throw new Error('VS Code grammar projection has no role.');
-  return role.startsWith('ui:') ? uiColor(theme, role.slice(3)) : syntaxColor(theme, role);
+  return themeColor(theme, role.startsWith('ui:') ? role : `syntax:${role}`);
 }
 
 /**
@@ -75,7 +75,7 @@ function enforceContrastContract(colors, pairs, themeName) {
 
 export function collectVscodeThemeAssets(root = repoRoot) {
   const repository = loadThemeRepository(root);
-  const projection = loadVscodeProjection(root, repository.definition);
+  const projection = loadVscodeProjection(repository.definition);
 
   return repository.sources.map((source) => ({
     path: source.vscodeThemePath,
@@ -103,12 +103,14 @@ function projectColors(target, projection, resolve) {
   }
 }
 
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
-  const stale = syncGeneratedAssets(collectVscodeThemeAssets(repoRoot), repoRoot, {
-    check: process.argv.includes('--check'),
+/**
+ * @param {string} [root]
+ * @param {{ check?: boolean }} [options]
+ * @returns {string[]}
+ */
+export function syncVscodeThemes(root = repoRoot, options = {}) {
+  return syncGeneratedAssets(collectVscodeThemeAssets(root), root, {
+    check: options.check,
     ownership: [{ directory: 'apps/vscode/themes', match: /\.json$/u }],
   });
-  if (stale.length > 0) {
-    throw new Error(`Generated VS Code themes are stale:\n${stale.join('\n')}`);
-  }
 }

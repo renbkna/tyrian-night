@@ -67,3 +67,7 @@ export function isTyrianThemeLabel(theme: string | undefined): theme is TyrianTh
 export function getIslandCssFileForTheme(theme: string): string | undefined {
   return TYRIAN_THEME_CATALOG.find(({ label }) => label === theme)?.islandCssFile;
 }
+
+export function isTyrianIslandCssFile(cssFile: string): boolean {
+  return TYRIAN_THEME_CATALOG.some(({ islandCssFile }) => islandCssFile === cssFile);
+}

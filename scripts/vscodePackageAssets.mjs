@@ -25,14 +25,3 @@ export function syncVscodePackageAssets(root = repoRoot, options = {}) {
     { check: options.check }
   );
 }
-
-if (process.argv[1] === import.meta.filename) {
-  const stale = syncVscodePackageAssets(repoRoot, {
-    check: process.argv.includes('--check'),
-  });
-
-  if (process.argv.includes('--check') && stale.length > 0) {
-    console.error(`VS Code package assets are stale: ${stale.join(', ')}`);
-    process.exit(1);
-  }
-}

@@ -1,14 +1,7 @@
 // @ts-check
 
-import path from 'node:path';
-
-import { loadThemeInspectionRepository, readInspectionTheme } from './themeSources.mjs';
-import {
-  auditThemeSafety,
-  readThemeSafetyContract,
-  reportThemeColorDiagnostics,
-} from './themeSafety.mjs';
-import { auditThemePigmentPolicy, readThemePigmentPolicy } from './themePigmentPolicy.mjs';
+import { auditThemeSnapshot, loadThemeInspectionRepository } from './themeSources.mjs';
+import { readThemeSafetyContract, reportThemeColorDiagnostics } from './themeSafety.mjs';
 
 const args = process.argv.slice(2);
 const unsupported = args.find(
@@ -23,14 +16,8 @@ if (requestedRoot !== undefined && requestedRoot.length === 0) {
 }
 const showDiagnostics = args.includes('--diagnostics');
 const repository = loadThemeInspectionRepository(requestedRoot);
-const contract = readThemeSafetyContract(
-  path.join(repository.root, 'source/themeSafetyContract.json'),
-  repository.definition
-);
-const pigmentPolicy = readThemePigmentPolicy(
-  path.join(repository.root, 'source/themePigmentPolicy.json'),
-  repository.definition
-);
+const contract = readThemeSafetyContract(repository.definition);
+const audits = new Map(auditThemeSnapshot(repository).map((audit) => [audit.slug, audit]));
 const sources = requestedTheme
   ? repository.sources.filter(({ slug }) => slug === requestedTheme)
   : repository.sources;
@@ -38,9 +25,11 @@ const sources = requestedTheme
 if (sources.length === 0) throw new Error(`Unknown source theme '${requestedTheme}'.`);
 let failed = false;
 for (const source of sources) {
-  const theme = readInspectionTheme(source, repository);
-  const violations = auditThemeSafety(theme, contract);
-  const pigmentViolations = auditThemePigmentPolicy(theme, pigmentPolicy);
+  const theme = /** @type {import('./themeDefinition.mjs').ThemeDefinition} */ (
+    repository.themes.get(source.slug)
+  );
+  const { safety: violations, pigment: pigmentViolations } =
+    /** @type {import('./themeSources.mjs').ThemePolicyAudit} */ (audits.get(source.slug));
   const diagnostics = reportThemeColorDiagnostics(theme, source.slug, contract);
   console.log(
     `${source.slug}: accessibility=${violations.length === 0 ? 'pass' : `${violations.length} violation(s)`}; ` +

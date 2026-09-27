@@ -1,0 +1,25 @@
+/** @type {import('../scripts/themePigmentPolicy.mjs', { with: { 'resolution-mode': 'import' } }).ThemePigmentPolicy} */
+const themePigmentPolicy = {
+  reservations: [
+    {
+      id: 'green-cyan-reserved',
+      minimum: 100,
+      maximum: 205,
+      allowedRoles: [
+        'ui:editor.hint',
+        'ui:status.success',
+        'ui:status.successBackground',
+        'syntax:string',
+        'terminal:ansi.brightGreen',
+        'terminal:ansi.green',
+        'vscode:diff.editor.inserted.line.background',
+        'vscode:diff.editor.inserted.text.background',
+        'vscode:editor.hint.border',
+        'vscode:editor.overviewRuler.addedForeground',
+        'vscode:merge.incoming.header.background',
+      ],
+    },
+  ],
+};
+
+module.exports = themePigmentPolicy;

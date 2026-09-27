@@ -5,7 +5,7 @@ foot controls the terminal window: background, foreground, cursor, selection, an
 From a clean checkout, materialize the generated terminal assets first:
 
 ```sh
-bun run build:terminal-themes
+bun run generate --product=desktop
 ```
 
 Generated themes live in `terminal/foot/themes/`:

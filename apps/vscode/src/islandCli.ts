@@ -1,128 +1,68 @@
-import { parseArgs as parseNodeArgs } from 'node:util';
+import { parseArgs } from 'node:util';
 
-import {
-  applyIslandShell,
-  describeIslandShellFailure,
-  readAllIslandShellStatuses,
-  readIslandShellStatus,
-  restoreAllIslandShells,
-  restoreIslandShell,
-} from './islandShell.js';
+import { acquireIslandLock } from './islandLock.js';
+import { describeIslandShellFailure } from './islandShellContract.js';
 import {
   applyIslandUiSupervised,
+  convergeIslandUiSupervised,
   readIslandUiSupervisorStatuses,
   restoreIslandUiSupervised,
 } from './islandSupervisor.js';
-import {
-  ISLAND_WIRE_PROTOCOL_VERSION,
-  projectIslandApplyResult,
-  projectIslandDirectRestoreResult,
-  projectIslandShellApplyResult,
-  projectIslandReconciliationStatus,
-  projectIslandRestoreResult,
-  projectIslandSupervisorInventory,
-} from './islandWire.js';
+import type { IslandCliCommand, IslandCliResults } from './islandWire.js';
 
 type IslandCliArgs = {
   'app-root'?: string;
   'css-source'?: string;
+  'fallback-css'?: string;
+  'island-dir'?: string;
+  repair?: boolean;
   'theme-version'?: string;
 };
 
+const COMMANDS: {
+  [Command in IslandCliCommand]: (args: IslandCliArgs) => Promise<IslandCliResults[Command]>;
+} = {
+  'apply-supervised': (args) =>
+    applyIslandUiSupervised({
+      appRoot: requireArg(args, 'app-root'),
+      cssSourcePath: requireArg(args, 'css-source'),
+      themeVersion: requireArg(args, 'theme-version'),
+    }),
+  converge: (args) => {
+    if (!args.repair && args['fallback-css'] !== undefined) {
+      throw new Error("Argument '--fallback-css' requires '--repair'.");
+    }
+    return convergeIslandUiSupervised({
+      appRoot: requireArg(args, 'app-root'),
+      islandDirectory: requireArg(args, 'island-dir'),
+      themeVersion: requireArg(args, 'theme-version'),
+      intent: args.repair
+        ? { kind: 'repair', fallbackCssFile: args['fallback-css'] }
+        : { kind: 'startup' },
+    });
+  },
+  'restore-supervised': (args) =>
+    restoreIslandUiSupervised({ preferredAppRoots: optionalAppRoots(args) }),
+  'status-all-supervised': (args) =>
+    readIslandUiSupervisorStatuses({ preferredAppRoots: optionalAppRoots(args) }),
+};
+
+const MUTATING_COMMANDS: ReadonlySet<string> = new Set<IslandCliCommand>([
+  'apply-supervised',
+  'converge',
+  'restore-supervised',
+]);
+
 async function main(): Promise<void> {
-  const { args, command } = parseCommandLine(process.argv.slice(2));
-
-  switch (command) {
-    case 'apply':
-      writeJson(
-        projectIslandShellApplyResult(
-          await applyIslandShell({
-            appRoot: requireArg(args, 'app-root'),
-            cssSourcePath: requireArg(args, 'css-source'),
-            themeVersion: requireArg(args, 'theme-version'),
-          })
-        )
-      );
-      return;
-    case 'apply-supervised':
-      writeJson(
-        projectIslandApplyResult(
-          await applyIslandUiSupervised({
-            appRoot: requireArg(args, 'app-root'),
-            cssSourcePath: requireArg(args, 'css-source'),
-            themeVersion: requireArg(args, 'theme-version'),
-          })
-        )
-      );
-      return;
-    case 'restore':
-      writeJson(
-        projectIslandDirectRestoreResult(
-          await restoreIslandShell({
-            appRoot: requireArg(args, 'app-root'),
-          })
-        )
-      );
-      return;
-    case 'restore-supervised':
-      writeJson(
-        projectIslandRestoreResult(
-          await restoreIslandUiSupervised({
-            preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-          })
-        )
-      );
-      return;
-    case 'restore-all':
-      {
-        const result = await restoreAllIslandShells({
-          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-        });
-        writeJson(result);
-        if (result.failedAppRoots.length > 0 || result.enumerationFailure !== undefined) {
-          process.exitCode = 2;
-        }
-      }
-      return;
-    case 'status':
-      writeJson(
-        projectIslandReconciliationStatus(
-          await readIslandShellStatus({
-            appRoot: requireArg(args, 'app-root'),
-          })
-        )
-      );
-      return;
-    case 'status-all':
-      writeJson(
-        await readAllIslandShellStatuses({
-          preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-        })
-      );
-      return;
-    case 'status-all-supervised':
-      writeJson(
-        projectIslandSupervisorInventory(
-          await readIslandUiSupervisorStatuses({
-            preferredAppRoots: args['app-root'] ? [args['app-root']] : [],
-          })
-        )
-      );
-      return;
-    default:
-      throw new Error(
-        "Unknown Tyrian Night CLI command. Use 'apply', 'apply-supervised', 'restore', 'restore-supervised', 'restore-all', 'status', 'status-all', or 'status-all-supervised'."
-      );
-  }
-}
-
-function parseCommandLine(argv: string[]): { args: IslandCliArgs; command: string | undefined } {
-  const { positionals, values } = parseNodeArgs({
+  const { positionals, values } = parseArgs({
     allowPositionals: true,
-    args: argv,
+    args: process.argv.slice(2),
     options: {
       'app-root': { type: 'string' },
       'css-source': { type: 'string' },
+      'fallback-css': { type: 'string' },
+      'island-dir': { type: 'string' },
+      repair: { type: 'boolean' },
       'theme-version': { type: 'string' },
     },
     strict: true,
@@ -132,30 +72,48 @@ function parseCommandLine(argv: string[]): { args: IslandCliArgs; command: strin
   if (extraPositionals.length > 0) {
     throw new Error(`Unexpected argument '${extraPositionals[0]}'.`);
   }
-
-  return { args: values, command };
-}
-
-function requireArg(args: IslandCliArgs, name: keyof IslandCliArgs): string {
-  const value = args[name];
-
-  if (!value) {
-    throw new Error(`Missing required argument '--${name}'.`);
+  if (command === undefined || !Object.hasOwn(COMMANDS, command)) {
+    throw new Error(
+      `Unknown Tyrian Night CLI command. Use ${Object.keys(COMMANDS)
+        .map((name) => `'${name}'`)
+        .join(', ')}.`
+    );
   }
 
+  const run = COMMANDS[command as IslandCliCommand];
+  if (!MUTATING_COMMANDS.has(command)) {
+    process.stdout.write(JSON.stringify(await run(values)));
+    return;
+  }
+
+  const lock = await acquireIslandLock();
+  if (lock.kind === 'delegated') {
+    process.exitCode = lock.exitCode;
+    return;
+  }
+  try {
+    process.stdout.write(JSON.stringify(await run(values)));
+  } finally {
+    await lock.release();
+  }
+}
+
+function requireArg(
+  args: IslandCliArgs,
+  name: 'app-root' | 'css-source' | 'island-dir' | 'theme-version'
+): string {
+  const value = args[name];
+  if (!value) throw new Error(`Missing required argument '--${name}'.`);
   return value;
 }
 
-function writeJson(value: unknown): void {
-  process.stdout.write(JSON.stringify(value));
+function optionalAppRoots(args: IslandCliArgs): string[] {
+  return args['app-root'] ? [args['app-root']] : [];
 }
 
 try {
   await main();
 } catch (error) {
-  const failure = describeIslandShellFailure(error);
-  process.stderr.write(
-    `${JSON.stringify({ version: ISLAND_WIRE_PROTOCOL_VERSION, ...failure })}\n`
-  );
+  process.stderr.write(`${JSON.stringify(describeIslandShellFailure(error))}\n`);
   process.exitCode = 1;
 }

@@ -1,8 +1,8 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { oklchToHex } from './colorScience.mjs';
+import { loadSourceModule } from './sourceModule.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -12,7 +12,6 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   appearance: ThemeAppearance;
  *   brackets: Record<string, string>;
  *   name: string;
- *   schemaVersion: 2;
  *   syntax: Record<string, string>;
  *   terminal: Record<string, string>;
  *   ui: Record<string, string>;
@@ -25,12 +24,10 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * @typedef {{
  *   bindings: Record<'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode', Record<string, ThemeColorBinding>>;
  * }} ThemeColorBindings
- * @typedef {{ aliases: Record<string, string>; derived: Record<string, string>; schemaVersion: 2 }} ThemeColorBindingContractSource
- * @typedef {{ bindings: ThemeColorBindings['bindings']; schemaVersion: 2 }} ThemeColorBindingContract
+ * @typedef {{ aliases: Record<string, string>; derived: Record<string, string> }} ThemeColorBindingContractSource
  * @typedef {{
  *   name: string;
  *   oklch: Record<string, readonly [number, number]>;
- *   schemaVersion: 5;
  * }} OklchThemeRecipe
  * @typedef {OklchThemeRecipe} ThemeRecipe
  */
@@ -56,7 +53,6 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   };
  *   hueProfiles: string[];
  *   pigmentHues: Record<string, Record<string, number | null>>;
- *   schemaVersion: 2;
  *   semanticPigments: string[];
  *   syntaxBalance: {
  *     functionTypeLightnessDelta: NumericRange;
@@ -67,11 +63,11 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * }} ThemeFamilyContract
  */
 /**
- * @typedef {{ opacities: Record<string, string>; overrides: Partial<Record<ThemeAppearance, Record<string, string>>>; schemaVersion: 2 }} ThemeOpacityContractSource
+ * @typedef {{ opacities: Record<string, string>; overrides: Partial<Record<ThemeAppearance, Record<string, string>>> }} ThemeOpacityContractSource
  * @typedef {Record<ThemeAppearance, Readonly<Record<string, string>>>} ThemeOpacityPolicy
  */
 /** @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean }} ThemeFamilyClassification */
-/** @typedef {{ schemaVersion: 2; brackets: string[]; ui: string[]; syntax: string[]; terminal: string[]; vscode: string[] }} ThemeRoleContract */
+/** @typedef {{ brackets: string[]; ui: string[]; syntax: string[]; terminal: string[]; vscode: string[] }} ThemeRoleContract */
 /**
  * @typedef {{
  *   colorBindings: Readonly<ThemeColorBindings>;
@@ -81,10 +77,6 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   requiredThemeRoles: Readonly<{ brackets: readonly string[]; ui: readonly string[]; syntax: readonly string[]; terminal: readonly string[]; vscode: readonly string[] }>;
  * }} ThemeDefinitionContext
  */
-const defaultDefinitionContext = loadThemeDefinitionContext(repoRoot);
-
-export const REQUIRED_THEME_ROLES = defaultDefinitionContext.requiredThemeRoles;
-
 /** Canonical ANSI palette order shared by terminal-compatible projections. */
 export const TERMINAL_ANSI_ROLES = Object.freeze([
   'terminal:ansi.black',
@@ -106,98 +98,69 @@ export const TERMINAL_ANSI_ROLES = Object.freeze([
 ]);
 
 /**
- * Loads the role-membership authority for one repository root.
+ * Loads the role-membership authority for one repository root. Contract shapes
+ * are type-checked source modules; this validates their cross-file references.
  * @param {string} [root]
  * @returns {ThemeDefinitionContext}
  */
 export function loadThemeDefinitionContext(root = repoRoot) {
   const resolvedRoot = path.resolve(root);
-  const roleContract = validateThemeRoleContract(
-    JSON.parse(fs.readFileSync(path.join(resolvedRoot, 'source/themeRoleContract.json'), 'utf8'))
+  /** @param {string} name */
+  const load = (name) => loadSourceModule(path.join(resolvedRoot, 'source', `${name}.cjs`));
+  const requiredThemeRoles = validateThemeRoleContract(
+    /** @type {ThemeRoleContract} */ (load('themeRoleContract'))
   );
-  const requiredThemeRoles = deepFreeze({
-    brackets: roleContract.brackets,
-    ui: roleContract.ui,
-    syntax: roleContract.syntax,
-    terminal: roleContract.terminal,
-    vscode: roleContract.vscode,
-  });
-
-  const colorBindingContract = validateThemeColorBindingContract(
-    JSON.parse(fs.readFileSync(path.join(resolvedRoot, 'source/themeColorBindings.json'), 'utf8')),
+  const colorBindings = validateThemeColorBindingContract(
+    /** @type {ThemeColorBindingContractSource} */ (load('themeColorBindings')),
     requiredThemeRoles
   );
-  const colorBindings = deepFreeze(colorBindingContract);
-
-  const opacityContract = validateThemeOpacityContract(
-    JSON.parse(
-      fs.readFileSync(path.join(resolvedRoot, 'source/themeOpacityContract.json'), 'utf8')
-    ),
+  const opacityPolicy = validateThemeOpacityContract(
+    /** @type {ThemeOpacityContractSource} */ (load('themeOpacityContract')),
     colorBindings
   );
-  const opacityPolicy = deepFreeze(opacityContract);
-  const familyContract = deepFreeze(
-    validateThemeFamilyContract(
-      JSON.parse(
-        fs.readFileSync(path.join(resolvedRoot, 'source/themeFamilyContract.json'), 'utf8')
-      ),
-      requiredPigmentsForBindings(colorBindings)
-    )
+  const familyContract = validateThemeFamilyContract(
+    /** @type {ThemeFamilyContract} */ (load('themeFamilyContract')),
+    requiredPigmentsForBindings(colorBindings)
   );
 
-  return Object.freeze({
+  return {
     colorBindings,
     familyContract,
     opacityPolicy,
     root: resolvedRoot,
     requiredThemeRoles,
-  });
+  };
 }
 
 /**
- * Validates the editable source representation without exposing it to generators.
- * @param {unknown} value
+ * Validates a type-checked recipe against the family pigment vocabulary.
+ * @param {ThemeRecipe} recipe
  * @param {string} sourceName
- * @param {ThemeDefinitionContext} [context]
+ * @param {ThemeDefinitionContext} context
  * @returns {ThemeRecipe}
  */
-export function validateThemeRecipe(value, sourceName, context = defaultDefinitionContext) {
-  const recipe = requirePlainObject(value, `Theme recipe '${sourceName}'`);
-  if (recipe.schemaVersion !== 5) {
-    throw new Error(`Theme recipe '${sourceName}' must use schemaVersion 5.`);
+export function validateThemeRecipe(recipe, sourceName, context) {
+  if (recipe.name.length === 0 || recipe.name.trim() !== recipe.name) {
+    throw new Error(`Theme recipe '${sourceName}' must have a trimmed, non-empty name.`);
   }
-  const allowedFields = ['name', 'oklch', 'schemaVersion'];
-  const unsupportedFields = Object.keys(recipe).filter((field) => !allowedFields.includes(field));
-  if (unsupportedFields.length > 0) {
-    throw new Error(
-      `Theme recipe '${sourceName}' has unsupported fields: ${unsupportedFields.join(', ')}.`
-    );
-  }
-  if (typeof recipe.name !== 'string' || recipe.name.trim() !== recipe.name || !recipe.name) {
-    throw new Error(`Theme recipe '${sourceName}' must have a non-empty name.`);
-  }
-  const requiredPigments = requiredPigmentsForBindings(context.colorBindings);
-  const classification = themeFamilyClassification(context, sourceName);
-
-  requireExactFields(recipe, ['name', 'oklch', 'schemaVersion'], `Theme recipe '${sourceName}'`);
   validateOklchMap(
     recipe.oklch,
-    requiredPigments,
-    classification.hueProfile,
+    requiredPigmentsForBindings(context.colorBindings),
+    themeFamilyClassification(context, sourceName).hueProfile,
     sourceName,
     context.familyContract
   );
-  return /** @type {OklchThemeRecipe} */ (/** @type {unknown} */ (recipe));
+  return recipe;
 }
 
 /**
  * Resolves the source recipe through the family binding authority.
  * @param {ThemeRecipe} recipe
  * @param {string} sourceName
- * @param {ThemeDefinitionContext} [context]
+ * @param {ThemeDefinitionContext} context
  * @returns {ThemeDefinition}
  */
-export function resolveThemeRecipe(recipe, sourceName, context = defaultDefinitionContext) {
+export function resolveThemeRecipe(recipe, sourceName, context) {
   const classification = themeFamilyClassification(context, sourceName);
   const opacities = context.opacityPolicy[classification.appearance];
   if (!opacities) {
@@ -232,46 +195,11 @@ export function resolveThemeRecipe(recipe, sourceName, context = defaultDefiniti
     appearance: classification.appearance,
     brackets: resolveNamespace('brackets'),
     name: recipe.name,
-    schemaVersion: 2,
     syntax: resolveNamespace('syntax'),
     terminal: resolveNamespace('terminal'),
     ui: resolveNamespace('ui'),
     vscode: resolveNamespace('vscode'),
   };
-}
-
-/**
- * Returns the pigment slot that owns one resolved role.
- * @param {ThemeDefinitionContext} context
- * @param {string} qualifiedRole
- */
-export function themePigmentOwner(context, qualifiedRole) {
-  const separator = qualifiedRole.indexOf(':');
-  const namespace = qualifiedRole.slice(0, separator);
-  const role = qualifiedRole.slice(separator + 1);
-  if (separator <= 0 || !Object.hasOwn(context.colorBindings.bindings, namespace)) {
-    throw new Error(`Invalid theme role '${qualifiedRole}'.`);
-  }
-  const bindings = /** @type {Record<string, Record<string, ThemeColorBinding>>} */ (
-    context.colorBindings.bindings
-  );
-  const binding = bindings[namespace][role];
-  if (binding === undefined) throw new Error(`Invalid theme role '${qualifiedRole}'.`);
-  return typeof binding === 'string' ? binding : binding.pigment;
-}
-
-/**
- * Returns the family-owned hue for one current pigment and hue profile.
- * @param {ThemeDefinitionContext} context
- * @param {string} hueProfile
- * @param {string} pigment
- */
-export function themePigmentHue(context, hueProfile, pigment) {
-  const hues = context.familyContract.pigmentHues[pigment];
-  if (!hues || !Object.hasOwn(hues, hueProfile)) {
-    throw new Error(`Unknown theme pigment hue '${hueProfile}:${pigment}'.`);
-  }
-  return hues[hueProfile];
 }
 
 /**
@@ -299,31 +227,6 @@ export function themeFamilyClassification(context, slug) {
   };
 }
 
-/** @param {ThemeDefinition} theme @param {string} role */
-export function bracketColor(theme, role) {
-  return requireRole(theme.brackets, role, theme.name, 'brackets');
-}
-
-/** @param {ThemeDefinition} theme @param {string} role */
-export function uiColor(theme, role) {
-  return requireRole(theme.ui, role, theme.name, 'ui');
-}
-
-/** @param {ThemeDefinition} theme @param {string} role */
-export function syntaxColor(theme, role) {
-  return requireRole(theme.syntax, role, theme.name, 'syntax');
-}
-
-/** @param {ThemeDefinition} theme @param {string} role */
-export function terminalColor(theme, role) {
-  return requireRole(theme.terminal, role, theme.name, 'terminal');
-}
-
-/** @param {ThemeDefinition} theme @param {string} role */
-export function vscodeColor(theme, role) {
-  return requireRole(theme.vscode, role, theme.name, 'vscode');
-}
-
 /**
  * Reads one stable semantic role without exposing the source representation.
  * @param {ThemeDefinition} theme
@@ -333,13 +236,19 @@ export function themeColor(theme, qualifiedRole) {
   const separator = qualifiedRole.indexOf(':');
   const namespace = qualifiedRole.slice(0, separator);
   const role = qualifiedRole.slice(separator + 1);
-  if (separator <= 0 || !role) throw new Error(`Invalid theme role '${qualifiedRole}'.`);
-  if (namespace === 'brackets') return bracketColor(theme, role);
-  if (namespace === 'ui') return uiColor(theme, role);
-  if (namespace === 'syntax') return syntaxColor(theme, role);
-  if (namespace === 'terminal') return terminalColor(theme, role);
-  if (namespace === 'vscode') return vscodeColor(theme, role);
-  throw new Error(`Invalid theme role namespace '${namespace}'.`);
+  if (
+    separator <= 0 ||
+    !role ||
+    !['brackets', 'ui', 'syntax', 'terminal', 'vscode'].includes(namespace)
+  ) {
+    throw new Error(`Invalid theme role '${qualifiedRole}'.`);
+  }
+  const color =
+    theme[/** @type {'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode'} */ (namespace)][role];
+  if (color === undefined) {
+    throw new Error(`Theme '${theme.name}' does not define ${namespace} role '${role}'.`);
+  }
+  return color;
 }
 
 /**
@@ -357,35 +266,21 @@ function requiredPigmentsForBindings(bindings) {
 }
 
 /**
- * @param {unknown} value
+ * @param {ThemeFamilyContract} contract
  * @param {readonly string[]} requiredPigments
  * @returns {ThemeFamilyContract}
  */
-function validateThemeFamilyContract(value, requiredPigments) {
-  const contract = requirePlainObject(value, 'Theme family contract');
-  requireExactFields(
-    contract,
-    [
-      'branches',
-      'canonical',
-      'energyLine',
-      'hueProfiles',
-      'pigmentHues',
-      'schemaVersion',
-      'semanticPigments',
-      'syntaxBalance',
-    ],
-    'Theme family contract'
-  );
-  if (contract.schemaVersion !== 2) {
-    throw new Error('Theme family contract must use schemaVersion 2.');
-  }
-
-  const canonical = requireNonEmptyString(contract.canonical, 'Theme family canonical theme');
-  const semanticPigments = requireUniqueStrings(
-    contract.semanticPigments,
-    'Theme family semantic pigments'
-  );
+function validateThemeFamilyContract(contract, requiredPigments) {
+  const {
+    branches,
+    canonical,
+    energyLine,
+    hueProfiles,
+    pigmentHues,
+    semanticPigments,
+    syntaxBalance,
+  } = contract;
+  requireUnique(semanticPigments, 'Theme family semantic pigments');
   const requiredPigmentSet = new Set(requiredPigments);
   for (const pigment of semanticPigments) {
     if (!requiredPigmentSet.has(pigment)) {
@@ -393,187 +288,99 @@ function validateThemeFamilyContract(value, requiredPigments) {
     }
   }
 
-  const syntaxBalanceValue = requirePlainObject(
-    contract.syntaxBalance,
-    'Theme family syntax balance'
+  requireRange(
+    syntaxBalance.functionTypeLightnessDelta,
+    'Theme family function/type lightness delta',
+    -1,
+    1
   );
-  requireExactFields(
-    syntaxBalanceValue,
-    [
-      'functionTypeLightnessDelta',
-      'keywordFunctionChromaDelta',
-      'keywordTypeChromaDelta',
-      'typeFunctionChromaDelta',
-    ],
-    'Theme family syntax balance'
+  requireRange(
+    syntaxBalance.keywordFunctionChromaDelta,
+    'Theme family keyword/function chroma delta',
+    -0.5,
+    0.5
   );
-  const syntaxBalance = {
-    functionTypeLightnessDelta: validateNumericRange(
-      syntaxBalanceValue.functionTypeLightnessDelta,
-      'Theme family function/type lightness delta',
-      -1,
-      1
-    ),
-    keywordFunctionChromaDelta: validateNumericRange(
-      syntaxBalanceValue.keywordFunctionChromaDelta,
-      'Theme family keyword/function chroma delta',
-      -0.5,
-      0.5
-    ),
-    keywordTypeChromaDelta: validateNumericRange(
-      syntaxBalanceValue.keywordTypeChromaDelta,
-      'Theme family keyword/type chroma delta',
-      -0.5,
-      0.5
-    ),
-    typeFunctionChromaDelta: validateNumericRange(
-      syntaxBalanceValue.typeFunctionChromaDelta,
-      'Theme family type/function chroma delta',
-      -0.5,
-      0.5
-    ),
-  };
+  requireRange(
+    syntaxBalance.keywordTypeChromaDelta,
+    'Theme family keyword/type chroma delta',
+    -0.5,
+    0.5
+  );
+  requireRange(
+    syntaxBalance.typeFunctionChromaDelta,
+    'Theme family type/function chroma delta',
+    -0.5,
+    0.5
+  );
 
-  const hueProfiles = requireUniqueStrings(contract.hueProfiles, 'Theme family hue profiles');
+  requireUnique(hueProfiles, 'Theme family hue profiles');
   for (const profile of hueProfiles) {
     if (!/^[a-z][a-z0-9-]*$/u.test(profile)) {
       throw new Error(`Theme family hue profile '${profile}' has an invalid name.`);
     }
   }
-  const pigmentHuesValue = requirePlainObject(contract.pigmentHues, 'Theme family pigment hues');
-  const actualPigments = Object.keys(pigmentHuesValue).toSorted();
-  if (JSON.stringify(actualPigments) !== JSON.stringify(requiredPigments)) {
-    throw new Error('Theme family pigment hues must exactly match current theme pigments.');
-  }
-  /** @type {Record<string, Record<string, number | null>>} */
-  const pigmentHues = {};
-  const expectedHueProfiles = [...hueProfiles].toSorted();
-  for (const pigment of requiredPigments) {
-    const huesValue = requirePlainObject(
-      pigmentHuesValue[pigment],
-      `Theme family pigment '${pigment}' hue mapping`
+  requireSameMembers(
+    Object.keys(pigmentHues),
+    requiredPigments,
+    'Theme family pigment hues',
+    'current theme pigments'
+  );
+  for (const [pigment, hues] of Object.entries(pigmentHues)) {
+    requireSameMembers(
+      Object.keys(hues),
+      hueProfiles,
+      `Theme family pigment '${pigment}' hue profiles`,
+      'family hue profiles'
     );
-    const actualHueProfiles = Object.keys(huesValue).toSorted();
-    if (JSON.stringify(actualHueProfiles) !== JSON.stringify(expectedHueProfiles)) {
-      throw new Error(
-        `Theme family pigment '${pigment}' hue profiles must exactly match family hue profiles.`
-      );
-    }
-    /** @type {Record<string, number | null>} */
-    const hues = {};
-    for (const profile of hueProfiles) {
-      const hue = huesValue[profile];
-      if (
-        hue !== null &&
-        (typeof hue !== 'number' || !Number.isFinite(hue) || hue < 0 || hue >= 360)
-      ) {
+    for (const [profile, hue] of Object.entries(hues)) {
+      if (hue !== null && (hue < 0 || hue >= 360)) {
         throw new Error(`Theme family pigment '${pigment}' has an invalid '${profile}' hue.`);
       }
-      if (semanticPigments.includes(pigment) && hue === null) {
+      if (hue === null && semanticPigments.includes(pigment)) {
         throw new Error(`Theme family semantic pigment '${pigment}' must define every hue.`);
       }
-      hues[profile] = hue;
     }
-    pigmentHues[pigment] = hues;
   }
 
-  const energyLine = requirePlainObject(contract.energyLine, 'Theme family energy line');
-  requireExactFields(
-    energyLine,
-    ['canvasLightnessOrder', 'hueProfile', 'variants'],
-    'Theme family energy line'
-  );
-  const energyHueProfile = requireHueProfile(
-    energyLine.hueProfile,
-    hueProfiles,
-    'Theme family energy line'
-  );
-  const canvasLightnessOrder = requireUniqueStrings(
-    energyLine.canvasLightnessOrder,
-    'Theme family canvas lightness order'
-  );
-  const variantsValue = requirePlainObject(energyLine.variants, 'Theme family energy variants');
-  const variantNames = Object.keys(variantsValue);
-  if (variantNames.length === 0 || !variantNames.includes(canonical)) {
+  requireHueProfile(energyLine.hueProfile, hueProfiles, 'Theme family energy line');
+  const variantNames = Object.keys(energyLine.variants);
+  if (!variantNames.includes(canonical)) {
     throw new Error('Theme family energy line must include its canonical theme.');
   }
-  if (
-    JSON.stringify([...variantNames].toSorted()) !==
-    JSON.stringify([...canvasLightnessOrder].toSorted())
-  ) {
-    throw new Error('Theme family canvas lightness order must exactly match energy variants.');
-  }
-  /** @type {Record<string, EnergyVariantContract>} */
-  const variants = {};
-  for (const [slug, variantValue] of Object.entries(variantsValue)) {
-    const variant = requirePlainObject(variantValue, `Theme family energy variant '${slug}'`);
-    requireExactFields(
-      variant,
-      ['semanticChromaRatio', 'semanticContrast'],
-      `Theme family energy variant '${slug}'`
+  requireUnique(energyLine.canvasLightnessOrder, 'Theme family canvas lightness order');
+  requireSameMembers(
+    energyLine.canvasLightnessOrder,
+    variantNames,
+    'Theme family canvas lightness order',
+    'energy variants'
+  );
+  for (const [slug, variant] of Object.entries(energyLine.variants)) {
+    requireRange(
+      variant.semanticChromaRatio,
+      `Theme family energy variant '${slug}' chroma ratio`,
+      0,
+      Number.POSITIVE_INFINITY
     );
-    variants[slug] = {
-      semanticChromaRatio: validateNumericRange(
-        variant.semanticChromaRatio,
-        `Theme family energy variant '${slug}' chroma ratio`,
-        0,
-        Number.POSITIVE_INFINITY
-      ),
-      semanticContrast: validateNumericRange(
-        variant.semanticContrast,
-        `Theme family energy variant '${slug}' contrast`,
-        1,
-        21
-      ),
-    };
+    requireRange(variant.semanticContrast, `Theme family energy variant '${slug}' contrast`, 1, 21);
   }
-  const branchesValue = requirePlainObject(contract.branches, 'Theme family branches');
-  /** @type {Record<string, ThemeBranchContract>} */
-  const branches = {};
-  for (const [slug, branchValue] of Object.entries(branchesValue)) {
-    const branch = requirePlainObject(branchValue, `Theme family branch '${slug}'`);
-    const kind =
-      branch.kind === 'soft-focus' ||
-      branch.kind === 'light-counterpart' ||
-      branch.kind === 'historical-reference'
-        ? branch.kind
-        : undefined;
-    if (!kind) throw new Error(`Theme family branch '${slug}' has an invalid kind.`);
-    requireExactFields(
-      branch,
-      kind === 'historical-reference'
-        ? ['frozenPaletteSha256', 'hueProfile', 'kind', 'maximumSemanticHueDistance']
-        : ['hueProfile', 'kind', 'maximumSemanticHueDistance'],
-      `Theme family branch '${slug}'`
-    );
-    if (
-      typeof branch.maximumSemanticHueDistance !== 'number' ||
-      !Number.isFinite(branch.maximumSemanticHueDistance) ||
-      branch.maximumSemanticHueDistance < 0 ||
-      branch.maximumSemanticHueDistance > 180
-    ) {
+
+  for (const [slug, branch] of Object.entries(branches)) {
+    requireHueProfile(branch.hueProfile, hueProfiles, `Theme family branch '${slug}'`);
+    if (branch.maximumSemanticHueDistance < 0 || branch.maximumSemanticHueDistance > 180) {
       throw new Error(`Theme family branch '${slug}' has an invalid hue-distance limit.`);
     }
-    const frozenPaletteSha256 =
-      kind === 'historical-reference'
-        ? requireNonEmptyString(
-            branch.frozenPaletteSha256,
-            `Theme family branch '${slug}' frozen palette digest`
-          )
-        : undefined;
-    if (frozenPaletteSha256 && !/^[a-f0-9]{64}$/u.test(frozenPaletteSha256)) {
+    const frozen = branch.kind === 'historical-reference';
+    if (frozen !== (branch.frozenPaletteSha256 !== undefined)) {
+      throw new Error(
+        `Theme family branch '${slug}' must pin a frozen palette digest exactly when it is a historical reference.`
+      );
+    }
+    if (
+      branch.frozenPaletteSha256 !== undefined &&
+      !/^[a-f0-9]{64}$/u.test(branch.frozenPaletteSha256)
+    ) {
       throw new Error(`Theme family branch '${slug}' has an invalid frozen palette digest.`);
     }
-    branches[slug] = {
-      hueProfile: requireHueProfile(
-        branch.hueProfile,
-        hueProfiles,
-        `Theme family branch '${slug}'`
-      ),
-      kind,
-      maximumSemanticHueDistance: branch.maximumSemanticHueDistance,
-      ...(frozenPaletteSha256 ? { frozenPaletteSha256 } : {}),
-    };
   }
 
   const classified = [...variantNames, ...Object.keys(branches)];
@@ -581,7 +388,7 @@ function validateThemeFamilyContract(value, requiredPigments) {
     throw new Error('Theme family classifications must not overlap.');
   }
   const usedHueProfiles = new Set([
-    energyHueProfile,
+    energyLine.hueProfile,
     ...Object.values(branches).map(({ hueProfile }) => hueProfile),
   ]);
   const unusedHueProfiles = hueProfiles.filter((profile) => !usedHueProfiles.has(profile));
@@ -589,27 +396,17 @@ function validateThemeFamilyContract(value, requiredPigments) {
     throw new Error(`Theme family hue profiles are unused: ${unusedHueProfiles.join(', ')}.`);
   }
 
-  return {
-    branches,
-    canonical,
-    energyLine: { canvasLightnessOrder, hueProfile: energyHueProfile, variants },
-    hueProfiles,
-    pigmentHues,
-    schemaVersion: 2,
-    semanticPigments,
-    syntaxBalance,
-  };
+  return contract;
 }
 
 /**
- * @param {unknown} value
+ * @param {ThemeRecipe['oklch']} values
  * @param {readonly string[]} requiredPigments
  * @param {string} hueProfile
  * @param {string} sourceName
  * @param {Readonly<ThemeFamilyContract>} familyContract
  */
-function validateOklchMap(value, requiredPigments, hueProfile, sourceName, familyContract) {
-  const values = requirePlainObject(value, `Theme recipe '${sourceName}' oklch`);
+function validateOklchMap(values, requiredPigments, hueProfile, sourceName, familyContract) {
   const actual = Object.keys(values).toSorted();
   if (JSON.stringify(actual) !== JSON.stringify(requiredPigments)) {
     const required = new Set(requiredPigments);
@@ -621,28 +418,15 @@ function validateOklchMap(value, requiredPigments, hueProfile, sourceName, famil
         `${unsupported.length ? `; unsupported: ${unsupported.join(', ')}` : ''}.`
     );
   }
-  for (const pigment of requiredPigments) {
-    const coordinates = values[pigment];
-    if (
-      !Array.isArray(coordinates) ||
-      coordinates.length !== 2 ||
-      coordinates.some(
-        (coordinate) => typeof coordinate !== 'number' || !Number.isFinite(coordinate)
-      )
-    ) {
-      throw new Error(`Theme recipe '${sourceName}' has invalid oklch value '${pigment}'.`);
-    }
-    const [lightness, chroma] = coordinates;
+  for (const [pigment, [lightness, chroma]] of Object.entries(values)) {
     if (lightness < 0 || lightness > 1 || chroma < 0 || chroma > 0.5) {
       throw new Error(`Theme recipe '${sourceName}' has invalid oklch value '${pigment}'.`);
     }
-    const hue = familyContract.pigmentHues[pigment][hueProfile];
-    if (hue === null && chroma > 0.000004) {
+    if (familyContract.pigmentHues[pigment]?.[hueProfile] === null && chroma > 0.000004) {
       throw new Error(
         `Theme recipe '${sourceName}' pigment '${pigment}' has chroma without an owned hue.`
       );
     }
-    resolveOklchColor(lightness, chroma, hue, pigment, sourceName);
   }
 }
 
@@ -676,110 +460,77 @@ function resolveOklchColor(lightness, chroma, hue, pigment, sourceName) {
 }
 
 /**
- * @param {unknown} value
+ * @param {string} profile
  * @param {readonly string[]} hueProfiles
  * @param {string} owner
  */
-function requireHueProfile(value, hueProfiles, owner) {
-  const profile = requireNonEmptyString(value, `${owner} hue profile`);
+function requireHueProfile(profile, hueProfiles, owner) {
   if (!hueProfiles.includes(profile)) {
     throw new Error(`${owner} references unknown hue profile '${profile}'.`);
   }
-  return profile;
 }
 
 /**
- * @param {unknown} value
+ * @param {NumericRange} range
  * @param {string} owner
  * @param {number} floor
  * @param {number} ceiling
- * @returns {NumericRange}
  */
-function validateNumericRange(value, owner, floor, ceiling) {
-  const range = requirePlainObject(value, owner);
-  requireExactFields(range, ['maximum', 'minimum'], owner);
-  if (
-    typeof range.minimum !== 'number' ||
-    !Number.isFinite(range.minimum) ||
-    typeof range.maximum !== 'number' ||
-    !Number.isFinite(range.maximum) ||
-    range.minimum < floor ||
-    range.maximum > ceiling ||
-    range.minimum > range.maximum
-  ) {
+function requireRange(range, owner, floor, ceiling) {
+  if (range.minimum < floor || range.maximum > ceiling || range.minimum > range.maximum) {
     throw new Error(`${owner} is invalid.`);
   }
-  return { maximum: range.maximum, minimum: range.minimum };
+}
+
+/** @param {readonly string[]} values @param {string} owner */
+function requireUnique(values, owner) {
+  if (values.length === 0 || new Set(values).size !== values.length) {
+    throw new Error(`${owner} must be non-empty and contain no duplicate values.`);
+  }
 }
 
 /**
- * @param {Record<string, string>} roles
- * @param {string} role
- * @param {string} themeName
- * @param {string} namespace
+ * @param {readonly string[]} actual
+ * @param {readonly string[]} expected
+ * @param {string} owner
+ * @param {string} expectedLabel
  */
-function requireRole(roles, role, themeName, namespace) {
-  const color = roles[role];
-  if (color === undefined) {
-    throw new Error(`Theme '${themeName}' does not define ${namespace} role '${role}'.`);
+function requireSameMembers(actual, expected, owner, expectedLabel) {
+  if (JSON.stringify(actual.toSorted()) !== JSON.stringify(expected.toSorted())) {
+    throw new Error(`${owner} must exactly match ${expectedLabel}.`);
   }
-  return color;
 }
 
-/** @param {unknown} value @returns {ThemeRoleContract} */
-function validateThemeRoleContract(value) {
-  const contract = /** @type {Partial<ThemeRoleContract> & Record<string, unknown>} */ (
-    requirePlainObject(value, 'Theme role contract')
-  );
-  if (contract.schemaVersion !== 2)
-    throw new Error('Theme role contract must use schemaVersion 2.');
-  const fields = Object.keys(contract).toSorted();
-  if (
-    JSON.stringify(fields) !==
-    JSON.stringify(['brackets', 'schemaVersion', 'syntax', 'terminal', 'ui', 'vscode'])
-  ) {
-    throw new Error('Theme role contract has unsupported or missing namespaces.');
+/** @param {ThemeRoleContract} contract @returns {ThemeRoleContract} */
+function validateThemeRoleContract(contract) {
+  for (const [namespace, roles] of Object.entries(contract)) {
+    requireUnique(roles, `Theme role contract ${namespace} roles`);
+    if (roles.some((role) => role.length === 0 || role.trim() !== role)) {
+      throw new Error(`Theme role contract has an invalid ${namespace} role.`);
+    }
   }
-
   return {
-    schemaVersion: 2,
-    brackets: validateRoleNames(contract.brackets, 'brackets'),
-    ui: validateRoleNames(contract.ui, 'ui'),
-    syntax: validateRoleNames(contract.syntax, 'syntax'),
-    terminal: validateRoleNames(contract.terminal, 'terminal'),
-    vscode: validateRoleNames(contract.vscode, 'vscode'),
+    brackets: contract.brackets.toSorted(),
+    ui: contract.ui.toSorted(),
+    syntax: contract.syntax.toSorted(),
+    terminal: contract.terminal.toSorted(),
+    vscode: contract.vscode.toSorted(),
   };
 }
 
 /**
- * @param {unknown} value
+ * @param {ThemeColorBindingContractSource} contract
  * @param {ThemeDefinitionContext['requiredThemeRoles']} requiredThemeRoles
- * @returns {ThemeColorBindingContract}
+ * @returns {ThemeColorBindings}
  */
-function validateThemeColorBindingContract(value, requiredThemeRoles) {
-  const contract =
-    /** @type {Partial<ThemeColorBindingContractSource> & Record<string, unknown>} */ (
-      requirePlainObject(value, 'Theme color binding contract')
-    );
-  requireExactFields(
-    contract,
-    ['aliases', 'derived', 'schemaVersion'],
-    'Theme color binding contract'
-  );
-  if (contract.schemaVersion !== 2) {
-    throw new Error('Theme color binding contract must use schemaVersion 2.');
-  }
-
+function validateThemeColorBindingContract(contract, requiredThemeRoles) {
   const namespaces = /** @type {const} */ (['brackets', 'ui', 'syntax', 'terminal', 'vscode']);
   const knownRoles = new Set(
     namespaces.flatMap((namespace) =>
       requiredThemeRoles[namespace].map((role) => `${namespace}:${role}`)
     )
   );
-  const aliases = requirePlainObject(contract.aliases, 'Theme color binding aliases');
-  const derived = requirePlainObject(contract.derived, 'Theme color binding derived roles');
-  const aliasPigments = /** @type {Record<string, string>} */ (aliases);
-  const derivedPigments = /** @type {Record<string, string>} */ (derived);
+  const { aliases: aliasPigments, derived: derivedPigments } = contract;
   const configuredRoles = new Set();
   for (const [qualifiedRole, pigment] of Object.entries(aliasPigments)) {
     requireKnownBindingRole(qualifiedRole, knownRoles);
@@ -816,26 +567,15 @@ function validateThemeColorBindingContract(value, requiredThemeRoles) {
     );
   }
 
-  return { bindings, schemaVersion: 2 };
+  return { bindings };
 }
 
 /**
- * @param {unknown} value
+ * @param {ThemeOpacityContractSource} contract
  * @param {ThemeColorBindings} colorBindings
  * @returns {ThemeOpacityPolicy}
  */
-function validateThemeOpacityContract(value, colorBindings) {
-  const contract = /** @type {Partial<ThemeOpacityContractSource> & Record<string, unknown>} */ (
-    requirePlainObject(value, 'Theme opacity contract')
-  );
-  requireExactFields(
-    contract,
-    ['opacities', 'overrides', 'schemaVersion'],
-    'Theme opacity contract'
-  );
-  if (contract.schemaVersion !== 2) {
-    throw new Error('Theme opacity contract must use schemaVersion 2.');
-  }
+function validateThemeOpacityContract(contract, colorBindings) {
   const requiredOpacities = Object.values(colorBindings.bindings)
     .flatMap((bindings) => Object.values(bindings))
     .filter((binding) => typeof binding === 'object')
@@ -847,15 +587,7 @@ function validateThemeOpacityContract(value, colorBindings) {
     'Theme opacity opacities',
     true
   );
-  const overrides = requirePlainObject(contract.overrides, 'Theme opacity overrides');
-  const unsupportedAppearances = Object.keys(overrides).filter(
-    (appearance) => appearance !== 'dark' && appearance !== 'light'
-  );
-  if (unsupportedAppearances.length > 0) {
-    throw new Error(
-      `Theme opacity has unsupported appearance overrides: ${unsupportedAppearances.join(', ')}.`
-    );
-  }
+  const { overrides } = contract;
   const requiredSet = new Set(requiredOpacities);
   /** @type {ThemeOpacityPolicy} */
   const expanded = /** @type {any} */ ({});
@@ -879,14 +611,13 @@ function validateThemeOpacityContract(value, colorBindings) {
 }
 
 /**
- * @param {unknown} value
+ * @param {Record<string, string>} values
  * @param {readonly string[]} requiredKeys
  * @param {string} owner
  * @param {boolean} exact
  * @returns {Record<string, string>}
  */
-function validateOpacityMap(value, requiredKeys, owner, exact) {
-  const values = requirePlainObject(value, owner);
+function validateOpacityMap(values, requiredKeys, owner, exact) {
   const actual = Object.keys(values).toSorted();
   const expected = [...new Set(requiredKeys)].toSorted();
   if (exact && JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -900,11 +631,11 @@ function validateOpacityMap(value, requiredKeys, owner, exact) {
     );
   }
   for (const [role, opacity] of Object.entries(values)) {
-    if (typeof opacity !== 'string' || !/^[0-9A-F]{2}$/u.test(opacity)) {
+    if (!/^[0-9A-F]{2}$/u.test(opacity)) {
       throw new Error(`${owner} has invalid value '${role}'.`);
     }
   }
-  return /** @type {Record<string, string>} */ (values);
+  return values;
 }
 
 /**
@@ -918,75 +649,12 @@ function requireKnownBindingRole(qualifiedRole, knownRoles) {
 }
 
 /**
- * @param {unknown} pigment
+ * @param {string} pigment
  * @param {Set<string>} knownRoles
  * @param {string} qualifiedRole
  */
 function requireKnownPigment(pigment, knownRoles, qualifiedRole) {
-  if (typeof pigment !== 'string' || !knownRoles.has(pigment)) {
+  if (!knownRoles.has(pigment)) {
     throw new Error(`Theme color binding role '${qualifiedRole}' references an unknown pigment.`);
   }
-}
-
-/** @param {unknown} value @param {string} namespace @returns {string[]} */
-function validateRoleNames(value, namespace) {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`Theme role contract must define ${namespace} roles.`);
-  }
-  const roles = value.map((role) => {
-    if (typeof role !== 'string' || role.length === 0 || role.trim() !== role) {
-      throw new Error(`Theme role contract has an invalid ${namespace} role.`);
-    }
-    return role;
-  });
-  if (new Set(roles).size !== roles.length) {
-    throw new Error(`Theme role contract has duplicate ${namespace} roles.`);
-  }
-  return roles.toSorted();
-}
-
-/** @param {unknown} value @param {string} owner @returns {Record<string, unknown>} */
-function requirePlainObject(value, owner) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${owner} must be an object.`);
-  }
-  return /** @type {Record<string, unknown>} */ (value);
-}
-
-/** @param {Record<string, unknown>} value @param {readonly string[]} fields @param {string} owner */
-function requireExactFields(value, fields, owner) {
-  const actual = Object.keys(value).toSorted();
-  const expected = fields.toSorted();
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`${owner} has unsupported or missing fields.`);
-  }
-}
-
-/** @param {unknown} value @param {string} owner @returns {string} */
-function requireNonEmptyString(value, owner) {
-  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
-    throw new Error(`${owner} must be a non-empty string.`);
-  }
-  return value;
-}
-
-/** @param {unknown} value @param {string} owner @param {boolean} [allowEmpty] @returns {string[]} */
-function requireUniqueStrings(value, owner, allowEmpty = false) {
-  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
-    throw new Error(`${owner} must be a ${allowEmpty ? '' : 'non-empty '}string array.`);
-  }
-  const strings = value.map((entry) => requireNonEmptyString(entry, owner));
-  if (new Set(strings).size !== strings.length) {
-    throw new Error(`${owner} contains duplicate values.`);
-  }
-  return strings;
-}
-
-/** @template T @param {T} value @returns {Readonly<T>} */
-function deepFreeze(value) {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const entry of Object.values(value)) deepFreeze(entry);
-    Object.freeze(value);
-  }
-  return value;
 }

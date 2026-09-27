@@ -17,7 +17,7 @@ On a clean checkout, materialize the generated desktop assets before following
 the manual copy commands:
 
 ```sh
-bun run build:desktop-themes
+bun run generate --product=desktop
 ```
 
 Install the Night color scheme by copying or symlinking

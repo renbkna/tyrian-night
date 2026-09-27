@@ -5,7 +5,7 @@ fish controls shell input syntax highlighting, autosuggestions, and pager colors
 From a clean checkout, materialize the generated terminal assets first:
 
 ```sh
-bun run build:terminal-themes
+bun run generate --product=desktop
 ```
 
 Source one generated theme from your interactive fish config:

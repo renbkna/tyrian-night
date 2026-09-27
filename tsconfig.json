@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["apps/vscode/src", "scripts"]
+  "include": ["apps/vscode/src", "apps/desktop/src", "assets", "scripts", "source"]
 }

@@ -17,14 +17,6 @@ const PACKAGE_RUNTIME_SUFFIX_FILES = ['assets/icon.png', 'out/extension.js', 'ou
  */
 
 /**
- * @param {string} [root]
- * @returns {VscodeThemeContribution[]}
- */
-export function buildVscodeThemeContributions(root = defaultRepoRoot) {
-  return vscodeThemeContributions(readThemeSources(root));
-}
-
-/**
  * @param {ReadonlyArray<import('./themeSources.mjs').ThemeSource>} sourceThemes
  * @returns {VscodeThemeContribution[]}
  */
@@ -58,6 +50,10 @@ export function isTyrianThemeLabel(theme: string | undefined): theme is TyrianTh
 
 export function getIslandCssFileForTheme(theme: string): string | undefined {
   return TYRIAN_THEME_CATALOG.find(({ label }) => label === theme)?.islandCssFile;
+}
+
+export function isTyrianIslandCssFile(cssFile: string): boolean {
+  return TYRIAN_THEME_CATALOG.some(({ islandCssFile }) => islandCssFile === cssFile);
 }
 `;
 }
@@ -130,15 +126,4 @@ export function syncGeneratedContracts(root = defaultRepoRoot, options = {}) {
     check,
     ownership: GENERATED_CONTRACT_OWNERSHIP,
   });
-}
-
-if (process.argv[1] === import.meta.filename) {
-  const staleSurfaces = syncGeneratedContracts(defaultRepoRoot, {
-    check: process.argv.includes('--check'),
-  });
-
-  if (staleSurfaces.length > 0) {
-    console.error(`Generated contract surfaces are stale: ${staleSurfaces.join(', ')}`);
-    process.exit(1);
-  }
 }

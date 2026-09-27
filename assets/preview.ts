@@ -6,14 +6,11 @@
  * types, functions, classes, diagnostics, strings, regex, and markdown text.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 
-import {
-  SOURCE_THEMES,
-  getDefaultThemeSource,
-  loadThemeRepository,
-  readSourceTheme,
-} from '../scripts/themeSources.mjs';
+import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog.js';
+import { isDirectRun } from '../scripts/cli.mjs';
 
 // TODO(theme): check comments, notes, and AI ghost text against Monaspace Radon.
 // NOTE: JSON property names should read like attributes, not function calls.
@@ -22,19 +19,9 @@ declare const THEME_MODE: unique symbol;
 
 export type ThemeMode = string & { readonly [THEME_MODE]: true };
 
-export function buildThemePreviewContract(sourceThemes = SOURCE_THEMES): {
-  readonly defaultMode: ThemeMode;
-  readonly modes: ReadonlyArray<ThemeMode>;
-} {
-  return Object.freeze({
-    defaultMode: previewModeForSource(getDefaultThemeSource(sourceThemes)),
-    modes: Object.freeze(sourceThemes.map(previewModeForSource)),
-  });
-}
+const THEME_DIRECTORY = path.resolve(import.meta.dirname, '../apps/vscode/themes');
 
-const DEFAULT_THEME_PREVIEW_CONTRACT = buildThemePreviewContract();
-
-export const THEME_MODES = DEFAULT_THEME_PREVIEW_CONTRACT.modes;
+export const THEME_MODES: ReadonlyArray<ThemeMode> = TYRIAN_THEME_CATALOG.map(previewModeForSource);
 
 export interface ThemeToken {
   readonly scope: string;
@@ -56,15 +43,25 @@ export enum DiagnosticSeverity {
   Error = 'error',
 }
 
+interface VscodeThemeFile {
+  readonly name: string;
+  readonly type: 'dark' | 'light';
+  readonly colors: Readonly<Record<string, `#${string}` | undefined>>;
+  readonly tokenColors: ReadonlyArray<{
+    scope: string | string[];
+    settings: { foreground: `#${string}` };
+  }>;
+}
+
 const ANSI_ROLES = [
-  'ansi.black',
-  'ansi.red',
-  'ansi.green',
-  'ansi.yellow',
-  'ansi.blue',
-  'ansi.magenta',
-  'ansi.cyan',
-  'ansi.white',
+  'terminal.ansiBlack',
+  'terminal.ansiRed',
+  'terminal.ansiGreen',
+  'terminal.ansiYellow',
+  'terminal.ansiBlue',
+  'terminal.ansiMagenta',
+  'terminal.ansiCyan',
+  'terminal.ansiWhite',
 ] as const;
 
 const COLOR_PATTERN = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/iu;
@@ -86,35 +83,33 @@ function traceable(label: string): ClassDecorator {
 
 @traceable('theme-preview')
 export class ThemePreviewController {
-  static readonly defaultMode = DEFAULT_THEME_PREVIEW_CONTRACT.defaultMode;
+  static readonly defaultMode = previewModeForSource(defaultCatalogTheme());
 
   #cache = new Map<ThemeMode, CachedThemePreview>();
 
-  constructor(private readonly root = process.cwd()) {}
+  constructor(private readonly themeDirectory = THEME_DIRECTORY) {}
 
   async readThemeManifest(mode: ThemeMode): Promise<ReadonlyArray<ThemeToken>> {
-    const repository = loadThemeRepository(this.root);
     const slug = `tyrian-${mode}`;
-    const source = repository.sources.find((candidate) => candidate.slug === slug);
-    if (!source) throw new Error(`Unknown preview theme: ${slug}`);
-    const theme = readSourceTheme(source, repository);
+    const theme = JSON.parse(
+      await fs.promises.readFile(path.join(this.themeDirectory, `${slug}.json`), 'utf8')
+    ) as VscodeThemeFile;
 
-    if (!theme.name.includes('Tyrian') || !['dark', 'light'].includes(theme.appearance)) {
+    if (!theme.name.includes('Tyrian') || !['dark', 'light'].includes(theme.type)) {
       throw new Error(`Unexpected theme name: ${theme.name}`);
     }
 
-    const tokens: ThemeToken[] = Object.entries(theme.syntax).map(([scope, foreground]) => ({
-      scope,
-      foreground: foreground as `#${string}`,
-    }));
+    const tokens: ThemeToken[] = theme.tokenColors.flatMap(({ scope, settings }) =>
+      [scope].flat().map((entry) => ({ scope: entry, foreground: settings.foreground }))
+    );
     const ansi = ANSI_ROLES.map((role) => {
-      const color = theme.terminal[role];
+      const color = theme.colors[role];
       if (!color) throw new Error(`Theme ${theme.name} is missing terminal role ${role}.`);
-      return color as `#${string}`;
+      return color;
     });
     this.#cache.set(mode, {
       ansi,
-      appearance: theme.appearance,
+      appearance: theme.type,
       name: theme.name,
       tokens,
     });
@@ -138,6 +133,12 @@ export class ThemePreviewController {
       importantScopes || 'No cached scopes yet.',
     ].join('\n\n');
   }
+}
+
+function defaultCatalogTheme(): { slug: string } {
+  const theme = TYRIAN_THEME_CATALOG.find(({ isDefault }) => isDefault);
+  if (!theme) throw new Error('The Tyrian theme catalog has no default theme.');
+  return theme;
 }
 
 function previewModeForSource(source: { slug: string }): ThemeMode {
@@ -200,7 +201,7 @@ export async function renderPreview(mode: ThemeMode, signal?: AbortSignal): Prom
   console.info(controller.summarize(mode));
 }
 
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
+if (isDirectRun(import.meta)) {
   void renderPreview(ThemePreviewController.defaultMode).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error({

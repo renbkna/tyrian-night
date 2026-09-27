@@ -26,6 +26,7 @@ const DESKTOP_THEME_ID = /^Tyrian(?:[A-Z0-9][a-z0-9]*)+$/u;
  *   plasmaDesktopTheme: string;
  *   plasmaLookAndFeel: string;
  *   caelestiaSchemeState: string;
+ *   caelestiaSequences: string;
  *   caelestiaHyprLegacy: string;
  *   caelestiaHyprLua: string;
  * }} DesktopThemeAssetPaths
@@ -252,6 +253,10 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildCaelestiaHyprLuaScheme(caelestiaColours),
       },
       {
+        path: desktopAssets.caelestiaSequences,
+        content: buildCaelestiaSequences(caelestiaColours),
+      },
+      {
         path: desktopAssets.caelestiaSchemeState,
         content: `${JSON.stringify(
           {
@@ -288,21 +293,13 @@ function readPackageVersion(repoRoot) {
 /**
  * @param {string} [repoRoot]
  * @param {{ check?: boolean }} [options]
- * @returns {void}
+ * @returns {string[]}
  */
-export function writeDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
-  const staleAssets = syncGeneratedAssets(buildDesktopThemeAssets(repoRoot), repoRoot, {
+export function syncDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+  return syncGeneratedAssets(buildDesktopThemeAssets(repoRoot), repoRoot, {
     check: options.check,
     ownership: DESKTOP_GENERATED_OWNERSHIP,
   });
-
-  if (staleAssets.length > 0) {
-    throw new Error(
-      `Desktop theme assets are stale:\n${staleAssets
-        .map((assetPath) => `  - ${assetPath}`)
-        .join('\n')}\nRun: node scripts/desktopThemes.mjs`
-    );
-  }
 }
 
 /**
@@ -717,10 +714,7 @@ function buildUnionCssTokens(palette) {
  * @returns {string}
  */
 function formatJson(value) {
-  return JSON.stringify(value, null, 2).replace(
-    /\[\n\s+"Plasma\/Theme"\n\s+\]/u,
-    '["Plasma/Theme"]'
-  );
+  return JSON.stringify(value, null, 2);
 }
 
 /**
@@ -1293,6 +1287,32 @@ function buildCaelestiaHyprLuaScheme(colours) {
 }
 
 /**
+ * OSC palette sequences Caelestia replays into new terminals.
+ *
+ * @param {Record<string, string>} colours
+ * @returns {string}
+ */
+function buildCaelestiaSequences(colours) {
+  /** @param {string} name @param {number[]} indexes */
+  const sequence = (name, ...indexes) => {
+    const color = colours[name];
+    if (color === undefined) throw new Error(`Missing Caelestia colour '${name}'`);
+    return `\x1b]${indexes.join(';')};rgb:${color.slice(0, 2)}/${color.slice(2, 4)}/${color.slice(4, 6)}\x1b\\`;
+  };
+
+  return [
+    sequence('onSurface', 10),
+    sequence('surface', 11),
+    sequence('secondary', 12),
+    sequence('secondary', 17),
+    ...Array.from({ length: 16 }, (_, index) => sequence(`term${index}`, 4, index)),
+    sequence('primary', 4, 16),
+    sequence('secondary', 4, 17),
+    sequence('tertiary', 4, 18),
+  ].join('');
+}
+
+/**
  * @param {string} name
  * @param {Record<string, string>} entries
  * @returns {string}
@@ -1362,6 +1382,7 @@ export function desktopThemeAssetPaths(slug) {
     plasmaDesktopTheme: `desktop/kde/plasma/desktoptheme/${themeId}`,
     plasmaLookAndFeel: `desktop/kde/plasma/look-and-feel/${themeId}`,
     caelestiaSchemeState: `desktop/caelestia/state/${slug}.scheme.json`,
+    caelestiaSequences: `desktop/caelestia/state/${slug}.sequences.txt`,
     caelestiaHyprLegacy: `desktop/caelestia/hypr/${slug}.conf`,
     caelestiaHyprLua: `desktop/caelestia/hypr/${slug}.lua`,
   };
@@ -1389,8 +1410,4 @@ function desktopColor(theme, qualifiedRole, background) {
     readThemeColor(theme, qualifiedRole),
     background ?? readThemeColor(theme, 'ui:surface.canvas')
   );
-}
-
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
-  writeDesktopThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }

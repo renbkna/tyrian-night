@@ -5,7 +5,7 @@ Starship controls the prompt. `terminal/starship/tyrian-night.toml` uses a Tyria
 From a clean checkout, materialize the generated terminal assets first:
 
 ```sh
-bun run build:terminal-themes
+bun run generate --product=desktop
 ```
 
 Use it directly:

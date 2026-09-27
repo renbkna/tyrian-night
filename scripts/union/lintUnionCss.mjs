@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { extractCssRules, selectorElementNames } from './extractSelectors.mjs';
 import { flattenCssFile } from './flattenCss.mjs';
+import { isDirectRun } from '../cli.mjs';
 
 const GENERATED_FORBIDDEN_TEXT = [
   '@import',
@@ -186,7 +187,7 @@ function normalizeSelector(selector) {
     .trim();
 }
 
-if (process.argv[1] === import.meta.filename) {
+if (isDirectRun(import.meta)) {
   const repoRoot = process.cwd();
   const css = readUnionSourceCss(repoRoot);
   const issues = lintUnionCss(css, { generated: true });

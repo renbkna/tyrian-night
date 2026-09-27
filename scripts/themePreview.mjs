@@ -2,10 +2,14 @@
 
 import path from 'node:path';
 
-import { contrastRatio, hexToOklch } from './colorScience.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { themeColor } from './themeDefinition.mjs';
-import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
+import {
+  loadThemeRepository,
+  meanSemanticChroma,
+  meanSemanticContrast,
+  readSourceTheme,
+} from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const OUTPUT_PATH = 'examples/theme-preview/generated/production-family.js';
@@ -26,13 +30,9 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
     if (!energyVariant && !branch) {
       throw new Error(`Theme '${source.slug}' has no preview classification.`);
     }
-    const semanticColors = family.semanticPigments.map((pigment) => themeColor(theme, pigment));
     const canvas = themeColor(theme, 'ui:surface.canvas');
-    const semanticChroma =
-      semanticColors.reduce((sum, color) => sum + hexToOklch(color).C, 0) / semanticColors.length;
-    const semanticContrast =
-      semanticColors.reduce((sum, color) => sum + contrastRatio(color, canvas), 0) /
-      semanticColors.length;
+    const semanticChroma = meanSemanticChroma(theme, family.semanticPigments);
+    const semanticContrast = meanSemanticContrast(theme, family.semanticPigments);
     const classification = source.isDefault
       ? 'canonical family center'
       : energyVariant
@@ -80,7 +80,7 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
  * @param {string} [repoRoot]
  * @param {{ check?: boolean }} [options]
  */
-export function writeProductionFamilyPreview(repoRoot = defaultRepoRoot, options = {}) {
+export function syncProductionFamilyPreview(repoRoot = defaultRepoRoot, options = {}) {
   const content =
     '// biome-ignore format: generated production palette\n' +
     'window.TYRIAN_PRODUCTION_FAMILY = Object.freeze(' +
@@ -90,14 +90,4 @@ export function writeProductionFamilyPreview(repoRoot = defaultRepoRoot, options
     check: options.check,
     ownership: [{ directory: 'examples/theme-preview/generated' }],
   });
-}
-
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
-  const staleFiles = writeProductionFamilyPreview(defaultRepoRoot, {
-    check: process.argv.includes('--check'),
-  });
-  if (staleFiles.length > 0) {
-    console.error(`Theme preview assets are stale: ${staleFiles.join(', ')}`);
-    process.exit(1);
-  }
 }

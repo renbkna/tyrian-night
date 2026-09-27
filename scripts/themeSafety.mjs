@@ -1,6 +1,5 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -13,94 +12,59 @@ import {
 import { opaqueHex } from './colorUtils.mjs';
 import { COLOR_VISION_MODES, simulateColorVision } from './colorVision.mjs';
 import { loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
-
-const ROOT = path.resolve(import.meta.dirname, '..');
-export const THEME_SAFETY_CONTRACT_PATH = path.join(ROOT, 'source', 'themeSafetyContract.json');
-const PAIRINGS = new Set(['adjacent', 'adjacent-cycle', 'all']);
+import { loadSourceModule } from './sourceModule.mjs';
 
 /** @typedef {Record<string, any>} JsonObject */
 /** @typedef {{ id: string; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
-/** @typedef {{ id: string; pairing: string; roles: string[] }} SafetyStateComparison */
-/** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; schemaVersion: 3; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
-
-/**
- * @param {string} [contractPath]
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @returns {ThemeSafetyContract}
- */
-export function readThemeSafetyContract(
-  contractPath = THEME_SAFETY_CONTRACT_PATH,
-  definition = loadThemeDefinitionContext(path.resolve(path.dirname(contractPath), '..'))
-) {
-  const root = path.resolve(path.dirname(contractPath), '..');
-  if (definition.root !== root) {
-    throw new Error('Theme safety contract and definition roots must match.');
-  }
-  return validateThemeSafetyContract(JSON.parse(fs.readFileSync(contractPath, 'utf8')), definition);
-}
+/** @typedef {{ id: string; pairing: 'adjacent' | 'adjacent-cycle' | 'all'; roles: string[] }} SafetyStateComparison */
+/** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
 /**
  * The safety contract contains hard rendered-contrast requirements and the
  * semantic state pairs that must not collapse to one source color. Simulated
  * color-vision distances remain observations because no repository threshold
- * has human-validation authority.
- * @param {unknown} value
+ * has human-validation authority. Its shape is type-checked; this validates
+ * references into the role contract and the numeric bounds types cannot express.
+ *
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @returns {ThemeSafetyContract}
  */
-export function validateThemeSafetyContract(value, definition = loadThemeDefinitionContext(ROOT)) {
-  const contract = requireObject(value, 'root');
-  requireExactFields(
-    contract,
-    ['background', 'contrast', 'contrastPairs', 'schemaVersion', 'stateComparisons'],
-    'root'
+export function readThemeSafetyContract(definition = loadThemeDefinitionContext()) {
+  return validateThemeSafetyContract(
+    /** @type {ThemeSafetyContract} */ (
+      loadSourceModule(path.join(definition.root, 'source/themeSafetyContract.cjs'))
+    ),
+    definition
   );
-  invariant(contract.schemaVersion === 3, 'schemaVersion must be 3');
+}
+
+/**
+ * @param {ThemeSafetyContract} contract
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
+ * @returns {ThemeSafetyContract}
+ */
+export function validateThemeSafetyContract(contract, definition) {
   requireThemeRole(contract.background, definition, 'background');
+  invariant(contract.contrast.length > 0, 'contrast must not be empty');
+  invariant(contract.contrastPairs.length > 0, 'contrastPairs must not be empty');
+  invariant(contract.stateComparisons.length > 0, 'stateComparisons must not be empty');
   const ids = new Set();
-  const contrast = requireArray(contract.contrast, 'contrast').map((raw, index) => {
-    const entry = requireObject(raw, `contrast[${index}]`);
-    requireExactFields(entry, ['id', 'minimum', 'roles'], `contrast[${index}]`);
-    requireId(entry.id, ids, `contrast[${index}]`);
-    requireMinimumContrast(entry.minimum, `contrast[${index}] minimum`);
-    const roles = requireUniqueStrings(entry.roles, `contrast[${index}] roles`);
-    for (const role of roles) requireThemeRole(role, definition, `contrast[${index}] role`);
-    return { id: entry.id, minimum: entry.minimum, roles };
-  });
-  const contrastPairs = requireArray(contract.contrastPairs, 'contrastPairs').map((raw, index) => {
-    const entry = requireObject(raw, `contrastPairs[${index}]`);
-    requireExactFields(
-      entry,
-      ['background', 'foreground', 'id', 'minimum'],
-      `contrastPairs[${index}]`
-    );
-    requireId(entry.id, ids, `contrastPairs[${index}]`);
-    requireThemeRole(entry.foreground, definition, `contrastPairs[${index}] foreground`);
-    requireThemeRole(entry.background, definition, `contrastPairs[${index}] background`);
-    requireMinimumContrast(entry.minimum, `contrastPairs[${index}] minimum`);
-    return { ...entry };
-  });
-  const stateComparisons = requireArray(contract.stateComparisons, 'stateComparisons').map(
-    (raw, index) => {
-      const entry = requireObject(raw, `stateComparisons[${index}]`);
-      requireExactFields(entry, ['id', 'pairing', 'roles'], `stateComparisons[${index}]`);
-      requireId(entry.id, ids, `stateComparisons[${index}]`);
-      invariant(PAIRINGS.has(entry.pairing), `${entry.id} has invalid pairing`);
-      const roles = requireUniqueStrings(entry.roles, `${entry.id} roles`);
-      invariant(roles.length >= 2, `${entry.id} requires at least two roles`);
-      for (const role of roles) requireThemeRole(role, definition, `${entry.id} role`);
-      return { ...entry, roles };
-    }
-  );
-  return /** @type {ThemeSafetyContract} */ (
-    deepFreeze({
-      background: contract.background,
-      contrast,
-      contrastPairs,
-      schemaVersion: 3,
-      stateComparisons,
-    })
-  );
+  for (const entry of [...contract.contrast, ...contract.contrastPairs]) {
+    requireId(entry.id, ids);
+    invariant(entry.minimum >= 3 && entry.minimum <= 7, `${entry.id} minimum must be within 3..7`);
+  }
+  for (const entry of contract.contrast) {
+    requireRoles(entry.id, entry.roles, 1, definition);
+  }
+  for (const entry of contract.contrastPairs) {
+    requireRoles(entry.id, [entry.foreground, entry.background], 2, definition);
+  }
+  for (const entry of contract.stateComparisons) {
+    requireId(entry.id, ids);
+    requireRoles(entry.id, entry.roles, 2, definition);
+  }
+  return contract;
 }
 
 /**
@@ -244,79 +208,35 @@ function channelPairs(roles, pairing) {
   return pairs;
 }
 
-/** @param {unknown} value @param {string} owner @returns {JsonObject} */
-function requireObject(value, owner) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`Invalid theme safety contract: ${owner} must be an object.`);
-  }
-  return /** @type {JsonObject} */ (value);
+/** @param {string} id @param {Set<string>} ids */
+function requireId(id, ids) {
+  invariant(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id), `constraint id '${id}' must be kebab-case`);
+  invariant(!ids.has(id), `constraint id ${id} is duplicated`);
+  ids.add(id);
 }
 
-/** @param {unknown} value @param {string} owner @returns {any[]} */
-function requireArray(value, owner) {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`Invalid theme safety contract: ${owner} must be a non-empty array.`);
-  }
-  return value;
+/**
+ * @param {string} owner
+ * @param {string[]} roles
+ * @param {number} minimumCount
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
+ */
+function requireRoles(owner, roles, minimumCount, definition) {
+  invariant(roles.length >= minimumCount, `${owner} requires at least ${minimumCount} roles`);
+  invariant(new Set(roles).size === roles.length, `${owner} roles contain duplicates`);
+  for (const role of roles) requireThemeRole(role, definition, `${owner} role`);
 }
 
-/** @param {JsonObject} value @param {string[]} fields @param {string} owner */
-function requireExactFields(value, fields, owner) {
-  invariant(
-    JSON.stringify(Object.keys(value).toSorted()) === JSON.stringify([...fields].toSorted()),
-    `${owner} has unsupported or missing fields`
-  );
-}
-
-/** @param {unknown} value @param {string} owner */
-function requireUniqueStrings(value, owner) {
-  const values = requireArray(value, owner);
-  invariant(
-    values.every((entry) => typeof entry === 'string' && entry.length > 0),
-    `${owner} must contain strings`
-  );
-  invariant(new Set(values).size === values.length, `${owner} contains duplicates`);
-  return /** @type {string[]} */ (values);
-}
-
-/** @param {unknown} value @param {Set<string>} ids @param {string} owner */
-function requireId(value, ids, owner) {
-  if (typeof value !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value)) {
-    throw new Error(`Invalid theme safety contract: ${owner} has invalid id.`);
-  }
-  invariant(!ids.has(value), `constraint id ${value} is duplicated`);
-  ids.add(value);
-}
-
-/** @param {unknown} value @param {string} owner */
-function requireMinimumContrast(value, owner) {
-  invariant(typeof value === 'number' && value >= 3 && value <= 7, `${owner} must be within 3..7`);
-}
-
-/** @param {unknown} role @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition @param {string} owner */
+/** @param {string} role @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition @param {string} owner */
 function requireThemeRole(role, definition, owner) {
-  if (typeof role !== 'string') {
-    throw new Error(
-      `Invalid theme safety contract: ${owner} references unknown role ${String(role)}.`
-    );
-  }
   const separator = role.indexOf(':');
   const namespace = separator > 0 ? role.slice(0, separator) : '';
   const name = separator > 0 ? role.slice(separator + 1) : '';
   const roles = /** @type {Record<string, readonly string[]>} */ (definition.requiredThemeRoles);
   invariant(
-    separator > 0 && Object.hasOwn(roles, namespace) && roles[namespace].includes(name),
-    `${owner} references unknown role ${String(role)}`
+    separator > 0 && Object.hasOwn(roles, namespace) && roles[namespace]?.includes(name),
+    `${owner} references unknown role ${role}`
   );
-}
-
-/** @param {any} value */
-function deepFreeze(value) {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
-  }
-  return value;
 }
 
 /** @param {unknown} condition @param {string} message */

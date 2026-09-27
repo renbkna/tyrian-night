@@ -8,34 +8,18 @@
 # Build and Packaging
 *.vsix
 
-# Python (Development Artifacts)
-__pycache__/
-*.py[cod]
-*$py.class
-*.py
-verify_colors.py
-check_parity.py
-wcag_check.py
-
-# Rust (Development Artifacts)
-target/
-Cargo.lock
-*.rs
-!examples/theme-preview/**/*.rs
-
 # General
 .DS_Store
 node_modules/
 dist/
 user.settings.json
+
+# Local tool state
 .codex-logs/
-.machine-backups/
-# Retired experiment profiles are inert user-owned data; no repository command reads this path.
 .umbra/
 
 # Build artifacts
-out/*.js
-out/*.map
+out/
 apps/vscode/out/*.js
 apps/vscode/out/*.map
 apps/vscode/LICENSE

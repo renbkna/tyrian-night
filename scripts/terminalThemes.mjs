@@ -4,13 +4,12 @@ import path from 'node:path';
 
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { FASTFETCH_IMAGE_CONFIG_PATH } from './portableAssets.mjs';
+import { FASTFETCH_IMAGE_CONFIG_PATH } from '../apps/desktop/src/installPaths.mjs';
 import { themeColor as requireThemeColor, TERMINAL_ANSI_ROLES } from './themeDefinition.mjs';
 import {
   getTerminalDefaultThemeSource,
   loadThemeRepository,
   readSourceTheme,
-  requireProductionThemeRepository,
 } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
@@ -62,19 +61,19 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
     ]),
     {
       path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig({ repoRoot, repository }),
+      content: buildGhosttyConfig({ repository }),
     },
     {
       path: 'terminal/foot/foot.ini',
-      content: buildFootConfig({ repoRoot, repository }),
+      content: buildFootConfig({ repository }),
     },
     {
       path: 'terminal/fish/config.example.fish',
-      content: buildFishConfig({ repoRoot, repository }),
+      content: buildFishConfig({ repository }),
     },
     {
       path: 'terminal/fish/conf.d/tyrian-night.fish',
-      content: buildFishStartupConfig({ repoRoot, repository }),
+      content: buildFishStartupConfig({ repository }),
     },
     {
       path: 'terminal/fish/functions/fish_greeting.fish',
@@ -94,21 +93,13 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
 /**
  * @param {string} [repoRoot]
  * @param {{ check?: boolean }} [options]
- * @returns {void}
+ * @returns {string[]}
  */
-export function writeTerminalThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
-  const staleAssets = syncGeneratedAssets(buildTerminalThemeAssets(repoRoot), repoRoot, {
+export function syncTerminalThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+  return syncGeneratedAssets(buildTerminalThemeAssets(repoRoot), repoRoot, {
     check: options.check,
     ownership: TERMINAL_GENERATED_OWNERSHIP,
   });
-
-  if (staleAssets.length > 0) {
-    throw new Error(
-      `Terminal theme assets are stale:\n${staleAssets
-        .map((assetPath) => `  - ${assetPath}`)
-        .join('\n')}\nRun: node scripts/terminalThemes.mjs`
-    );
-  }
 }
 
 /**
@@ -232,12 +223,10 @@ function buildFishTheme(theme) {
 }
 
 /**
- * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository }} [options]
+ * @param {{ repository: import('./themeSources.mjs').ThemeRepository }} options
  * @returns {string}
  */
-export function buildGhosttyConfig(options = {}) {
-  const root = options.repoRoot ?? defaultRepoRoot;
-  const repository = resolveThemeRepository(root, options.repository);
+export function buildGhosttyConfig({ repository }) {
   const darkSource = getTerminalDefaultThemeSource('dark', repository.sources);
   const lightSource = getTerminalDefaultThemeSource('light', repository.sources);
   const lines = [
@@ -272,15 +261,15 @@ export function buildGhosttyConfig(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; themeDirectory?: string }} [options]
+ * @param {{ repository: import('./themeSources.mjs').ThemeRepository; themeDirectory?: string }} options
  * @returns {string}
  */
-export function buildFootConfig(options = {}) {
-  const root = options.repoRoot ?? defaultRepoRoot;
-  const repository = resolveThemeRepository(root, options.repository);
+export function buildFootConfig({
+  repository,
+  themeDirectory = '/path/to/tyrian-night/terminal/foot/themes',
+}) {
   const defaultDarkSource = getTerminalDefaultThemeSource('dark', repository.sources);
   const defaultLightSource = getTerminalDefaultThemeSource('light', repository.sources);
-  const themeDirectory = options.themeDirectory ?? '/path/to/tyrian-night/terminal/foot/themes';
 
   return [
     `include=${themeDirectory}/${defaultDarkSource.slug}.ini`,
@@ -308,19 +297,13 @@ export function buildFootConfig(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} [options]
+ * @param {{ repository: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} options
  * @returns {string}
  */
-export function buildFishConfig(options = {}) {
-  const tyrianRoot = options.tyrianRoot ?? '/path/to/tyrian-night';
-
+export function buildFishConfig({ repository, tyrianRoot = '/path/to/tyrian-night' }) {
   return [
     'if status is-interactive',
-    ...buildFishStartupConfig({
-      repoRoot: options.repoRoot,
-      repository: options.repository,
-      tyrianRoot,
-    })
+    ...buildFishStartupConfig({ repository, tyrianRoot })
       .trimEnd()
       .split('\n')
       .map((line) => `    ${line}`),
@@ -332,16 +315,11 @@ export function buildFishConfig(options = {}) {
 }
 
 /**
- * @param {{ repoRoot?: string; repository?: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} [options]
+ * @param {{ repository: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} options
  * @returns {string}
  */
-export function buildFishStartupConfig(options = {}) {
-  const root = options.repoRoot ?? defaultRepoRoot;
-  const defaultDarkSource = getTerminalDefaultThemeSource(
-    'dark',
-    resolveThemeRepository(root, options.repository).sources
-  );
-  const tyrianRoot = options.tyrianRoot ?? '/path/to/tyrian-night';
+export function buildFishStartupConfig({ repository, tyrianRoot = '/path/to/tyrian-night' }) {
+  const defaultDarkSource = getTerminalDefaultThemeSource('dark', repository.sources);
 
   return [
     `set -gx TYRIAN_NIGHT_ROOT "${fishEscape(tyrianRoot)}"`,
@@ -510,17 +488,7 @@ function buildFastfetchConfig(theme) {
     ],
   };
 
-  return `${formatJson(config)}\n`;
-}
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function formatJson(value) {
-  return JSON.stringify(value, null, 2)
-    .replace(/\[\n\s+"bar",\n\s+"num"\n\s+\]/u, '["bar", "num"]')
-    .replace(/\[\n\s+0,\n\s+15\n\s+\]/u, '[0, 15]');
+  return `${JSON.stringify(config, null, 2)}\n`;
 }
 
 /**
@@ -640,20 +608,6 @@ function terminalSourceTheme(sourceThemes, appearance) {
 }
 
 /**
- * @param {string} root
- * @param {import('./themeSources.mjs').ThemeRepository | undefined} repository
- */
-function resolveThemeRepository(root, repository) {
-  const resolvedRepository = requireProductionThemeRepository(
-    repository ?? loadThemeRepository(root)
-  );
-  if (resolvedRepository.root !== path.resolve(root)) {
-    throw new Error('Terminal generator theme context does not belong to the requested root.');
-  }
-  return resolvedRepository;
-}
-
-/**
  * @param {string} module
  * @returns {string[]}
  */
@@ -739,8 +693,4 @@ function footColor(color) {
  */
 function fishEscape(value) {
   return value.replace(/([$"\\])/gu, '\\$1');
-}
-
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
-  writeTerminalThemeAssets(defaultRepoRoot, { check: process.argv.includes('--check') });
 }

@@ -1,45 +1,24 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { hexToOklch, hueInsideRange } from './colorScience.mjs';
 import { loadThemeDefinitionContext } from './themeDefinition.mjs';
-
-const ROOT = path.resolve(import.meta.dirname, '..');
-export const THEME_PIGMENT_POLICY_PATH = path.join(ROOT, 'source/themePigmentPolicy.json');
+import { loadSourceModule } from './sourceModule.mjs';
 
 /** @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation */
-/** @typedef {{ reservations: PigmentReservation[]; schemaVersion: 2 }} ThemePigmentPolicy */
+/** @typedef {{ reservations: PigmentReservation[] }} ThemePigmentPolicy */
 
 /**
- * @param {string} [policyPath]
+ * Reads the type-checked pigment policy and validates what types cannot:
+ * identifier uniqueness, hue bounds, and role references into the role contract.
+ *
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
  * @returns {ThemePigmentPolicy}
  */
-export function readThemePigmentPolicy(
-  policyPath = THEME_PIGMENT_POLICY_PATH,
-  definition = loadThemeDefinitionContext(path.resolve(path.dirname(policyPath), '..'))
-) {
-  const root = path.resolve(path.dirname(policyPath), '..');
-  if (definition.root !== root) {
-    throw new Error('Theme pigment policy and definition roots must match.');
-  }
-  return validateThemePigmentPolicy(JSON.parse(fs.readFileSync(policyPath, 'utf8')), definition);
-}
-
-/**
- * @param {unknown} value
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
- * @returns {ThemePigmentPolicy}
- */
-export function validateThemePigmentPolicy(value, definition = loadThemeDefinitionContext(ROOT)) {
-  const policy = requireObject(value, 'root');
-  requireExactFields(policy, ['reservations', 'schemaVersion'], 'root');
-  invariant(policy.schemaVersion === 2, 'schemaVersion must be 2');
-  invariant(
-    Array.isArray(policy.reservations) && policy.reservations.length > 0,
-    'reservations must be a non-empty array'
+export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()) {
+  const policy = /** @type {ThemePigmentPolicy} */ (
+    loadSourceModule(path.join(definition.root, 'source/themePigmentPolicy.cjs'))
   );
   const knownRoles = new Set(
     Object.entries(definition.requiredThemeRoles).flatMap(([namespace, roles]) =>
@@ -47,33 +26,36 @@ export function validateThemePigmentPolicy(value, definition = loadThemeDefiniti
     )
   );
   const ids = new Set();
-  const reservations = /** @type {any[]} */ (policy.reservations).map(
-    /** @param {unknown} raw @param {number} index */ (raw, index) => {
-      const reservation = requireObject(raw, `reservations[${index}]`);
-      requireExactFields(
-        reservation,
-        ['allowedRoles', 'id', 'maximum', 'minimum'],
-        `reservations[${index}]`
+  invariant(policy.reservations.length > 0, 'reservations must not be empty');
+  for (const reservation of policy.reservations) {
+    invariant(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(reservation.id),
+      `reservation id '${reservation.id}' must be kebab-case`
+    );
+    invariant(!ids.has(reservation.id), `reservation id ${reservation.id} is duplicated`);
+    ids.add(reservation.id);
+    for (const bound of [reservation.minimum, reservation.maximum]) {
+      invariant(
+        bound >= 0 && bound < 360,
+        `reservation ${reservation.id} hue must be within 0..360`
       );
-      requireId(reservation.id, `reservations[${index}] id`);
-      invariant(!ids.has(reservation.id), `reservation id ${reservation.id} is duplicated`);
-      ids.add(reservation.id);
-      requireHue(reservation.minimum, `reservation ${reservation.id} minimum`);
-      requireHue(reservation.maximum, `reservation ${reservation.id} maximum`);
-      const allowedRoles = requireKnownRoles(
-        reservation.allowedRoles,
-        knownRoles,
-        `reservation ${reservation.id} allowedRoles`
-      );
-      return {
-        allowedRoles,
-        id: reservation.id,
-        maximum: reservation.maximum,
-        minimum: reservation.minimum,
-      };
     }
-  );
-  return /** @type {ThemePigmentPolicy} */ (deepFreeze({ reservations, schemaVersion: 2 }));
+    invariant(
+      reservation.allowedRoles.length > 0,
+      `reservation ${reservation.id} allowedRoles must not be empty`
+    );
+    invariant(
+      new Set(reservation.allowedRoles).size === reservation.allowedRoles.length,
+      `reservation ${reservation.id} allowedRoles contains duplicates`
+    );
+    for (const role of reservation.allowedRoles) {
+      invariant(
+        knownRoles.has(role),
+        `reservation ${reservation.id} references unknown role ${role}`
+      );
+    }
+  }
+  return policy;
 }
 
 /**
@@ -104,62 +86,6 @@ export function auditThemePigmentPolicy(theme, policy = readThemePigmentPolicy()
     }
   }
   return violations;
-}
-
-/** @param {unknown} value @param {string} owner @returns {Record<string, any>} */
-function requireObject(value, owner) {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`Invalid theme pigment policy: ${owner} must be an object.`);
-  }
-  return /** @type {Record<string, any>} */ (value);
-}
-
-/** @param {Record<string, any>} value @param {string[]} fields @param {string} owner */
-function requireExactFields(value, fields, owner) {
-  invariant(
-    JSON.stringify(Object.keys(value).toSorted()) === JSON.stringify([...fields].toSorted()),
-    `${owner} has unsupported or missing fields`
-  );
-}
-
-/** @param {unknown} value @param {string} owner */
-function requireId(value, owner) {
-  invariant(
-    typeof value === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value),
-    `${owner} must be a kebab-case identifier`
-  );
-}
-
-/** @param {unknown} value @param {string} owner */
-function requireHue(value, owner) {
-  invariant(
-    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value < 360,
-    `${owner} must be within 0..360 (exclusive)`
-  );
-}
-
-/** @param {unknown} value @param {Set<string>} knownRoles @param {string} owner */
-function requireKnownRoles(value, knownRoles, owner) {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`Invalid theme pigment policy: ${owner} must be a non-empty array.`);
-  }
-  const entries = /** @type {unknown[]} */ (value);
-  invariant(new Set(entries).size === entries.length, `${owner} contains duplicates`);
-  for (const entry of entries)
-    invariant(
-      typeof entry === 'string' && knownRoles.has(entry),
-      `${owner} references unknown role ${String(entry)}`
-    );
-  return /** @type {string[]} */ ([...entries]);
-}
-
-/** @param {any} value */
-function deepFreeze(value) {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
-  }
-  return value;
 }
 
 /** @param {unknown} condition @param {string} message */

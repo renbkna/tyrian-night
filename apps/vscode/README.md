@@ -14,8 +14,7 @@ The projection covers a curated set of documented public VS Code colors for cont
 ## Support
 
 - Color themes and the packaged extension support VS Code 1.118 or newer on Linux, macOS, and Windows.
-- Island UI apply and repair support Linux only.
-- Doctor and Restore Classic UI remain available on every platform for current managed installations. A pending version 5 exchange journal needs Linux with GNU `mv` before Restore can recover it.
+- Island UI (Apply, Repair, Restore Classic UI, and Doctor) supports Linux, macOS, and Windows. VS Code must be installed where your user account can write it: a per-user install on Windows, not one under `Program Files`.
 - Tyrian never requests administrator privileges or changes file ownership or permissions.
 
 The color themes use the normal VS Code extension contract. Merely installing or selecting a theme does not modify the VS Code application.
@@ -32,11 +31,9 @@ Tyrian keeps VS Code semantic highlighting disabled by theme default so language
 
 ## Island UI
 
-Island UI is an optional Linux-only workbench patch. Apply and Repair refuse unsupported platforms before filesystem or desired-state admission.
+Island UI is an optional workbench patch for VS Code on Linux, macOS, and Windows. On any other platform the commands report unsupported and change nothing, and startup reconciliation is skipped.
 
-Apply and Repair require GNU `mv` with `--exchange` and `--no-copy` so existing VS Code files can be replaced atomically; systems without that capability report unsupported before writing application files. Classic Restore selects the same version 5 exchange protocol when it is available. On Linux without that capability, and on the existing portable Restore platforms, it records the recoverable version 4 protocol instead. Version 4 can recover an interrupted operation, but an abrupt termination between retirement and publication can temporarily leave the replaced target absent; it does not promise continuous target presence.
-
-Apply and Repair create journal version 5 for atomic file exchange. Doctor and Restore continue to read and recover existing version 4 journals. A pending version 5 journal requires Linux with GNU `mv` supporting `--exchange` and `--no-copy`; Restore reports that prerequisite before changing the managed-root record. Durable journals and managed-root records retain one fixed predecessor and one prepared candidate beside their canonical name. After an interrupted publication or cleanup, Doctor can read the predecessor and the next locked Island command completes its owned recovery. If canonical and predecessor records disagree without the candidate proof that explains the change, Tyrian preserves both generations and reports manual recovery instead of overwriting or deleting either one. Older UUID-named retirement files also remain preserved for manual recovery because their original ownership cannot be proved.
+Every Island change holds one per-user lock that the operating system releases when the process exits: `flock` on Linux and `lockf` on macOS, both on `~/.tyrian-night/island.lock`, and a named pipe on Windows. A second VS Code window waits for the first. Startup reconciliation and Repair read the installation's desired style and act on it while holding that lock, so a window that starts during another window's Apply cannot revert it. Each file is replaced atomically, so no file is ever partial or missing. Apply writes the stylesheet before the `workbench.html` link that loads it, and Restore removes the link before the stylesheet, so an interrupted command leaves VS Code loadable; running the same command again completes it. Doctor reports an interrupted state as broken or checksum-mismatched and recommends that command.
 
 > [!WARNING]
 > Before uninstalling Tyrian Night, run **Tyrian Night: Restore Classic UI**, reload VS Code, and confirm that the custom UI is gone. Uninstalling the extension alone cannot remove an active patch.
@@ -48,9 +45,9 @@ Commands:
 - **Tyrian Night: Restore Classic UI**
 - **Tyrian Night: Doctor Island UI**
 
-Apply preflights the canonical application root, desired stylesheet, current patch, backup receipts, transaction evidence, checksums, and write access. It then transactionally updates one stylesheet link in `workbench.html`, one CSS file, and the matching `product.json` checksum.
+Apply preflights the canonical application root, desired stylesheet, current patch, backup receipts, checksums, and write access. It then updates one stylesheet link in `workbench.html`, one CSS file, and the matching `product.json` checksum. A target that changed after planning, such as during a VS Code update, stops the command before it is overwritten.
 
-Tyrian stores backups beside the patched files, records the exact physical application root and hashes in a manifest, serializes writers with process locks, and rolls an interrupted file transaction back before another mutation. Restore accepts backups only when the complete receipt proves they belong to the current patch; otherwise it removes Tyrian-owned evidence and repairs the checksum.
+Tyrian stores backups beside the patched files and records the exact physical application root and hashes in a manifest. Restore accepts backups only when the complete receipt proves they belong to the current patch; otherwise it removes Tyrian-owned evidence and repairs the checksum.
 
 Package-managed VS Code installations may make application files read-only. Fix permissions through the package or system administrator, then retry Repair or Restore. Tyrian reports permission and partial-cleanup failures instead of claiming success.
 

@@ -1,11 +1,12 @@
 // @ts-check
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { contrastRatio } from './colorScience.mjs';
 import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { bracketColor, syntaxColor, terminalColor, uiColor } from './themeDefinition.mjs';
+import { themeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 /**
@@ -42,13 +43,14 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
+export function syncZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
   return syncGeneratedAssets(
     [
       {
         path: OUTPUT_PATH,
         content: `${JSON.stringify(buildZedThemeFamily(repoRoot), null, 2)}\n`,
       },
+      { path: 'apps/zed/LICENSE', content: fs.readFileSync(path.join(repoRoot, 'LICENSE')) },
     ],
     repoRoot,
     {
@@ -65,16 +67,16 @@ export function writeZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
  */
 export function buildZedTheme(theme, bracketRoles) {
   /** @param {string} role */
-  const ui = (role) => uiColor(theme, role);
+  const ui = (role) => themeColor(theme, `ui:${role}`);
   /** @param {string} role */
-  const syntaxRole = (role) => syntaxColor(theme, role);
+  const syntaxRole = (role) => themeColor(theme, `syntax:${role}`);
   /** @param {string} role */
-  const terminal = (role) => terminalColor(theme, role);
+  const terminal = (role) => themeColor(theme, `terminal:${role}`);
   const dimAnsi = buildDimAnsi(theme);
   const syntax = buildSyntax(theme);
   const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
   const editorBackground = ui('surface.canvas');
-  const accents = bracketRoles.map((role) => bracketColor(theme, role));
+  const accents = bracketRoles.map((role) => themeColor(theme, `brackets:${role}`));
 
   return {
     name: theme.name,
@@ -247,9 +249,11 @@ export function buildZedTheme(theme, bracketRoles) {
  */
 function buildSyntax(theme) {
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
-  const syntax = (role, options = {}) => highlight({ color: syntaxColor(theme, role), ...options });
+  const syntax = (role, options = {}) =>
+    highlight({ color: themeColor(theme, `syntax:${role}`), ...options });
   /** @param {string} role @param {Omit<ZedHighlight, 'color'>} [options] */
-  const ui = (role, options = {}) => highlight({ color: uiColor(theme, role), ...options });
+  const ui = (role, options = {}) =>
+    highlight({ color: themeColor(theme, `ui:${role}`), ...options });
 
   return {
     attribute: syntax('data'),
@@ -357,11 +361,11 @@ function highlight(settings) {
  * @returns {Record<string, string>}
  */
 function buildDimAnsi(theme) {
-  const background = terminalColor(theme, 'background');
-  const targetContrast = contrastRatio(uiColor(theme, 'text.muted'), background);
+  const background = themeColor(theme, 'terminal:background');
+  const targetContrast = contrastRatio(themeColor(theme, 'ui:text.muted'), background);
   /** @param {string} role */
   const dim = (role) =>
-    dimTerminalColor(terminalColor(theme, `ansi.${role}`), background, targetContrast);
+    dimTerminalColor(themeColor(theme, `terminal:ansi.${role}`), background, targetContrast);
 
   return {
     black: dim('black'),
@@ -412,25 +416,14 @@ function dimTerminalColor(color, background, targetContrast) {
  * @returns {string}
  */
 function zedBracketMatchBackground(theme) {
-  const background = uiColor(theme, 'editor.bracket.matchBackground');
+  const background = themeColor(theme, 'ui:editor.bracket.matchBackground');
 
   if (!isTransparentHex(background)) {
     return background;
   }
 
-  const border = uiColor(theme, 'editor.bracket.matchBorder');
+  const border = themeColor(theme, 'ui:editor.bracket.matchBorder');
   const alpha = theme.appearance === 'light' ? '1F' : '35';
 
   return withHexAlpha(border, alpha);
-}
-
-if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
-  const staleFiles = writeZedThemeFamily(defaultRepoRoot, {
-    check: process.argv.includes('--check'),
-  });
-
-  if (staleFiles.length > 0) {
-    console.error(`Zed theme assets are stale: ${staleFiles.join(', ')}`);
-    process.exit(1);
-  }
 }
