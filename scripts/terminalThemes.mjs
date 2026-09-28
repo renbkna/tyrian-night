@@ -371,7 +371,7 @@ function buildFastfetchConfig(theme) {
         right: 4,
       },
       printRemaining: true,
-      recache: false,
+      cache: true,
       position: 'left',
       chafa: {
         fgOnly: false,

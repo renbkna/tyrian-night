@@ -260,7 +260,7 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
     height: 26,
     preserveAspectRatio: true,
   });
-  expect(fastfetchConfig.logo.recache).toBe(false);
+  expect(fastfetchConfig.logo.cache).toBe(true);
   expect(fastfetchConfig.logo.printRemaining).toBe(true);
   expect(fastfetchConfig.logo.chafa.symbols).toBe('braille');
   expect(fastfetchConfig.display.color.keys).toBe(themeColor(theme, 'terminal:ansi.magenta'));
