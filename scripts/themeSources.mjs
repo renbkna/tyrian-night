@@ -1,6 +1,5 @@
 // @ts-check
 
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -167,7 +166,6 @@ function loadThemeSnapshot(root) {
         slug,
         definition
       );
-      validateFrozenThemePalette(recipe, slug, definition);
       recipes.set(slug, recipe);
       themes.set(slug, resolveThemeRecipe(recipe, slug, definition));
       return recipe.name;
@@ -187,24 +185,6 @@ function loadThemeSnapshot(root) {
 
   validateThemeFamilyRelationships(sources, themes, definition);
   return { definition, recipes, root: resolvedRoot, sources, themes };
-}
-
-/**
- * @param {ThemeRecipe} recipe
- * @param {string} slug
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition
- */
-function validateFrozenThemePalette(recipe, slug, definition) {
-  const expected = definition.familyContract.branches[slug]?.frozenPaletteSha256;
-  if (!expected) return;
-
-  const palette = Object.entries(recipe.oklch).toSorted(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0
-  );
-  const actual = createHash('sha256').update(JSON.stringify(palette)).digest('hex');
-  if (actual !== expected) {
-    throw new Error(`Historical-reference theme '${slug}' palette is frozen.`);
-  }
 }
 
 /**
@@ -319,12 +299,23 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
 
   const hierarchy = family.syntaxHierarchy;
   for (const { slug } of sources) {
-    if (family.branches[slug]?.kind === 'historical-reference') continue;
     const theme = /** @type {ThemeDefinition} */ (themes.get(slug));
     const canvas = themeColor(theme, 'ui:surface.canvas');
     /** @param {readonly string[]} pigments */
     const contrasts = (pigments) =>
       pigments.map((pigment) => apcaContrast(themeColor(theme, pigment), canvas));
+    /** @param {string} pigment */
+    const chroma = (pigment) => hexToOklch(themeColor(theme, pigment)).C;
+    const leadChroma = Math.max(...hierarchy[0].pigments.map(chroma));
+    // The syntax solver keeps every capped pigment under its ceiling; the band
+    // floor below is measured relative to that ceiling.
+    /** @type {Map<string, number>} */
+    const chromaCeilings = new Map();
+    for (const { pigments, maximumChromaShareOfLead } of hierarchy) {
+      if (maximumChromaShareOfLead === undefined) continue;
+      for (const pigment of pigments)
+        chromaCeilings.set(pigment, maximumChromaShareOfLead * leadChroma);
+    }
     for (const [index, upper] of hierarchy.slice(0, -1).entries()) {
       const lower = hierarchy[index + 1];
       requireMetricRange(
@@ -355,19 +346,21 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
       family.energyLine.variants[slug]?.syntaxSaturation ?? family.branches[slug]?.syntaxSaturation
     );
     for (const pigment of family.syntaxSaturation.pigments) {
+      const value = SATURATION_MEASURES[band.measure](themeColor(theme, pigment));
+      const pigmentChroma = chroma(pigment);
+      const ceiling = chromaCeilings.get(pigment) ?? Number.POSITIVE_INFINITY;
+      // Richness scales with chroma at fixed lightness and hue, so value / chroma converts.
+      const ceilingInMeasure =
+        band.measure === 'chroma'
+          ? ceiling
+          : pigmentChroma > 0
+            ? (ceiling * value) / pigmentChroma
+            : band.maximum;
+      const effectiveMaximum = Math.min(band.maximum, ceilingInMeasure);
       requireMetricRange(
-        SATURATION_MEASURES[band.measure](themeColor(theme, pigment)),
-        band,
+        value,
+        { minimum: (effectiveMaximum * band.minimum) / band.maximum, maximum: band.maximum },
         `Theme '${slug}' syntax pigment '${pigment}' ${band.measure}`
-      );
-    }
-    /** @param {string} pigment */
-    const chroma = (pigment) => hexToOklch(themeColor(theme, pigment)).C;
-    for (const { pigment, reference, maximumShare } of family.syntaxSaturation.ceilings) {
-      requireMetricRange(
-        chroma(pigment),
-        { minimum: 0, maximum: maximumShare * chroma(reference) },
-        `Theme '${slug}' '${pigment}' chroma under '${reference}'`
       );
     }
   }

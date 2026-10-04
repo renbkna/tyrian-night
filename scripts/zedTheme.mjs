@@ -11,12 +11,11 @@ import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
- * @typedef {{ color: string; italic?: boolean; bold?: boolean; weight?: number }} ZedHighlight
+ * @typedef {{ color: string; italic?: boolean; bold?: boolean }} ZedHighlight
  */
 
 const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
-const ZED_FUNCTION_FONT_WEIGHT = 500;
 
 /**
  * @param {string} [repoRoot]
@@ -280,13 +279,11 @@ function buildSyntax(theme) {
     'enum.member': syntax('data'),
     enumMember: syntax('data'),
     error: ui('status.error'),
-    function: syntax('function', {
-      weight: ZED_FUNCTION_FONT_WEIGHT,
-    }),
-    'function.builtin': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    function: syntax('function'),
+    'function.builtin': syntax('function'),
     'function.definition': syntax('function', { bold: true }),
     'function.special.definition': syntax('function', { bold: true }),
-    'function.method': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    'function.method': syntax('function'),
     hint: ui('text.hint', { italic: true }),
     'invalid.deprecated': syntax('data'),
     keyword: syntax('declaration'),
@@ -296,8 +293,8 @@ function buildSyntax(theme) {
     link_uri: syntax('file'),
     macro: syntax('type'),
     'markup.quote': syntax('string', { italic: true }),
-    method: syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
-    'method.builtin': syntax('function', { weight: ZED_FUNCTION_FONT_WEIGHT }),
+    method: syntax('function'),
+    'method.builtin': syntax('function'),
     module: syntax('type'),
     namespace: syntax('type'),
     number: syntax('literal'),
@@ -358,7 +355,6 @@ function highlight(settings) {
   const style = { color: settings.color };
   if (settings.italic) style.font_style = 'italic';
   if (settings.bold) style.font_weight = 700;
-  if (settings.weight !== undefined) style.font_weight = settings.weight;
   return style;
 }
 

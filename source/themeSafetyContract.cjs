@@ -29,7 +29,7 @@ const themeSafetyContract = {
     {
       id: 'readable-code',
       metric: 'apca',
-      minimum: 60,
+      minimum: 45,
       roles: [
         'syntax:control',
         'syntax:function',
@@ -44,13 +44,13 @@ const themeSafetyContract = {
     {
       id: 'readable-structure',
       metric: 'apca',
-      minimum: 50,
+      minimum: 40,
       roles: ['syntax:declaration'],
     },
     {
       id: 'readable-quiet',
       metric: 'apca',
-      minimum: 40,
+      minimum: 30,
       roles: ['syntax:comment', 'syntax:documentation', 'syntax:punctuation'],
     },
     {

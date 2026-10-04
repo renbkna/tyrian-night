@@ -1,13 +1,12 @@
 # Tyrian Night for VS Code
 
-Tyrian Night provides six generated VS Code color themes:
+Tyrian Night provides five generated VS Code color themes:
 
 - **Night** — the quiet, low-energy dark variant at 60% of Abyss's saturation;
 - **Nocturne** — the tempered middle step at 80%;
 - **Pastel** — the family's pastel model: soft tints on a dusk-plum editor;
-- **Abyss** — the default: the deepest editor and the most saturation sRGB allows;
-- **Dawn** — the family in daylight: Nocturne's vividness on lavender-tinted paper;
-- **Night Old** — the historical reference translated onto the current theme contract.
+- **Abyss** — the default: the deepest editor and the richest matte jewel tones;
+- **Dawn** — the family in daylight: deep, vivid colors on lavender-tinted paper;
 
 The themes enable semantic highlighting. Language servers that report semantic tokens keep parameters colored at every use, bold only declarations of functions and types, underline mutable bindings (rust-analyzer), and strike through deprecated symbols; other languages fall back to the TextMate grammar colors.
 

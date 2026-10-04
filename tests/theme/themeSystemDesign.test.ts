@@ -2,36 +2,19 @@ import { SOURCE_THEMES, sourceTheme, VSCODE_PROJECTION } from '../support/themes
 import { expect, test } from 'bun:test';
 
 import { hexToOklch, hueDistance } from '../../scripts/colorScience.mjs';
-import {
-  loadThemeInspectionRepository,
-  loadThemeRepository,
-  readSourceTheme,
-} from '../../scripts/themeSources.mjs';
+import { loadThemeRepository, readSourceTheme } from '../../scripts/themeSources.mjs';
 import { themeColor, themeFamilyClassification } from '../../scripts/themeDefinition.mjs';
 import { buildVscodeTheme } from '../../scripts/vscodeThemes.mjs';
 import { buildZedThemeFamily } from '../../scripts/zedTheme.mjs';
 
-const inspectionRepository = loadThemeInspectionRepository();
-
-function readDefaultThemeRecipe(source: (typeof SOURCE_THEMES)[number]) {
-  const inspectedSource = inspectionRepository.sources.find(({ slug }) => slug === source.slug);
-  if (!inspectedSource) throw new Error(`Missing inspection source '${source.slug}'.`);
-  return inspectionRepository.recipes.get(inspectedSource.slug)!;
-}
-
-test('the family exposes six palettes through one recipe path', () => {
+test('the family exposes five palettes through one recipe path', () => {
   expect(SOURCE_THEMES.map(({ slug }) => slug)).toEqual([
     'tyrian-night',
     'tyrian-nocturne',
     'tyrian-pastel',
     'tyrian-abyss',
     'tyrian-dawn',
-    'tyrian-night-old',
   ]);
-
-  expect(
-    loadThemeRepository().definition.familyContract.branches['tyrian-night-old']!.hueProfile
-  ).toBe('core');
 
   const themes = SOURCE_THEMES.map((source) => sourceTheme(source));
   expect(new Set(themes.map((theme) => themeColor(theme, 'ui:surface.canvas'))).size).toBe(
@@ -62,9 +45,7 @@ test('the family contract fixes hue identity and proves each declared energy tie
     'syntax:literal',
   ]);
   const themes = Object.fromEntries(
-    repository.sources
-      .filter(({ slug }) => slug !== 'tyrian-night-old')
-      .map((source) => [source.slug, readSourceTheme(source, repository)])
+    repository.sources.map((source) => [source.slug, readSourceTheme(source, repository)])
   );
   const semanticColors = (slug: string) => {
     const theme = themes[slug];
@@ -104,28 +85,21 @@ test('the family contract fixes hue identity and proves each declared energy tie
   expect(canvasLightness('tyrian-dawn')).toBeGreaterThan(0.95);
 });
 
-test('the historical-reference branch uses current bindings and opacity policy', () => {
-  const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old');
-  expect(source).toBeDefined();
-  const historical = sourceTheme(source!);
-  const repository = loadThemeRepository();
-  const recipe = readDefaultThemeRecipe(source!);
-  expect(recipe).not.toHaveProperty('appearance');
-  expect(recipe).not.toHaveProperty('hueProfile');
-  expect(repository.definition.familyContract.branches['tyrian-night-old']).toEqual({
-    frozenPaletteSha256: 'a317b824a281dd989af90bcce1f2db48d38e0c3f67e8749bd3ee4010f6a9e607',
-    hueProfile: 'core',
-    kind: 'historical-reference',
-    maximumSemanticHueDistance: 0,
-  });
-  expect(historical.vscode['chrome.statusBar.offlineForeground']).toBe(
-    historical.ui['text.primary']
-  );
-  const vscode = buildVscodeTheme(historical, VSCODE_PROJECTION).colors;
-  expect(vscode['statusBarItem.offlineForeground']).toBe(historical.ui['text.primary']);
-  expect(vscode['inputValidation.errorForeground']).toBe(historical.ui['text.primary']);
-  expect(vscode['inputValidation.infoForeground']).toBe(historical.ui['text.primary']);
-  expect(vscode['inputValidation.warningForeground']).toBe(historical.ui['text.primary']);
+test('VS Code status and validation foregrounds bind to primary text', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = sourceTheme(source);
+    const primary = theme.ui['text.primary'];
+    expect(theme.vscode['chrome.statusBar.offlineForeground']).toBe(primary);
+    const vscode = buildVscodeTheme(theme, VSCODE_PROJECTION).colors;
+    for (const key of [
+      'statusBarItem.offlineForeground',
+      'inputValidation.errorForeground',
+      'inputValidation.infoForeground',
+      'inputValidation.warningForeground',
+    ]) {
+      expect(vscode[key]).toBe(primary);
+    }
+  }
 });
 
 test('all editor projections share the current semantic bindings', () => {
@@ -133,13 +107,13 @@ test('all editor projections share the current semantic bindings', () => {
     themes: Array<{ name: string; style: { syntax: Record<string, { color: string }> } }>;
   };
   const current = family.themes.find(({ name }) => name === 'Tyrian Nocturne')!;
-  const historical = family.themes.find(({ name }) => name === 'Tyrian Night Old')!;
+  const light = family.themes.find(({ name }) => name === 'Tyrian Dawn')!;
   const currentSource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne')!;
   const currentTheme = sourceTheme(currentSource);
-  const historicalSource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
-  const historicalTheme = sourceTheme(historicalSource);
+  const lightSource = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-dawn')!;
+  const lightTheme = sourceTheme(lightSource);
   const currentVscode = buildVscodeTheme(currentTheme, VSCODE_PROJECTION);
-  const historicalVscode = buildVscodeTheme(historicalTheme, VSCODE_PROJECTION);
+  const lightVscode = buildVscodeTheme(lightTheme, VSCODE_PROJECTION);
   const grammarColor = (theme: typeof currentVscode, scope: string) =>
     theme.tokenColors.find((token) => token.scope.includes(scope))!.settings.foreground;
 
@@ -147,7 +121,7 @@ test('all editor projections share the current semantic bindings', () => {
   expect(current.style.syntax.link_uri.color).not.toBe(current.style.syntax.type.color);
   for (const [zed, vscode, theme] of [
     [current, currentVscode, currentTheme],
-    [historical, historicalVscode, historicalTheme],
+    [light, lightVscode, lightTheme],
   ] as const) {
     const literal = themeColor(theme, 'syntax:literal');
     const punctuation = themeColor(theme, 'syntax:punctuation');
@@ -183,11 +157,11 @@ test('all editor projections share the current semantic bindings', () => {
       expect(zed.style.syntax[capture]!.color).toBe(themeColor(theme, role));
     }
   }
-  expect(historical.style.syntax.link_uri.color).toBe(themeColor(historicalTheme, 'syntax:file'));
-  expect(grammarColor(currentVscode, 'markup.underline.link')).toBe(
-    themeColor(currentTheme, 'syntax:file')
-  );
-  expect(grammarColor(historicalVscode, 'markup.underline.link')).toBe(
-    themeColor(historicalTheme, 'syntax:file')
-  );
+  for (const [zed, vscode, theme] of [
+    [current, currentVscode, currentTheme],
+    [light, lightVscode, lightTheme],
+  ] as const) {
+    expect(zed.style.syntax.link_uri.color).toBe(themeColor(theme, 'syntax:file'));
+    expect(grammarColor(vscode, 'markup.underline.link')).toBe(themeColor(theme, 'syntax:file'));
+  }
 });

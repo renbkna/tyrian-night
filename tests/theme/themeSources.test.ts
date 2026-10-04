@@ -1,5 +1,4 @@
 import { readSourceData, writeSourceData } from '../support/sourceData.js';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -211,20 +210,12 @@ test('injected repository role membership is validated by that repository contex
       const theme = readSourceData<any>(themePath);
       theme.oklch['ui:injected.owner.role'] = [0.5, 0.02];
       writeSourceData(themePath, theme);
-      if (fileName === 'tyrian-night-old.cjs') {
-        const palette = Object.entries(theme.oklch).toSorted(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0
-        );
-        family.branches['tyrian-night-old'].frozenPaletteSha256 = createHash('sha256')
-          .update(JSON.stringify(palette))
-          .digest('hex');
-      }
     }
     writeSourceData(familyPath, family);
 
     const repository = loadThemeRepository(root);
     expect(repository.definition.requiredThemeRoles.ui).toContain('injected.owner.role');
-    expect(repository.sources).toHaveLength(6);
+    expect(repository.sources).toHaveLength(5);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -287,9 +278,22 @@ test('theme recipe validation rejects incomplete or out-of-gamut color authority
   const recipe = readDefaultThemeRecipe(source!);
 
   const missing = structuredClone(recipe);
-  delete missing.oklch['syntax:function'];
+  delete missing.oklch['ui:accent.primary'];
   expect(() => validateThemeRecipe(missing, source!.slug, DEFAULT_DEFINITION)).toThrow(
-    'invalid oklch; missing: syntax:function'
+    'invalid oklch; missing: ui:accent.primary'
+  );
+
+  // Syntax colors are solved from targets; a recipe cannot author them.
+  const authored = structuredClone(recipe);
+  authored.oklch['syntax:function'] = [0.8, 0.1];
+  expect(() => validateThemeRecipe(authored, source!.slug, DEFAULT_DEFINITION)).toThrow(
+    'invalid oklch; unsupported: syntax:function'
+  );
+
+  const neutralChromaMissing = structuredClone(recipe);
+  delete neutralChromaMissing.syntax.chroma['syntax:comment'];
+  expect(() => validateThemeRecipe(neutralChromaMissing, source!.slug, DEFAULT_DEFINITION)).toThrow(
+    'syntax targets chroma'
   );
 
   const unnamed = structuredClone(recipe);
@@ -311,7 +315,7 @@ test('production snapshots reject unreadable palettes while inspection snapshots
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
     const recipe = readSourceData<any>(themePath);
-    recipe.oklch['syntax:comment'] = [0.1, 0];
+    recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);
 
     expect(() => loadThemeRepository(root)).toThrow(
@@ -327,9 +331,9 @@ test('production snapshots reject unreadable palettes while inspection snapshots
     const contract = readThemeSafetyContract(inspection.definition);
     expect(auditThemeSafety(theme, contract)).toContainEqual(
       expect.objectContaining({
-        constraint: 'readable-quiet',
+        constraint: 'readable-plain-code',
         kind: 'apca-minimum-contrast',
-        role: 'syntax:comment',
+        role: 'syntax:variable',
       })
     );
   } finally {
@@ -343,7 +347,7 @@ test('color audit loads an inspection snapshot when production admission rejects
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
     const recipe = readSourceData<any>(themePath);
-    recipe.oklch['syntax:comment'] = [0.1, 0];
+    recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);
 
     const audit = spawnSync(
@@ -354,7 +358,7 @@ test('color audit loads an inspection snapshot when production admission rejects
 
     expect(audit.status).toBe(1);
     expect(audit.stdout).toContain('tyrian-nocturne: accessibility=1 violation(s)');
-    expect(audit.stdout).toContain('"role":"syntax:comment"');
+    expect(audit.stdout).toContain('"role":"syntax:variable"');
     expect(audit.stderr).toBe('');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -367,8 +371,9 @@ test('production snapshots reject every duplicate bracket depth, including non-a
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
     const recipe = readSourceData<any>(themePath);
-    recipe.oklch['brackets:depth1'] = [0.7, 0];
-    recipe.oklch['brackets:depth3'] = [0.7, 0];
+    // Gray brackets at one contrast target solve to one color.
+    recipe.syntax.chroma['brackets:depth1'] = 0;
+    recipe.syntax.chroma['brackets:depth3'] = 0;
     writeSourceData(themePath, recipe);
 
     expect(() => loadThemeRepository(root)).toThrow(
@@ -425,7 +430,7 @@ test('production source reads keep the validated snapshot when editable files ch
     const theme = readSourceTheme(source, repository);
     const themePath = path.join(root, source.sourcePath);
     const recipe = readSourceData<any>(themePath);
-    recipe.oklch['syntax:comment'] = [0.1, 0];
+    recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);
 
     expect(readSourceTheme(source, repository)).toBe(theme);
@@ -439,13 +444,13 @@ test('production source reads keep the validated snapshot when editable files ch
 
 test('family relationship validation rejects syntax saturation drift', () => {
   const cases: Array<[(family: any) => void, string]> = [
-    // Gamut-share band: Night's control flow is more vivid than a 0.52 ceiling allows.
+    // Gamut-share band: Night's control flow is more vivid than a 0.45 ceiling allows.
     [
       (family) => {
         family.energyLine.variants['tyrian-night'].syntaxSaturation = {
           measure: 'richness',
-          minimum: 0.5,
-          maximum: 0.52,
+          minimum: 0.4,
+          maximum: 0.45,
         };
       },
       "Theme 'tyrian-night' syntax pigment 'syntax:control' richness",
@@ -459,15 +464,9 @@ test('family relationship validation rejects syntax saturation drift', () => {
     ],
     [
       (family) => {
-        family.syntaxSaturation.ceilings[0].maximumShare = 0.5;
-      },
-      "'syntax:declaration' chroma under 'syntax:control'",
-    ],
-    [
-      (family) => {
         delete family.branches['tyrian-dawn'].syntaxSaturation;
       },
-      "Theme family branch 'tyrian-dawn' must define a syntax saturation band exactly when it is maintained.",
+      "Theme family branch 'tyrian-dawn' must define a syntax saturation band.",
     ],
   ];
 
@@ -489,35 +488,20 @@ test('family relationship validation rejects syntax saturation drift', () => {
 
 test('family relationship validation rejects syntax hierarchy drift', () => {
   const cases: Array<[string, string, number, string]> = [
-    // Control flow weaker than a support pigment no longer leads.
-    [
-      'tyrian-nocturne',
-      'syntax:control',
-      0.7,
-      "Theme 'tyrian-nocturne' syntax tier 'lead' over 'support'",
-    ],
-    // On a light canvas a darker declaration keyword is the stronger one.
-    [
-      'tyrian-dawn',
-      'syntax:declaration',
-      0.44,
-      "Theme 'tyrian-dawn' syntax tier 'support' over 'structure'",
-    ],
-    // A comment as strong as declaration keywords no longer recedes.
-    [
-      'tyrian-night',
-      'syntax:comment',
-      0.71,
-      "Theme 'tyrian-night' syntax tier 'structure' over 'quiet'",
-    ],
+    // Leads one point above supports no longer lead.
+    ['tyrian-nocturne', 'lead', 50.5, "Theme 'tyrian-nocturne' syntax tier 'lead' over 'support'"],
+    // On a light canvas higher contrast is darker, so these declarations outrank supports.
+    ['tyrian-dawn', 'structure', 74, "Theme 'tyrian-dawn' syntax tier 'support' over 'structure'"],
+    // Comments as strong as declaration keywords no longer recede.
+    ['tyrian-night', 'quiet', 43, "Theme 'tyrian-night' syntax tier 'structure' over 'quiet'"],
   ];
-  for (const [slug, pigment, lightness, message] of cases) {
+  for (const [slug, tier, target, message] of cases) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-syntax-hierarchy-'));
     try {
       fs.cpSync('source', path.join(root, 'source'), { recursive: true });
       const themePath = path.join(root, `source/themes/${slug}.cjs`);
       const theme = readSourceData<any>(themePath);
-      theme.oklch[pigment][0] = lightness;
+      theme.syntax.contrast[tier] = target;
       writeSourceData(themePath, theme);
 
       expect(() => loadThemeRepository(root)).toThrow(message);
@@ -561,31 +545,16 @@ test('family relationship validation keeps diagnostics at full saturation', () =
   }
 });
 
-test('historical-reference palette rejects drift', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-frozen-palette-'));
-  try {
-    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    const themePath = path.join(root, 'source/themes/tyrian-night-old.cjs');
-    const theme = readSourceData<any>(themePath);
-    theme.oklch['syntax:function'][0] = 0.7;
-    writeSourceData(themePath, theme);
-
-    expect(() => loadThemeRepository(root)).toThrow(
-      "Historical-reference theme 'tyrian-night-old' palette is frozen."
-    );
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('family classification rejects absent and overlapping recipe classifications', () => {
   const cases: Array<[string, (family: any) => void, string]> = [
     [
       'absent branch',
       (family) => {
         delete family.branches['tyrian-dawn'];
-        family.branches['tyrian-night-old'].hueProfile = 'dawn';
-        family.branches['tyrian-night-old'].maximumSemanticHueDistance = 180;
+        family.hueProfiles = family.hueProfiles.filter((profile: string) => profile !== 'dawn');
+        for (const hues of Object.values(family.pigmentHues) as Array<Record<string, number>>) {
+          delete hues.dawn;
+        }
       },
       "Theme 'tyrian-dawn' has no family classification.",
     ],
@@ -593,10 +562,10 @@ test('family classification rejects absent and overlapping recipe classification
       'overlapping branch',
       (family) => {
         family.branches['tyrian-night'] = {
-          frozenPaletteSha256: '28f3736a9afd2536cc5667f0bec8684317155a759329c8148c574ea5e51fb789',
           hueProfile: 'core',
-          kind: 'historical-reference',
+          kind: 'soft-focus',
           maximumSemanticHueDistance: 0,
+          syntaxSaturation: { measure: 'richness', minimum: 0, maximum: 1 },
         };
       },
       'Theme family classifications must not overlap.',
@@ -845,42 +814,47 @@ function readClassification(slug: string) {
 }
 
 function definitionFor(identity: { name: string }, appearance: 'dark' | 'light') {
+  const family = DEFAULT_DEFINITION.familyContract;
   const bindings = DEFAULT_DEFINITION.colorBindings.bindings;
   const hueProfile = appearance === 'light' ? 'dawn' : 'core';
   const bindingValues = Object.values(bindings).flatMap((roles) => Object.values(roles));
-  // Every other pigment, including the canvas, sits at L 0.5. Each hierarchy tier
-  // above the last steps away from it so the fixture satisfies the family ladder,
-  // and the frame around the editor stage sits just below it.
-  const ladder = DEFAULT_DEFINITION.familyContract.syntaxHierarchy;
-  const { frame } = DEFAULT_DEFINITION.familyContract.editorStage;
-  // APCA tier steps are polarity-agnostic, so both appearances share them.
-  const steps = [0.94, 0.85, 0.75];
+  const solved = new Set([
+    ...family.syntaxHierarchy.flatMap(({ pigments }) => pigments),
+    family.plainSyntaxPigment,
+  ]);
+  const colored = new Set(family.syntaxSaturation.pigments);
+  const hasHue = (pigment: string) => family.pigmentHues[pigment][hueProfile] !== null;
+  // Authored pigments sit at L 0.5; the canvas and the frame around it sit at
+  // the appearance's end so every solved syntax target is reachable.
+  const { frame, stage } = family.editorStage;
   const lightness = (pigment: string) => {
-    if (frame.includes(pigment)) return 0.45;
-    const index = ladder.findIndex(({ pigments }) => pigments.includes(pigment));
-    if (index === -1 || index === ladder.length - 1) return 0.5;
-    const step = steps[index];
-    if (step === undefined)
-      throw new Error('The fixture needs a lightness for every hierarchy tier.');
-    return step;
+    if (pigment === stage) return appearance === 'light' ? 0.95 : 0.2;
+    if (frame.includes(pigment)) return appearance === 'light' ? 0.9 : 0.18;
+    return 0.5;
   };
+  const pigments = [
+    ...new Set(
+      bindingValues.map((binding) => (typeof binding === 'string' ? binding : binding.pigment))
+    ),
+  ].toSorted();
   const oklch = Object.fromEntries(
-    [
-      ...new Set(
-        bindingValues.map((binding) => (typeof binding === 'string' ? binding : binding.pigment))
-      ),
-    ]
-      .toSorted()
-      .map((pigment) => [
-        pigment,
-        [
-          lightness(pigment),
-          DEFAULT_DEFINITION.familyContract.pigmentHues[pigment][hueProfile] === null ? 0 : 0.02,
-        ],
-      ])
+    pigments
+      .filter((pigment) => !solved.has(pigment))
+      .map((pigment) => [pigment, [lightness(pigment), hasHue(pigment) ? 0.02 : 0]])
+  );
+  // Tier targets are spaced past every family step so the fixture keeps the ladder.
+  const contrast = Object.fromEntries([
+    ...family.syntaxHierarchy.map(({ tier }, index) => [tier, 65 - index * 10]),
+    ['plain', 75],
+  ]);
+  const chroma = Object.fromEntries(
+    [...solved]
+      .filter((pigment) => !colored.has(pigment))
+      .map((pigment) => [pigment, hasHue(pigment) ? 0.02 : 0])
   );
   return {
     ...identity,
+    syntax: { saturation: 0.02, contrast, chroma },
     oklch,
   };
 }
@@ -899,7 +873,7 @@ function copyThemeContracts(root: string) {
   family.canonical = 'tyrian-test-dark';
   // Fixture pigments share one low chroma; saturation relationships are proved on real recipes.
   family.diagnostics.minimumRichness = 0.01;
-  family.syntaxSaturation.ceilings = [];
+  for (const tier of family.syntaxHierarchy) delete tier.maximumChromaShareOfLead;
   const anySaturation = { measure: 'chroma', minimum: 0, maximum: 0.4 };
   family.energyLine = {
     hueProfile: 'core',

@@ -12,6 +12,8 @@ import { loadThemeDefinitionContext, themeColor } from '../../scripts/themeDefin
 import {
   getDefaultThemeSource,
   getTerminalDefaultThemeSource,
+  loadThemeRepository,
+  readSourceTheme,
 } from '../../scripts/themeSources.mjs';
 
 type ThemeDefinition = import('../../scripts/themeDefinition.mjs').ThemeDefinition;
@@ -295,7 +297,6 @@ test('Zed theme asset matches the generated projection of the neutral themes', (
     ['Tyrian Pastel', 'dark'],
     ['Tyrian Abyss', 'dark'],
     ['Tyrian Dawn', 'light'],
-    ['Tyrian Night Old', 'dark'],
   ]);
 });
 
@@ -323,16 +324,19 @@ test('Zed generation resolves theme membership and identity from the injected ro
     const theme = readSourceData<{
       name: string;
       oklch: Record<string, [number, number]>;
+      syntax: { contrast: Record<string, number>; chroma: Record<string, number> };
     }>(themePath);
     theme.name = 'Injected Zed Night';
     const injected = {
       'ui:surface.canvas': [0.135, 0.02],
-      'syntax:function': [0.8, 0.058],
-      'brackets:depth1': [0.61, 0.05],
       'ui:status.error': [0.76, 0.137],
       'terminal:ansi.red': [0.63, 0.11],
     } satisfies Record<string, [number, number]>;
     Object.assign(theme.oklch, injected);
+    // Syntax colors are solved from targets, so inject targets and compare
+    // against the injected root's own resolution.
+    theme.syntax.contrast.lead = 58;
+    theme.syntax.chroma['brackets:depth1'] = 0.05;
     writeSourceData(themePath, theme);
     const definition = loadThemeDefinitionContext(root);
     const color = (pigment: keyof typeof injected) => {
@@ -343,12 +347,20 @@ test('Zed generation resolves theme membership and identity from the injected ro
         h: definition.familyContract.pigmentHues[pigment]!.core!,
       });
     };
+    const repository = loadThemeRepository(root);
+    const resolved = readSourceTheme(
+      repository.sources.find(({ slug }) => slug === 'tyrian-night')!,
+      repository
+    );
+    const baseline = sourceTheme(SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night')!);
 
     const generated = buildZedThemeFamily(root) as ZedThemeFamily;
     expect(generated.themes[0]?.name).toBe('Injected Zed Night');
     expect(generated.themes[0]?.style['editor.background']).toBe(color('ui:surface.canvas'));
-    expect(generated.themes[0]?.style.syntax.function?.color).toBe(color('syntax:function'));
-    expect(generated.themes[0]?.style.accents[0]).toBe(color('brackets:depth1'));
+    expect(generated.themes[0]?.style.syntax.function?.color).toBe(resolved.syntax.function);
+    expect(resolved.syntax.function).not.toBe(baseline.syntax.function);
+    expect(generated.themes[0]?.style.accents[0]).toBe(resolved.brackets.depth1);
+    expect(resolved.brackets.depth1).not.toBe(baseline.brackets.depth1);
     expect(generated.themes[0]?.style.error).toBe(color('ui:status.error'));
     expect(generated.themes[0]?.style['terminal.ansi.red']).toBe(color('terminal:ansi.red'));
   } finally {
@@ -413,11 +425,12 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
       new RegExp(`^${source.ui['status.removed'].slice(0, 7)}`, 'u')
     );
     expect(theme.style.syntax.function.color).toBe(source.syntax.function);
-    expect(theme.style.syntax.function.font_weight).toBe(500);
+    // Calls keep the editor's normal weight; only definitions are bold.
+    expect(theme.style.syntax.function.font_weight).toBeUndefined();
     // `constructor` is a Zed capture name, not Object.prototype.constructor.
     expect(theme.style.syntax['constructor' as string]?.color).toBe(source.syntax.type);
     expect(theme.style.syntax['function.builtin']?.color).toBe(source.syntax.function);
-    expect(theme.style.syntax['function.builtin']?.font_weight).toBe(500);
+    expect(theme.style.syntax['function.builtin']?.font_weight).toBeUndefined();
     expect(theme.style.syntax.hint?.color).toBe(source.ui['text.hint']);
     expect(theme.style.syntax.hint?.font_style).toBe('italic');
     expect(theme.style.syntax['markup.quote']?.color).toBe(source.syntax.string);

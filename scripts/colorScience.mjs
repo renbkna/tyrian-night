@@ -169,8 +169,11 @@ export function hueInsideRange(hue, minimum, maximum) {
   return minimum <= maximum ? hue >= minimum && hue <= maximum : hue >= minimum || hue <= maximum;
 }
 
-/** @param {number} lightness @param {number} hue */
-function maximumSrgbChroma(lightness, hue) {
+/**
+ * The largest OKLCH chroma that stays inside sRGB at one lightness and hue.
+ * @param {number} lightness @param {number} hue
+ */
+export function maximumSrgbChroma(lightness, hue) {
   requireUnit(lightness, 'OKLCH lightness');
   requireFiniteRange(hue, 0, 360, 'OKLCH hue', true);
   let lower = 0;

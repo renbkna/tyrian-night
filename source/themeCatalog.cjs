@@ -22,10 +22,6 @@ const themeCatalog = [
     terminalDefault: true,
     islandEffects: 'dawn',
   },
-  {
-    slug: 'tyrian-night-old',
-    islandEffects: 'neutral-dark',
-  },
 ];
 
 module.exports = themeCatalog;

@@ -80,10 +80,8 @@ test('terminal config generators require an admitted repository snapshot', () =>
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const admitted = loadThemeRepository(root);
     const themePath = path.join(root, 'source/themes/tyrian-abyss.cjs');
-    const recipe = readSourceData(themePath) as {
-      oklch: Record<string, [number, number]>;
-    };
-    recipe.oklch['syntax:comment'] = [0.1, 0];
+    const recipe = readSourceData(themePath) as { syntax: { contrast: Record<string, number> } };
+    recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);
     const inspection = loadThemeInspectionRepository(root);
 

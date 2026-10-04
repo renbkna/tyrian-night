@@ -1,6 +1,6 @@
 # Tyrian Night for Zed
 
-Zed theme extension for Tyrian Abyss, Tyrian Night, Tyrian Nocturne, Tyrian Pastel, Tyrian Night Old, and Tyrian Dawn.
+Zed theme extension for Tyrian Abyss, Tyrian Night, Tyrian Nocturne, Tyrian Pastel, and Tyrian Dawn.
 
 Install it locally with `zed: install dev extension` and select this `apps/zed` directory.
 

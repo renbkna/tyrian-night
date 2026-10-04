@@ -68,7 +68,7 @@ const COLOR_PATTERN = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f
 
 /** @deprecated Use readThemeManifest instead. */
 export function loadLegacyThemeName(): string {
-  return 'Tyrian Night Old';
+  return 'Tyrian Night Classic';
 }
 
 function traceable(label: string): ClassDecorator {

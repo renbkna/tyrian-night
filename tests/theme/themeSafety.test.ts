@@ -75,8 +75,8 @@ describe('theme safety authority', () => {
     }
   });
 
-  test('the historical-reference theme follows the same safety gates', () => {
-    const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
+  test('supporting UI text below its WCAG floor fails', () => {
+    const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const unreadable = structuredClone(sourceTheme(source));
     unreadable.ui['text.muted'] = unreadable.ui['surface.canvas'];
     expect(auditThemeSafety(unreadable, contract)).toContainEqual(

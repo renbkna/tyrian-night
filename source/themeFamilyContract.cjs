@@ -18,19 +18,39 @@ const themeFamilyContract = {
     },
     {
       tier: 'support',
-      pigments: ['syntax:type', 'syntax:data', 'syntax:string', 'syntax:literal'],
+      pigments: [
+        'syntax:type',
+        'syntax:data',
+        'syntax:string',
+        'syntax:literal',
+        'syntax:emphasis',
+        'syntax:file',
+      ],
       minimumStepOverNext: 6,
+      maximumChromaShareOfLead: 0.8,
     },
     {
       tier: 'structure',
       pigments: ['syntax:declaration'],
       minimumStepOverNext: 6,
+      maximumChromaShareOfLead: 0.75,
     },
     {
       tier: 'quiet',
-      pigments: ['syntax:comment', 'syntax:documentation', 'syntax:punctuation'],
+      pigments: [
+        'syntax:comment',
+        'syntax:documentation',
+        'syntax:punctuation',
+        'brackets:depth1',
+        'brackets:depth2',
+        'brackets:depth3',
+        'brackets:depth4',
+        'brackets:depth5',
+        'brackets:depth6',
+      ],
     },
   ],
+  plainSyntaxPigment: 'syntax:variable',
   diagnostics: {
     pigments: ['ui:status.error', 'ui:status.warning'],
     minimumRichness: 0.9,
@@ -54,13 +74,7 @@ const themeFamilyContract = {
       'syntax:literal',
       'syntax:emphasis',
       'syntax:file',
-    ],
-    ceilings: [
-      {
-        pigment: 'syntax:declaration',
-        reference: 'syntax:control',
-        maximumShare: 0.75,
-      },
+      'syntax:declaration',
     ],
   },
   energyLine: {
@@ -70,22 +84,22 @@ const themeFamilyContract = {
       'tyrian-night': {
         syntaxSaturation: {
           measure: 'richness',
-          minimum: 0.55,
-          maximum: 0.6,
+          minimum: 0.48,
+          maximum: 0.56,
         },
       },
       'tyrian-nocturne': {
         syntaxSaturation: {
           measure: 'richness',
-          minimum: 0.75,
-          maximum: 0.8,
+          minimum: 0.66,
+          maximum: 0.74,
         },
       },
       'tyrian-abyss': {
         syntaxSaturation: {
           measure: 'richness',
-          minimum: 0.95,
-          maximum: 1,
+          minimum: 0.85,
+          maximum: 0.9,
         },
       },
     },
@@ -110,12 +124,6 @@ const themeFamilyContract = {
         minimum: 0.75,
         maximum: 0.8,
       },
-    },
-    'tyrian-night-old': {
-      hueProfile: 'core',
-      kind: 'historical-reference',
-      maximumSemanticHueDistance: 0,
-      frozenPaletteSha256: 'a317b824a281dd989af90bcce1f2db48d38e0c3f67e8749bd3ee4010f6a9e607',
     },
   },
   hueProfiles: ['core', 'pastel', 'dawn'],

@@ -44,15 +44,6 @@ export const TYRIAN_THEME_CATALOG = [
     paletteName: 'tyrian_dawn',
     appearance: 'light',
   },
-  {
-    label: 'Tyrian Night Old',
-    slug: 'tyrian-night-old',
-    isDefault: false,
-    vscodeUiTheme: 'vs-dark',
-    islandCssFile: 'tyrian-night-old.css',
-    paletteName: 'tyrian_night_old',
-    appearance: 'dark',
-  },
 ] as const;
 
 export type TyrianThemeCatalogEntry = (typeof TYRIAN_THEME_CATALOG)[number];

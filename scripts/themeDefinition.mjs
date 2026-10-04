@@ -3,6 +3,7 @@
 import path from 'node:path';
 import { oklchToHex } from './colorScience.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
+import { PLAIN_TARGET, solveSyntaxPigments } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -25,9 +26,12 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   bindings: Record<'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode', Record<string, ThemeColorBinding>>;
  * }} ThemeColorBindings
  * @typedef {{ aliases: Record<string, string>; derived: Record<string, string> }} ThemeColorBindingContractSource
+ * A recipe authors every pigment except syntax and bracket colors, which the
+ * syntax solver derives from `syntax` targets.
  * @typedef {{
  *   name: string;
  *   oklch: Record<string, readonly [number, number]>;
+ *   syntax: import('./syntaxSolver.mjs').SyntaxTargets;
  * }} OklchThemeRecipe
  * @typedef {OklchThemeRecipe} ThemeRecipe
  */
@@ -39,20 +43,23 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * is equally colorful (soft tints, where gamut room differs widely by hue).
  * @typedef {NumericRange & { measure: 'chroma' | 'richness' }} SaturationBand
  * @typedef {{ syntaxSaturation: SaturationBand }} EnergyVariantContract
- * Every colored syntax pigment of a maintained theme lies inside that theme's
- * band. A ceiling caps a pigment's OKLCH chroma at `maximumShare` of its
- * reference's, so structure never competes with the role it frames.
- * @typedef {{ pigment: string; reference: string; maximumShare: number }} ChromaCeiling
- * @typedef {{ pigments: string[]; ceilings: ChromaCeiling[] }} SyntaxSaturationContract
+ * Every colored syntax pigment of a maintained theme sits in the band's relative
+ * width below its effective maximum: the band maximum, lowered to its tier's
+ * colorfulness ceiling when that ceiling is smaller.
+ * @typedef {{ pigments: string[] }} SyntaxSaturationContract
  * One syntax weight tier. Tiers run from most to least prominent, measured as
  * APCA lightness contrast (absolute Lc) against `ui:surface.canvas` so dark and
  * light appearances share one rule: the weakest pigment of a tier must exceed
  * the strongest pigment of the next tier by `minimumStepOverNext` Lc points.
  * Only the last tier omits it. Readability floors live in the safety contract.
+ * Lightness alone does not set prominence: a vivid color reads louder than its
+ * contrast. `maximumChromaShareOfLead` caps every pigment of a lower tier at
+ * that share of the most colorful lead pigment's OKLCH chroma.
  * @typedef {{
  *   tier: string;
  *   pigments: string[];
  *   minimumStepOverNext?: number;
+ *   maximumChromaShareOfLead?: number;
  * }} SyntaxHierarchyTier
  * Diagnostics interrupt code through saturation, not brightness: each pigment
  * must use at least `minimumRichness` of the sRGB chroma available at its own
@@ -64,10 +71,9 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * @typedef {{ stage: string; frame: string[] }} EditorStageContract
  * @typedef {{
  *   hueProfile: string;
- *   kind: 'historical-reference' | 'light-counterpart' | 'soft-focus';
+ *   kind: 'light-counterpart' | 'soft-focus';
  *   maximumSemanticHueDistance: number;
- *   frozenPaletteSha256?: string;
- *   syntaxSaturation?: SaturationBand;
+ *   syntaxSaturation: SaturationBand;
  * }} ThemeBranchContract
  * @typedef {{
  *   branches: Record<string, ThemeBranchContract>;
@@ -81,6 +87,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   pigmentHues: Record<string, Record<string, number | null>>;
  *   semanticPigments: string[];
  *   syntaxHierarchy: SyntaxHierarchyTier[];
+ *   plainSyntaxPigment: string;
  *   syntaxSaturation: SyntaxSaturationContract;
  *   diagnostics: DiagnosticsContract;
  *   editorStage: EditorStageContract;
@@ -90,7 +97,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * @typedef {{ opacities: Record<string, string>; overrides: Partial<Record<ThemeAppearance, Record<string, string>>> }} ThemeOpacityContractSource
  * @typedef {Record<ThemeAppearance, Readonly<Record<string, string>>>} ThemeOpacityPolicy
  */
-/** @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean }} ThemeFamilyClassification */
+/** @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean; syntaxSaturation: SaturationBand }} ThemeFamilyClassification */
 /** @typedef {{ brackets: string[]; ui: string[]; syntax: string[]; terminal: string[]; vscode: string[] }} ThemeRoleContract */
 /**
  * @typedef {{
@@ -167,14 +174,81 @@ export function validateThemeRecipe(recipe, sourceName, context) {
   if (recipe.name.length === 0 || recipe.name.trim() !== recipe.name) {
     throw new Error(`Theme recipe '${sourceName}' must have a trimmed, non-empty name.`);
   }
+  const classification = themeFamilyClassification(context, sourceName);
+  const solved = solvedSyntaxPigments(context.familyContract);
   validateOklchMap(
     recipe.oklch,
-    requiredPigmentsForBindings(context.colorBindings),
-    themeFamilyClassification(context, sourceName).hueProfile,
+    requiredPigmentsForBindings(context.colorBindings).filter((pigment) => !solved.has(pigment)),
+    classification.hueProfile,
     sourceName,
     context.familyContract
   );
+  validateSyntaxTargets(recipe.syntax, classification, sourceName, context.familyContract);
   return recipe;
+}
+
+/**
+ * Syntax and bracket pigments the solver derives: every hierarchy tier plus plain text.
+ * @param {Readonly<ThemeFamilyContract>} familyContract
+ * @returns {Set<string>}
+ */
+function solvedSyntaxPigments(familyContract) {
+  return new Set([
+    ...familyContract.syntaxHierarchy.flatMap(({ pigments }) => pigments),
+    familyContract.plainSyntaxPigment,
+  ]);
+}
+
+/**
+ * @param {import('./syntaxSolver.mjs').SyntaxTargets} targets
+ * @param {ThemeFamilyClassification} classification
+ * @param {string} sourceName
+ * @param {Readonly<ThemeFamilyContract>} familyContract
+ */
+function validateSyntaxTargets(targets, classification, sourceName, familyContract) {
+  const owner = `Theme recipe '${sourceName}' syntax targets`;
+  if (!targets || typeof targets !== 'object') throw new Error(`${owner} are missing.`);
+  requireSameMembers(
+    Object.keys(targets),
+    ['chroma', 'contrast', 'saturation'],
+    owner,
+    'syntax target fields'
+  );
+  const ceiling = SATURATION_MEASURE_CEILINGS[classification.syntaxSaturation.measure];
+  if (!(targets.saturation > 0 && targets.saturation <= ceiling)) {
+    throw new Error(`${owner} saturation must be within 0 (exclusive) and ${ceiling}.`);
+  }
+  requireSameMembers(
+    Object.keys(targets.contrast),
+    [...familyContract.syntaxHierarchy.map(({ tier }) => tier), PLAIN_TARGET],
+    `${owner} contrast`,
+    'syntax tiers and plain text'
+  );
+  for (const [tier, target] of Object.entries(targets.contrast)) {
+    if (!(Number.isFinite(target) && target > 0 && target <= 108)) {
+      throw new Error(
+        `${owner} contrast '${tier}' must be an APCA Lc within 0 (exclusive) and 108.`
+      );
+    }
+  }
+  const colored = new Set(familyContract.syntaxSaturation.pigments);
+  const neutral = [...solvedSyntaxPigments(familyContract)].filter(
+    (pigment) => !colored.has(pigment)
+  );
+  requireSameMembers(
+    Object.keys(targets.chroma),
+    neutral,
+    `${owner} chroma`,
+    'neutral syntax pigments'
+  );
+  for (const [pigment, chroma] of Object.entries(targets.chroma)) {
+    if (!(chroma >= 0 && chroma <= 0.4)) {
+      throw new Error(`${owner} chroma '${pigment}' must be within 0 and 0.4.`);
+    }
+    if (familyContract.pigmentHues[pigment]?.[classification.hueProfile] === null && chroma > 0) {
+      throw new Error(`${owner} chroma '${pigment}' has chroma without an owned hue.`);
+    }
+  }
 }
 
 /**
@@ -191,18 +265,36 @@ export function resolveThemeRecipe(recipe, sourceName, context) {
     throw new Error(`Theme recipe '${sourceName}' has no opacity policy.`);
   }
 
+  const family = context.familyContract;
+  /** @param {string} pigment */
+  const hue = (pigment) => family.pigmentHues[pigment]?.[classification.hueProfile] ?? null;
+  /** @type {Record<string, string>} */
   const resolvedPigments = Object.fromEntries(
-    Object.keys(recipe.oklch).map((pigment) => [
+    Object.entries(recipe.oklch).map(([pigment, [lightness, chroma]]) => [
       pigment,
-      resolveOklchPigment(
-        recipe,
-        pigment,
-        classification.hueProfile,
-        sourceName,
-        context.familyContract
-      ),
+      resolveOklchColor(lightness, chroma, hue(pigment), pigment, sourceName),
     ])
   );
+  const solved = solveSyntaxPigments({
+    appearance: classification.appearance,
+    canvas: /** @type {string} */ (resolvedPigments['ui:surface.canvas']),
+    coloredPigments: new Set(family.syntaxSaturation.pigments),
+    hierarchy: family.syntaxHierarchy,
+    hue,
+    measure: classification.syntaxSaturation.measure,
+    owner: `Theme recipe '${sourceName}'`,
+    plainPigment: family.plainSyntaxPigment,
+    targets: recipe.syntax,
+  });
+  for (const [pigment, [lightness, chroma]] of Object.entries(solved)) {
+    resolvedPigments[pigment] = resolveOklchColor(
+      lightness,
+      chroma,
+      hue(pigment),
+      pigment,
+      sourceName
+    );
+  }
 
   /** @param {'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode'} namespace */
   const resolveNamespace = (namespace) =>
@@ -239,6 +331,7 @@ export function themeFamilyClassification(context, slug) {
       appearance: 'dark',
       hueProfile: family.energyLine.hueProfile,
       isDefault: slug === family.canonical,
+      syntaxSaturation: family.energyLine.variants[slug].syntaxSaturation,
     };
   }
 
@@ -248,6 +341,7 @@ export function themeFamilyClassification(context, slug) {
     appearance: branch.kind === 'light-counterpart' ? 'light' : 'dark',
     hueProfile: branch.hueProfile,
     isDefault: slug === family.canonical,
+    syntaxSaturation: branch.syntaxSaturation,
   };
 }
 
@@ -326,14 +420,17 @@ function validateThemeFamilyContract(contract, requiredPigments) {
     syntaxHierarchy.flatMap(({ pigments }) => pigments),
     'Theme family syntax hierarchy'
   );
-  for (const [index, { tier, pigments, minimumStepOverNext }] of syntaxHierarchy.entries()) {
+  for (const [
+    index,
+    { tier, pigments, minimumStepOverNext, maximumChromaShareOfLead },
+  ] of syntaxHierarchy.entries()) {
     if (pigments.length === 0) {
       throw new Error(`Theme family syntax hierarchy tier '${tier}' must not be empty.`);
     }
     for (const pigment of pigments) {
-      if (!pigment.startsWith('syntax:') || !requiredPigmentSet.has(pigment)) {
+      if (!/^(?:syntax|brackets):/u.test(pigment) || !requiredPigmentSet.has(pigment)) {
         throw new Error(
-          `Theme family syntax hierarchy pigment '${pigment}' is not a recipe-owned syntax pigment.`
+          `Theme family syntax hierarchy pigment '${pigment}' is not a recipe-owned syntax or bracket pigment.`
         );
       }
     }
@@ -351,26 +448,32 @@ function validateThemeFamilyContract(contract, requiredPigments) {
         `Theme family syntax hierarchy tier '${tier}' step must be a positive, finite Lc difference.`
       );
     }
-  }
-
-  requireUnique(syntaxSaturation.pigments, 'Theme family syntax saturation');
-  for (const pigment of syntaxSaturation.pigments) {
-    if (!pigment.startsWith('syntax:') || !requiredPigmentSet.has(pigment)) {
+    if (
+      maximumChromaShareOfLead !== undefined &&
+      (index === 0 || !(maximumChromaShareOfLead > 0 && maximumChromaShareOfLead <= 1))
+    ) {
       throw new Error(
-        `Theme family syntax saturation pigment '${pigment}' is not a recipe-owned syntax pigment.`
+        `Theme family syntax hierarchy tier '${tier}' chroma share of the lead must be within 0 (exclusive) and 1, below the lead tier.`
       );
     }
   }
-  for (const { pigment, reference, maximumShare } of syntaxSaturation.ceilings) {
-    for (const member of [pigment, reference]) {
-      if (!member.startsWith('syntax:') || !requiredPigmentSet.has(member)) {
-        throw new Error(
-          `Theme family chroma ceiling pigment '${member}' is not a recipe-owned syntax pigment.`
-        );
-      }
-    }
-    if (pigment === reference || !(maximumShare > 0 && maximumShare <= 1)) {
-      throw new Error(`Theme family chroma ceiling for '${pigment}' is invalid.`);
+
+  const tierPigments = new Set(syntaxHierarchy.flatMap(({ pigments }) => pigments));
+  if (
+    !contract.plainSyntaxPigment.startsWith('syntax:') ||
+    !requiredPigmentSet.has(contract.plainSyntaxPigment) ||
+    tierPigments.has(contract.plainSyntaxPigment)
+  ) {
+    throw new Error(
+      'Theme family plain syntax pigment must be a recipe-owned syntax pigment outside the hierarchy.'
+    );
+  }
+  requireUnique(syntaxSaturation.pigments, 'Theme family syntax saturation');
+  for (const pigment of syntaxSaturation.pigments) {
+    if (!tierPigments.has(pigment)) {
+      throw new Error(
+        `Theme family syntax saturation pigment '${pigment}' is not in a syntax hierarchy tier.`
+      );
     }
   }
 
@@ -448,26 +551,7 @@ function validateThemeFamilyContract(contract, requiredPigments) {
     if (branch.maximumSemanticHueDistance < 0 || branch.maximumSemanticHueDistance > 180) {
       throw new Error(`Theme family branch '${slug}' has an invalid hue-distance limit.`);
     }
-    const frozen = branch.kind === 'historical-reference';
-    if (frozen !== (branch.frozenPaletteSha256 !== undefined)) {
-      throw new Error(
-        `Theme family branch '${slug}' must pin a frozen palette digest exactly when it is a historical reference.`
-      );
-    }
-    if (
-      branch.frozenPaletteSha256 !== undefined &&
-      !/^[a-f0-9]{64}$/u.test(branch.frozenPaletteSha256)
-    ) {
-      throw new Error(`Theme family branch '${slug}' has an invalid frozen palette digest.`);
-    }
-    if (frozen === (branch.syntaxSaturation !== undefined)) {
-      throw new Error(
-        `Theme family branch '${slug}' must define a syntax saturation band exactly when it is maintained.`
-      );
-    }
-    if (branch.syntaxSaturation) {
-      requireSaturationBand(branch.syntaxSaturation, `Theme family branch '${slug}'`);
-    }
+    requireSaturationBand(branch.syntaxSaturation, `Theme family branch '${slug}'`);
   }
 
   const classified = [...variantNames, ...Object.keys(branches)];
@@ -518,19 +602,6 @@ function validateOklchMap(values, requiredPigments, hueProfile, sourceName, fami
 }
 
 /**
- * @param {OklchThemeRecipe} recipe
- * @param {string} pigment
- * @param {string} hueProfile
- * @param {string} sourceName
- * @param {Readonly<ThemeFamilyContract>} familyContract
- */
-function resolveOklchPigment(recipe, pigment, hueProfile, sourceName, familyContract) {
-  const [lightness, chroma] = recipe.oklch[pigment];
-  const hue = familyContract.pigmentHues[pigment][hueProfile];
-  return resolveOklchColor(lightness, chroma, hue, pigment, sourceName);
-}
-
-/**
  * @param {number} lightness
  * @param {number} chroma
  * @param {number | null} hue
@@ -574,6 +645,7 @@ const SATURATION_MEASURE_CEILINGS = { chroma: 0.4, richness: 1 };
 
 /** @param {SaturationBand} band @param {string} owner */
 function requireSaturationBand(band, owner) {
+  if (!band) throw new Error(`${owner} must define a syntax saturation band.`);
   if (!Object.hasOwn(SATURATION_MEASURE_CEILINGS, band.measure)) {
     throw new Error(`${owner} syntax saturation measure '${band.measure}' is unsupported.`);
   }

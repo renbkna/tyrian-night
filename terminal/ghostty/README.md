@@ -13,7 +13,6 @@ Generated themes live in `terminal/ghostty/themes/`:
 - `tyrian-night`
 - `tyrian-nocturne`
 - `tyrian-pastel`
-- `tyrian-night-old`
 - `tyrian-abyss`
 - `tyrian-dawn`
 

@@ -14,7 +14,6 @@
     "island/tyrian-pastel.css",
     "island/tyrian-abyss.css",
     "island/tyrian-dawn.css",
-    "island/tyrian-night-old.css",
     "assets/icon.png",
     "out/extension.js",
     "out/islandCli.js",
@@ -22,8 +21,7 @@
     "themes/tyrian-nocturne.json",
     "themes/tyrian-pastel.json",
     "themes/tyrian-abyss.json",
-    "themes/tyrian-dawn.json",
-    "themes/tyrian-night-old.json"
+    "themes/tyrian-dawn.json"
   ],
   "engines": {
     "vscode": "^1.118.0",
@@ -70,11 +68,6 @@
         "label": "Tyrian Dawn",
         "uiTheme": "vs",
         "path": "./themes/tyrian-dawn.json"
-      },
-      {
-        "label": "Tyrian Night Old",
-        "uiTheme": "vs-dark",
-        "path": "./themes/tyrian-night-old.json"
       }
     ],
     "commands": [
