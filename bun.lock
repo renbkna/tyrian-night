@@ -18,7 +18,7 @@
     },
     "apps/vscode": {
       "name": "tyrian-night",
-      "version": "2.5.0",
+      "version": "3.0.0",
       "devDependencies": {
         "@types/vscode": "^1.118.0",
         "@vscode/vsce": "^3.9.1",

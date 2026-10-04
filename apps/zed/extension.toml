@@ -1,6 +1,6 @@
 id = "tyrian-night-theme"
 name = "Tyrian Night"
-version = "2.5.0"
+version = "3.0.0"
 schema_version = 1
 authors = ["renbkna"]
 description = "Tyrian Night color theme family for Zed."
