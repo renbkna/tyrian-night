@@ -29,6 +29,7 @@ const DESKTOP_THEME_ID = /^Tyrian(?:[A-Z0-9][a-z0-9]*)+$/u;
  *   caelestiaSequences: string;
  *   caelestiaHyprLegacy: string;
  *   caelestiaHyprLua: string;
+ *   dmsTheme: string;
  * }} DesktopThemeAssetPaths
  * @typedef {{
  *   background: string;
@@ -193,6 +194,7 @@ const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/caelestia/schemes/tyrian' },
   { directory: 'desktop/caelestia/hypr' },
   { directory: 'desktop/caelestia/state' },
+  { directory: 'desktop/dms/themes' },
 ];
 
 /**
@@ -269,6 +271,10 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
           null,
           2
         )}\n`,
+      },
+      {
+        path: desktopAssets.dmsTheme,
+        content: buildDmsTheme(theme.name, mode, caelestiaColours, palette),
       },
     ];
   });
@@ -1258,6 +1264,45 @@ function buildCaelestiaColours(theme, palette) {
 }
 
 /**
+ * DankMaterialShell custom theme: the shell reads these Material roles directly;
+ * DMS derives app themes (GTK, Qt, terminals) from `primary` via matugen.
+ *
+ * @param {string} name
+ * @param {'dark' | 'light'} mode
+ * @param {Record<string, string>} colours Caelestia Material roles (hex without '#')
+ * @param {DesktopPalette} palette
+ * @returns {string}
+ */
+function buildDmsTheme(name, mode, colours, palette) {
+  /** @param {string} hex */
+  const css = (hex) => `#${stripHash(hex).toLowerCase()}`;
+  const theme = {
+    name,
+    primary: css(colours.primary),
+    primaryText: css(colours.onPrimary),
+    primaryContainer: css(colours.primaryContainer),
+    secondary: css(colours.secondary),
+    surface: css(colours.surface),
+    surfaceText: css(colours.onSurface),
+    surfaceVariant: css(colours.surfaceVariant),
+    surfaceVariantText: css(colours.onSurfaceVariant),
+    surfaceTint: css(colours.surfaceTint),
+    background: css(colours.background),
+    backgroundText: css(colours.onBackground),
+    outline: css(colours.outline),
+    surfaceContainer: css(colours.surfaceContainer),
+    surfaceContainerHigh: css(colours.surfaceContainerHigh),
+    surfaceContainerHighest: css(colours.surfaceContainerHighest),
+    error: css(colours.error),
+    warning: css(palette.neutral),
+    info: css(palette.info),
+    success: css(colours.success),
+    matugen_type: 'scheme-fidelity',
+  };
+  return `${JSON.stringify({ [mode]: theme }, null, 2)}\n`;
+}
+
+/**
  * @param {Record<string, string>} colours
  * @returns {string}
  */
@@ -1385,6 +1430,7 @@ export function desktopThemeAssetPaths(slug) {
     caelestiaSequences: `desktop/caelestia/state/${slug}.sequences.txt`,
     caelestiaHyprLegacy: `desktop/caelestia/hypr/${slug}.conf`,
     caelestiaHyprLua: `desktop/caelestia/hypr/${slug}.lua`,
+    dmsTheme: `desktop/dms/themes/${slug}.json`,
   };
 }
 

@@ -281,6 +281,35 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
   }
 });
 
+test('DMS themes project the Caelestia Material roles for the source appearance', () => {
+  for (const source of SOURCE_THEMES) {
+    const mode = source.appearance === 'light' ? 'light' : 'dark';
+    const dms = JSON.parse(requiredAsset(`desktop/dms/themes/${source.slug}.json`));
+    const { colours } = JSON.parse(
+      requiredAsset(`desktop/caelestia/state/${source.slug}.scheme.json`)
+    );
+
+    expect(Object.keys(dms)).toEqual([mode]);
+    const theme = dms[mode];
+    for (const [dmsRole, materialRole] of [
+      ['primary', 'primary'],
+      ['primaryText', 'onPrimary'],
+      ['surface', 'surface'],
+      ['surfaceText', 'onSurface'],
+      ['background', 'background'],
+      ['backgroundText', 'onBackground'],
+      ['surfaceContainerHighest', 'surfaceContainerHighest'],
+      ['error', 'error'],
+    ]) {
+      expect(theme[dmsRole]).toBe(`#${colours[materialRole]}`);
+    }
+    for (const [role, value] of Object.entries(theme)) {
+      if (role !== 'name' && role !== 'matugen_type') expect(value).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(theme.matugen_type).toBe('scheme-fidelity');
+  }
+});
+
 test('Caelestia schemes consume neutral Material and terminal roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
