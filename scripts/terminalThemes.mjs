@@ -181,7 +181,7 @@ function buildFishTheme(theme) {
   const fishColors = [
     ['fish_color_normal', foreground],
     ['fish_color_command', fishRoleColor(theme, 'syntax:function')],
-    ['fish_color_keyword', fishRoleColor(theme, 'syntax:keyword')],
+    ['fish_color_keyword', fishRoleColor(theme, 'syntax:control')],
     ['fish_color_quote', fishRoleColor(theme, 'syntax:string')],
     ['fish_color_redirection', fishRoleColor(theme, 'terminal:ansi.blue')],
     ['fish_color_end', fishRoleColor(theme, 'terminal:ansi.magenta')],

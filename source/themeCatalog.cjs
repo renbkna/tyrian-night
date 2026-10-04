@@ -6,7 +6,6 @@ const themeCatalog = [
   },
   {
     slug: 'tyrian-nocturne',
-    terminalDefault: true,
     islandEffects: 'neutral-dark',
   },
   {
@@ -15,6 +14,7 @@ const themeCatalog = [
   },
   {
     slug: 'tyrian-abyss',
+    terminalDefault: true,
     islandEffects: 'abyss',
   },
   {

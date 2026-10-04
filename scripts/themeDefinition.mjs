@@ -33,15 +33,41 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  */
 /**
  * @typedef {{ maximum: number; minimum: number }} NumericRange
+ * A theme's syntax saturation band. `richness` is the share of the sRGB chroma
+ * available at each pigment's own lightness and hue, so every hue is equally
+ * vivid for what it can reach; `chroma` is absolute OKLCH chroma, so every hue
+ * is equally colorful (soft tints, where gamut room differs widely by hue).
+ * @typedef {NumericRange & { measure: 'chroma' | 'richness' }} SaturationBand
+ * @typedef {{ syntaxSaturation: SaturationBand }} EnergyVariantContract
+ * Every colored syntax pigment of a maintained theme lies inside that theme's
+ * band. A ceiling caps a pigment's OKLCH chroma at `maximumShare` of its
+ * reference's, so structure never competes with the role it frames.
+ * @typedef {{ pigment: string; reference: string; maximumShare: number }} ChromaCeiling
+ * @typedef {{ pigments: string[]; ceilings: ChromaCeiling[] }} SyntaxSaturationContract
+ * One syntax weight tier. Tiers run from most to least prominent, measured as
+ * APCA lightness contrast (absolute Lc) against `ui:surface.canvas` so dark and
+ * light appearances share one rule: the weakest pigment of a tier must exceed
+ * the strongest pigment of the next tier by `minimumStepOverNext` Lc points.
+ * Only the last tier omits it. Readability floors live in the safety contract.
  * @typedef {{
- *   semanticChromaRatio: NumericRange;
- *   semanticContrast: NumericRange;
- * }} EnergyVariantContract
+ *   tier: string;
+ *   pigments: string[];
+ *   minimumStepOverNext?: number;
+ * }} SyntaxHierarchyTier
+ * Diagnostics interrupt code through saturation, not brightness: each pigment
+ * must use at least `minimumRichness` of the sRGB chroma available at its own
+ * lightness and hue. Their visibility floor lives in the safety contract.
+ * @typedef {{ pigments: string[]; minimumRichness: number }} DiagnosticsContract
+ * The editor canvas is the lit stage: no frame surface around it may have a
+ * higher OKLCH lightness than `stage` in any maintained theme. Near-black
+ * editors keep the frame flat with the stage; lighter ones frame it darker.
+ * @typedef {{ stage: string; frame: string[] }} EditorStageContract
  * @typedef {{
  *   hueProfile: string;
  *   kind: 'historical-reference' | 'light-counterpart' | 'soft-focus';
  *   maximumSemanticHueDistance: number;
  *   frozenPaletteSha256?: string;
+ *   syntaxSaturation?: SaturationBand;
  * }} ThemeBranchContract
  * @typedef {{
  *   branches: Record<string, ThemeBranchContract>;
@@ -54,12 +80,10 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   hueProfiles: string[];
  *   pigmentHues: Record<string, Record<string, number | null>>;
  *   semanticPigments: string[];
- *   syntaxBalance: {
- *     functionTypeLightnessDelta: NumericRange;
- *     keywordFunctionChromaDelta: NumericRange;
- *     keywordTypeChromaDelta: NumericRange;
- *     typeFunctionChromaDelta: NumericRange;
- *   };
+ *   syntaxHierarchy: SyntaxHierarchyTier[];
+ *   syntaxSaturation: SyntaxSaturationContract;
+ *   diagnostics: DiagnosticsContract;
+ *   editorStage: EditorStageContract;
  * }} ThemeFamilyContract
  */
 /**
@@ -278,7 +302,10 @@ function validateThemeFamilyContract(contract, requiredPigments) {
     hueProfiles,
     pigmentHues,
     semanticPigments,
-    syntaxBalance,
+    syntaxHierarchy,
+    syntaxSaturation,
+    diagnostics,
+    editorStage,
   } = contract;
   requireUnique(semanticPigments, 'Theme family semantic pigments');
   const requiredPigmentSet = new Set(requiredPigments);
@@ -288,30 +315,88 @@ function validateThemeFamilyContract(contract, requiredPigments) {
     }
   }
 
-  requireRange(
-    syntaxBalance.functionTypeLightnessDelta,
-    'Theme family function/type lightness delta',
-    -1,
-    1
+  if (syntaxHierarchy.length < 2) {
+    throw new Error('Theme family syntax hierarchy must order at least two tiers.');
+  }
+  requireUnique(
+    syntaxHierarchy.map(({ tier }) => tier),
+    'Theme family syntax hierarchy tiers'
   );
-  requireRange(
-    syntaxBalance.keywordFunctionChromaDelta,
-    'Theme family keyword/function chroma delta',
-    -0.5,
-    0.5
+  requireUnique(
+    syntaxHierarchy.flatMap(({ pigments }) => pigments),
+    'Theme family syntax hierarchy'
   );
-  requireRange(
-    syntaxBalance.keywordTypeChromaDelta,
-    'Theme family keyword/type chroma delta',
-    -0.5,
-    0.5
-  );
-  requireRange(
-    syntaxBalance.typeFunctionChromaDelta,
-    'Theme family type/function chroma delta',
-    -0.5,
-    0.5
-  );
+  for (const [index, { tier, pigments, minimumStepOverNext }] of syntaxHierarchy.entries()) {
+    if (pigments.length === 0) {
+      throw new Error(`Theme family syntax hierarchy tier '${tier}' must not be empty.`);
+    }
+    for (const pigment of pigments) {
+      if (!pigment.startsWith('syntax:') || !requiredPigmentSet.has(pigment)) {
+        throw new Error(
+          `Theme family syntax hierarchy pigment '${pigment}' is not a recipe-owned syntax pigment.`
+        );
+      }
+    }
+    const last = index === syntaxHierarchy.length - 1;
+    if (last !== (minimumStepOverNext === undefined)) {
+      throw new Error(
+        `Theme family syntax hierarchy tier '${tier}' must declare a step over the next tier exactly when one follows.`
+      );
+    }
+    if (
+      minimumStepOverNext !== undefined &&
+      !(Number.isFinite(minimumStepOverNext) && minimumStepOverNext > 0)
+    ) {
+      throw new Error(
+        `Theme family syntax hierarchy tier '${tier}' step must be a positive, finite Lc difference.`
+      );
+    }
+  }
+
+  requireUnique(syntaxSaturation.pigments, 'Theme family syntax saturation');
+  for (const pigment of syntaxSaturation.pigments) {
+    if (!pigment.startsWith('syntax:') || !requiredPigmentSet.has(pigment)) {
+      throw new Error(
+        `Theme family syntax saturation pigment '${pigment}' is not a recipe-owned syntax pigment.`
+      );
+    }
+  }
+  for (const { pigment, reference, maximumShare } of syntaxSaturation.ceilings) {
+    for (const member of [pigment, reference]) {
+      if (!member.startsWith('syntax:') || !requiredPigmentSet.has(member)) {
+        throw new Error(
+          `Theme family chroma ceiling pigment '${member}' is not a recipe-owned syntax pigment.`
+        );
+      }
+    }
+    if (pigment === reference || !(maximumShare > 0 && maximumShare <= 1)) {
+      throw new Error(`Theme family chroma ceiling for '${pigment}' is invalid.`);
+    }
+  }
+
+  requireUnique(diagnostics.pigments, 'Theme family diagnostics');
+  for (const pigment of diagnostics.pigments) {
+    if (!requiredPigmentSet.has(pigment)) {
+      throw new Error(`Theme family diagnostic pigment '${pigment}' is not recipe-owned.`);
+    }
+  }
+  if (!(diagnostics.minimumRichness > 0 && diagnostics.minimumRichness <= 1)) {
+    throw new Error(
+      'Theme family diagnostics minimum richness must be within 0 (exclusive) and 1.'
+    );
+  }
+
+  requireUnique(editorStage.frame, 'Theme family editor stage frame');
+  for (const pigment of [editorStage.stage, ...editorStage.frame]) {
+    if (!pigment.startsWith('ui:') || !requiredPigmentSet.has(pigment)) {
+      throw new Error(
+        `Theme family editor stage surface '${pigment}' is not a recipe-owned UI pigment.`
+      );
+    }
+  }
+  if (editorStage.frame.includes(editorStage.stage)) {
+    throw new Error('Theme family editor stage must not frame itself.');
+  }
 
   requireUnique(hueProfiles, 'Theme family hue profiles');
   for (const profile of hueProfiles) {
@@ -355,13 +440,7 @@ function validateThemeFamilyContract(contract, requiredPigments) {
     'energy variants'
   );
   for (const [slug, variant] of Object.entries(energyLine.variants)) {
-    requireRange(
-      variant.semanticChromaRatio,
-      `Theme family energy variant '${slug}' chroma ratio`,
-      0,
-      Number.POSITIVE_INFINITY
-    );
-    requireRange(variant.semanticContrast, `Theme family energy variant '${slug}' contrast`, 1, 21);
+    requireSaturationBand(variant.syntaxSaturation, `Theme family energy variant '${slug}'`);
   }
 
   for (const [slug, branch] of Object.entries(branches)) {
@@ -380,6 +459,14 @@ function validateThemeFamilyContract(contract, requiredPigments) {
       !/^[a-f0-9]{64}$/u.test(branch.frozenPaletteSha256)
     ) {
       throw new Error(`Theme family branch '${slug}' has an invalid frozen palette digest.`);
+    }
+    if (frozen === (branch.syntaxSaturation !== undefined)) {
+      throw new Error(
+        `Theme family branch '${slug}' must define a syntax saturation band exactly when it is maintained.`
+      );
+    }
+    if (branch.syntaxSaturation) {
+      requireSaturationBand(branch.syntaxSaturation, `Theme family branch '${slug}'`);
     }
   }
 
@@ -480,6 +567,22 @@ function requireRange(range, owner, floor, ceiling) {
   if (range.minimum < floor || range.maximum > ceiling || range.minimum > range.maximum) {
     throw new Error(`${owner} is invalid.`);
   }
+}
+
+/** OKLCH chroma beyond 0.4 lies outside sRGB at every lightness and hue. */
+const SATURATION_MEASURE_CEILINGS = { chroma: 0.4, richness: 1 };
+
+/** @param {SaturationBand} band @param {string} owner */
+function requireSaturationBand(band, owner) {
+  if (!Object.hasOwn(SATURATION_MEASURE_CEILINGS, band.measure)) {
+    throw new Error(`${owner} syntax saturation measure '${band.measure}' is unsupported.`);
+  }
+  requireRange(
+    band,
+    `${owner} syntax saturation band`,
+    0,
+    SATURATION_MEASURE_CEILINGS[band.measure]
+  );
 }
 
 /** @param {readonly string[]} values @param {string} owner */

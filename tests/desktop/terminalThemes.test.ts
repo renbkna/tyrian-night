@@ -39,7 +39,7 @@ test('terminal generation resolves validated default roles from the injected cat
       terminalDefault?: boolean;
     }>;
     for (const entry of catalog) {
-      if (entry.slug === 'tyrian-nocturne') delete entry.terminalDefault;
+      if (entry.slug === 'tyrian-abyss') delete entry.terminalDefault;
       if (entry.slug === 'tyrian-night') entry.terminalDefault = true;
     }
     writeSourceData(catalogPath, catalog);
@@ -79,7 +79,7 @@ test('terminal config generators require an admitted repository snapshot', () =>
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const admitted = loadThemeRepository(root);
-    const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
+    const themePath = path.join(root, 'source/themes/tyrian-abyss.cjs');
     const recipe = readSourceData(themePath) as {
       oklch: Record<string, [number, number]>;
     };
@@ -226,7 +226,7 @@ test('fish themes derive shell syntax colors without owning terminal window colo
 test('Starship prompt uses named Tyrian palettes backed by neutral roles', () => {
   const starshipConfig = requiredAsset('terminal/starship/tyrian-night.toml');
 
-  expect(starshipConfig).toContain('palette = "tyrian_nocturne"');
+  expect(starshipConfig).toContain('palette = "tyrian_abyss"');
   expect(starshipConfig).toContain('CachyOS = "󰣇"');
   expect(starshipConfig).toContain('style = "bg:surface fg:command"');
   expect(starshipConfig).toContain('style = "bg:surface fg:language"');
@@ -249,7 +249,7 @@ test('Starship prompt uses named Tyrian palettes backed by neutral roles', () =>
 });
 
 test('Fastfetch startup config uses the default Tyrian terminal palette with the Chafa logo asset', () => {
-  const theme = sourceTheme(requiredThemeSource('tyrian-nocturne'));
+  const theme = sourceTheme(requiredThemeSource('tyrian-abyss'));
   const fastfetchConfig = JSON.parse(requiredAsset('terminal/fastfetch/tyrian-night.jsonc'));
 
   expect(fs.existsSync(FASTFETCH_IMAGE_ASSET_PATH)).toBe(true);
@@ -291,7 +291,7 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
 
 test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'theme = dark:tyrian-nocturne,light:tyrian-dawn'
+    'theme = dark:tyrian-abyss,light:tyrian-dawn'
   );
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.82');
   expect(requiredAsset('terminal/ghostty/config.example')).toContain(
@@ -319,7 +319,7 @@ test('example configs point each terminal layer at the right owner', () => {
   expect(requiredAsset('terminal/ghostty/config.example')).toContain('copy-on-select = clipboard');
   expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
   expect(requiredAsset('terminal/foot/foot.ini')).toContain(
-    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-nocturne.ini'
+    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-abyss.ini'
   );
   expect(requiredAsset('terminal/foot/foot.ini')).toContain(
     'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-dawn.ini'
@@ -336,7 +336,7 @@ test('example configs point each terminal layer at the right owner', () => {
     'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
   );
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-nocturne.fish'
+    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-abyss.fish'
   );
   expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
     'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'
@@ -348,7 +348,7 @@ test('example configs point each terminal layer at the right owner', () => {
     'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
   );
   expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
-    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-nocturne.fish'
+    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-abyss.fish'
   );
   expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
     'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'

@@ -327,8 +327,8 @@ test('production snapshots reject unreadable palettes while inspection snapshots
     const contract = readThemeSafetyContract(inspection.definition);
     expect(auditThemeSafety(theme, contract)).toContainEqual(
       expect.objectContaining({
-        constraint: 'readable-syntax',
-        kind: 'wcag-minimum-contrast',
+        constraint: 'readable-quiet',
+        kind: 'apca-minimum-contrast',
         role: 'syntax:comment',
       })
     );
@@ -437,34 +437,124 @@ test('production source reads keep the validated snapshot when editable files ch
   }
 });
 
-test('family relationship validation rejects palette energy drift', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-energy-'));
+test('family relationship validation rejects syntax saturation drift', () => {
+  const cases: Array<[(family: any) => void, string]> = [
+    // Gamut-share band: Night's control flow is more vivid than a 0.52 ceiling allows.
+    [
+      (family) => {
+        family.energyLine.variants['tyrian-night'].syntaxSaturation = {
+          measure: 'richness',
+          minimum: 0.5,
+          maximum: 0.52,
+        };
+      },
+      "Theme 'tyrian-night' syntax pigment 'syntax:control' richness",
+    ],
+    // Absolute-chroma band: Pastel's tints are more colorful than a 0.085 ceiling allows.
+    [
+      (family) => {
+        family.branches['tyrian-pastel'].syntaxSaturation.maximum = 0.085;
+      },
+      "Theme 'tyrian-pastel' syntax pigment 'syntax:control' chroma",
+    ],
+    [
+      (family) => {
+        family.syntaxSaturation.ceilings[0].maximumShare = 0.5;
+      },
+      "'syntax:declaration' chroma under 'syntax:control'",
+    ],
+    [
+      (family) => {
+        delete family.branches['tyrian-dawn'].syntaxSaturation;
+      },
+      "Theme family branch 'tyrian-dawn' must define a syntax saturation band exactly when it is maintained.",
+    ],
+  ];
+
+  for (const [mutate, message] of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-saturation-'));
+    try {
+      fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+      const familyPath = path.join(root, 'source/themeFamilyContract.cjs');
+      const family = readSourceData<any>(familyPath);
+      mutate(family);
+      writeSourceData(familyPath, family);
+
+      expect(() => loadThemeRepository(root)).toThrow(message);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('family relationship validation rejects syntax hierarchy drift', () => {
+  const cases: Array<[string, string, number, string]> = [
+    // Control flow weaker than a support pigment no longer leads.
+    [
+      'tyrian-nocturne',
+      'syntax:control',
+      0.7,
+      "Theme 'tyrian-nocturne' syntax tier 'lead' over 'support'",
+    ],
+    // On a light canvas a darker declaration keyword is the stronger one.
+    [
+      'tyrian-dawn',
+      'syntax:declaration',
+      0.44,
+      "Theme 'tyrian-dawn' syntax tier 'support' over 'structure'",
+    ],
+    // A comment as strong as declaration keywords no longer recedes.
+    [
+      'tyrian-night',
+      'syntax:comment',
+      0.71,
+      "Theme 'tyrian-night' syntax tier 'structure' over 'quiet'",
+    ],
+  ];
+  for (const [slug, pigment, lightness, message] of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-syntax-hierarchy-'));
+    try {
+      fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+      const themePath = path.join(root, `source/themes/${slug}.cjs`);
+      const theme = readSourceData<any>(themePath);
+      theme.oklch[pigment][0] = lightness;
+      writeSourceData(themePath, theme);
+
+      expect(() => loadThemeRepository(root)).toThrow(message);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('family relationship validation keeps the editor the lit stage', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-editor-stage-'));
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    const familyPath = path.join(root, 'source/themeFamilyContract.cjs');
-    const family = readSourceData<any>(familyPath);
-    family.energyLine.variants['tyrian-night'].semanticChromaRatio.maximum = 0.61;
-    writeSourceData(familyPath, family);
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
+    const theme = readSourceData<any>(themePath);
+    theme.oklch['ui:surface.sidebar'][0] = 0.2;
+    writeSourceData(themePath, theme);
 
     expect(() => loadThemeRepository(root)).toThrow(
-      "Energy variant 'tyrian-night' semantic chroma ratio"
+      "Theme 'tyrian-nocturne' frame surface 'ui:surface.sidebar' is lighter than the editor stage."
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('family relationship validation rejects syntax balance drift', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-syntax-balance-'));
+test('family relationship validation keeps diagnostics at full saturation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-diagnostics-'));
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    const themePath = path.join(root, 'source/themes/tyrian-night.cjs');
+    const themePath = path.join(root, 'source/themes/tyrian-nocturne.cjs');
     const theme = readSourceData<any>(themePath);
-    theme.oklch['syntax:type'][0] = 0.7;
+    theme.oklch['ui:status.error'][1] = 0.05;
     writeSourceData(themePath, theme);
 
     expect(() => loadThemeRepository(root)).toThrow(
-      "Theme 'tyrian-night' function/type lightness delta"
+      "Theme 'tyrian-nocturne' diagnostic 'ui:status.error' richness"
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -482,32 +572,6 @@ test('historical-reference palette rejects drift', () => {
 
     expect(() => loadThemeRepository(root)).toThrow(
       "Historical-reference theme 'tyrian-night-old' palette is frozen."
-    );
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('family relationship validation rejects undefined chroma ratios', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-family-zero-chroma-'));
-  try {
-    fs.mkdirSync(path.join(root, 'source/themes'), { recursive: true });
-    copyThemeContracts(root);
-    writeSourceData(path.join(root, 'source/themeCatalog.cjs'), VALID_CATALOG);
-    const family = readSourceData<any>(path.join(root, 'source/themeFamilyContract.cjs'));
-
-    for (const [slug, identity] of Object.entries(VALID_IDENTITIES)) {
-      const definition = definitionFor(identity, readClassification(slug).appearance);
-      if (slug === family.canonical) {
-        for (const pigment of family.semanticPigments as string[]) {
-          definition.oklch[pigment] = [0, 0];
-        }
-      }
-      writeSourceData(path.join(root, `source/themes/${slug}.cjs`), definition);
-    }
-
-    expect(() => loadThemeRepository(root)).toThrow(
-      "Energy variant 'tyrian-test-dark' semantic chroma ratio"
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -624,8 +688,9 @@ test('opacity policy owns every derived alpha once and exposes only appearance o
   const definition = loadThemeDefinitionContext();
   expect(definition.opacityPolicy.dark['ui:border.tab']).toBe('FF');
   expect(definition.opacityPolicy.light['ui:border.tab']).toBe('00');
-  expect(definition.opacityPolicy.dark['ui:selection.primary']).toBe('47');
-  expect(definition.opacityPolicy.light['ui:selection.primary']).toBe('47');
+  expect(definition.opacityPolicy.light['ui:selection.primary']).toBe(
+    definition.opacityPolicy.dark['ui:selection.primary']
+  );
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-opacity-contract-'));
   try {
@@ -710,6 +775,27 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
         },
         'contrast contract must not be empty',
       ],
+      [
+        'semantic selector owner',
+        (projection) => {
+          projection.semanticTokenColors.push({ selector: 'parameter', role: 'type' });
+        },
+        "semantic token selector 'parameter' has multiple owners",
+      ],
+      [
+        'semantic rule without effect',
+        (projection) => {
+          projection.semanticTokenColors.push({ selector: 'label' });
+        },
+        "semantic token selector 'label' sets no role or style",
+      ],
+      [
+        'semantic rule role',
+        (projection) => {
+          projection.semanticTokenColors.push({ selector: 'label', role: 'keyword' });
+        },
+        "grammar projection references unknown role 'keyword'",
+      ],
     ];
 
     for (const [, mutate, message] of invalidCases) {
@@ -762,6 +848,22 @@ function definitionFor(identity: { name: string }, appearance: 'dark' | 'light')
   const bindings = DEFAULT_DEFINITION.colorBindings.bindings;
   const hueProfile = appearance === 'light' ? 'dawn' : 'core';
   const bindingValues = Object.values(bindings).flatMap((roles) => Object.values(roles));
+  // Every other pigment, including the canvas, sits at L 0.5. Each hierarchy tier
+  // above the last steps away from it so the fixture satisfies the family ladder,
+  // and the frame around the editor stage sits just below it.
+  const ladder = DEFAULT_DEFINITION.familyContract.syntaxHierarchy;
+  const { frame } = DEFAULT_DEFINITION.familyContract.editorStage;
+  // APCA tier steps are polarity-agnostic, so both appearances share them.
+  const steps = [0.94, 0.85, 0.75];
+  const lightness = (pigment: string) => {
+    if (frame.includes(pigment)) return 0.45;
+    const index = ladder.findIndex(({ pigments }) => pigments.includes(pigment));
+    if (index === -1 || index === ladder.length - 1) return 0.5;
+    const step = steps[index];
+    if (step === undefined)
+      throw new Error('The fixture needs a lightness for every hierarchy tier.');
+    return step;
+  };
   const oklch = Object.fromEntries(
     [
       ...new Set(
@@ -772,7 +874,7 @@ function definitionFor(identity: { name: string }, appearance: 'dark' | 'light')
       .map((pigment) => [
         pigment,
         [
-          0.5,
+          lightness(pigment),
           DEFAULT_DEFINITION.familyContract.pigmentHues[pigment][hueProfile] === null ? 0 : 0.02,
         ],
       ])
@@ -795,14 +897,15 @@ function copyThemeContracts(root: string) {
   const familyPath = path.join(root, 'source/themeFamilyContract.cjs');
   const family = readSourceData<any>(familyPath);
   family.canonical = 'tyrian-test-dark';
+  // Fixture pigments share one low chroma; saturation relationships are proved on real recipes.
+  family.diagnostics.minimumRichness = 0.01;
+  family.syntaxSaturation.ceilings = [];
+  const anySaturation = { measure: 'chroma', minimum: 0, maximum: 0.4 };
   family.energyLine = {
     hueProfile: 'core',
     canvasLightnessOrder: ['tyrian-test-dark'],
     variants: {
-      'tyrian-test-dark': {
-        semanticChromaRatio: { minimum: 1, maximum: 1 },
-        semanticContrast: { minimum: 1, maximum: 21 },
-      },
+      'tyrian-test-dark': { syntaxSaturation: anySaturation },
     },
   };
   family.branches = {
@@ -810,6 +913,7 @@ function copyThemeContracts(root: string) {
       hueProfile: 'dawn',
       kind: 'light-counterpart',
       maximumSemanticHueDistance: 180,
+      syntaxSaturation: anySaturation,
     },
   };
   family.hueProfiles = ['core', 'dawn'];

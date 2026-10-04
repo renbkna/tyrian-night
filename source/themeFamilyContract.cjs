@@ -1,65 +1,91 @@
 /** @type {import('../scripts/themeDefinition.mjs', { with: { 'resolution-mode': 'import' } }).ThemeFamilyContract} */
 const themeFamilyContract = {
-  canonical: 'tyrian-nocturne',
+  canonical: 'tyrian-abyss',
   semanticPigments: [
     'ui:accent.primary',
-    'syntax:keyword',
+    'syntax:control',
     'syntax:function',
     'syntax:type',
     'syntax:data',
     'syntax:string',
-    'syntax:regexp',
+    'syntax:literal',
   ],
-  syntaxBalance: {
-    functionTypeLightnessDelta: {
-      minimum: -0.05,
-      maximum: 0.05,
+  syntaxHierarchy: [
+    {
+      tier: 'lead',
+      pigments: ['syntax:control', 'syntax:function'],
+      minimumStepOverNext: 4,
     },
-    keywordFunctionChromaDelta: {
-      minimum: -0.005,
-      maximum: 0.5,
+    {
+      tier: 'support',
+      pigments: ['syntax:type', 'syntax:data', 'syntax:string', 'syntax:literal'],
+      minimumStepOverNext: 6,
     },
-    keywordTypeChromaDelta: {
-      minimum: -0.03,
-      maximum: 0.03,
+    {
+      tier: 'structure',
+      pigments: ['syntax:declaration'],
+      minimumStepOverNext: 6,
     },
-    typeFunctionChromaDelta: {
-      minimum: -0.005,
-      maximum: 0.5,
+    {
+      tier: 'quiet',
+      pigments: ['syntax:comment', 'syntax:documentation', 'syntax:punctuation'],
     },
+  ],
+  diagnostics: {
+    pigments: ['ui:status.error', 'ui:status.warning'],
+    minimumRichness: 0.9,
+  },
+  editorStage: {
+    stage: 'ui:surface.canvas',
+    frame: [
+      'ui:surface.navigation',
+      'ui:surface.chrome',
+      'ui:surface.sidebar',
+      'ui:surface.tab.inactive',
+    ],
+  },
+  syntaxSaturation: {
+    pigments: [
+      'syntax:control',
+      'syntax:function',
+      'syntax:type',
+      'syntax:data',
+      'syntax:string',
+      'syntax:literal',
+      'syntax:emphasis',
+      'syntax:file',
+    ],
+    ceilings: [
+      {
+        pigment: 'syntax:declaration',
+        reference: 'syntax:control',
+        maximumShare: 0.75,
+      },
+    ],
   },
   energyLine: {
     hueProfile: 'core',
     canvasLightnessOrder: ['tyrian-abyss', 'tyrian-nocturne', 'tyrian-night'],
     variants: {
       'tyrian-night': {
-        semanticChromaRatio: {
-          minimum: 0.6,
-          maximum: 0.7,
-        },
-        semanticContrast: {
-          minimum: 4.8,
-          maximum: 5.3,
+        syntaxSaturation: {
+          measure: 'richness',
+          minimum: 0.55,
+          maximum: 0.6,
         },
       },
       'tyrian-nocturne': {
-        semanticChromaRatio: {
-          minimum: 1,
-          maximum: 1,
-        },
-        semanticContrast: {
-          minimum: 5.8,
-          maximum: 6.4,
+        syntaxSaturation: {
+          measure: 'richness',
+          minimum: 0.75,
+          maximum: 0.8,
         },
       },
       'tyrian-abyss': {
-        semanticChromaRatio: {
-          minimum: 1.3,
-          maximum: 1.45,
-        },
-        semanticContrast: {
-          minimum: 6.6,
-          maximum: 7.3,
+        syntaxSaturation: {
+          measure: 'richness',
+          minimum: 0.95,
+          maximum: 1,
         },
       },
     },
@@ -69,17 +95,27 @@ const themeFamilyContract = {
       hueProfile: 'pastel',
       kind: 'soft-focus',
       maximumSemanticHueDistance: 12,
+      syntaxSaturation: {
+        measure: 'chroma',
+        minimum: 0.08,
+        maximum: 0.1,
+      },
     },
     'tyrian-dawn': {
       hueProfile: 'dawn',
       kind: 'light-counterpart',
       maximumSemanticHueDistance: 12,
+      syntaxSaturation: {
+        measure: 'richness',
+        minimum: 0.75,
+        maximum: 0.8,
+      },
     },
     'tyrian-night-old': {
       hueProfile: 'core',
       kind: 'historical-reference',
       maximumSemanticHueDistance: 0,
-      frozenPaletteSha256: '28f3736a9afd2536cc5667f0bec8684317155a759329c8148c574ea5e51fb789',
+      frozenPaletteSha256: 'a317b824a281dd989af90bcce1f2db48d38e0c3f67e8749bd3ee4010f6a9e607',
     },
   },
   hueProfiles: ['core', 'pastel', 'dawn'],
@@ -119,15 +155,20 @@ const themeFamilyContract = {
       pastel: 310.266181,
       dawn: 313.103696,
     },
-    'syntax:constantLanguage': {
-      core: 327.170579,
-      pastel: 326.132708,
-      dawn: 331.054347,
+    'syntax:control': {
+      core: 321.894799,
+      pastel: 311.966544,
+      dawn: 320.320705,
     },
     'syntax:data': {
       core: 342,
       pastel: 342,
       dawn: 342,
+    },
+    'syntax:declaration': {
+      core: 321.894799,
+      pastel: 311.966544,
+      dawn: 320.320705,
     },
     'syntax:documentation': {
       core: 300.41481,
@@ -149,20 +190,15 @@ const themeFamilyContract = {
       pastel: 262.202658,
       dawn: 258.609429,
     },
-    'syntax:keyword': {
-      core: 321.894799,
-      pastel: 311.966544,
-      dawn: 320.320705,
+    'syntax:literal': {
+      core: 58,
+      pastel: 60,
+      dawn: 56,
     },
     'syntax:punctuation': {
       core: 301.725534,
       pastel: 316.427543,
       dawn: 310.040683,
-    },
-    'syntax:regexp': {
-      core: 75.983357,
-      pastel: 75.558991,
-      dawn: 79.395209,
     },
     'syntax:string': {
       core: 146.106106,
@@ -173,6 +209,11 @@ const themeFamilyContract = {
       core: 284.076356,
       pastel: 285.419557,
       dawn: 282.281212,
+    },
+    'syntax:variable': {
+      core: 305.798859,
+      pastel: 306.813127,
+      dawn: 314.281316,
     },
     'terminal:ansi.blue': {
       core: 255.438161,
@@ -224,10 +265,25 @@ const themeFamilyContract = {
       pastel: 281.832809,
       dawn: 273.983041,
     },
+    'terminal:ansi.green': {
+      core: 146.062253,
+      pastel: 149.512795,
+      dawn: 145.001739,
+    },
     'terminal:ansi.magenta': {
       core: 313.083904,
       pastel: 308.343669,
       dawn: 311.966417,
+    },
+    'terminal:ansi.red': {
+      core: 17.812851,
+      pastel: 8.898821,
+      dawn: 19.332042,
+    },
+    'terminal:ansi.yellow': {
+      core: 75.321556,
+      pastel: 76.302705,
+      dawn: 76.403063,
     },
     'ui:accent.cursor': {
       core: 312.146994,

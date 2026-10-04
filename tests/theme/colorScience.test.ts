@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  apcaContrast,
   colorMetrics,
   compareColors,
   contrastRatio,
@@ -52,6 +53,14 @@ test('color science helpers expose stable policy-free observations', () => {
   expect(quantizeDiagnosticNumber(0.06025065814868918)).toBe(
     quantizeDiagnosticNumber(0.06025065814868934)
   );
+});
+
+test('APCA contrast reproduces the APCA-W3 0.0.98G-4g reference values in both polarities', () => {
+  expect(apcaContrast('#888888', '#FFFFFF')).toBeCloseTo(63.056, 2);
+  expect(apcaContrast('#FFFFFF', '#888888')).toBeCloseTo(68.541, 2);
+  expect(apcaContrast('#000000', '#AAAAAA')).toBeCloseTo(58.146, 2);
+  expect(apcaContrast('#AAAAAA', '#000000')).toBeCloseTo(56.24, 1);
+  expect(apcaContrast('#777777', '#777777')).toBe(0);
 });
 
 test('translucent observations require the owning backdrop', () => {

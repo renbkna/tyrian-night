@@ -59,6 +59,34 @@ export function contrastRatio(foreground, background) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+/**
+ * APCA-W3 0.0.98G-4g lightness contrast (Lc) of text on its background, as an
+ * absolute value: dark-on-light and light-on-dark text both report a positive
+ * Lc. WCAG 2 ratios overrate light text on dark backgrounds; Lc tracks
+ * perceived readability in both polarities.
+ * @param {string} text
+ * @param {string} background
+ */
+export function apcaContrast(text, background) {
+  const textY = apcaLuminance(opaqueHex(text));
+  const backgroundY = apcaLuminance(opaqueHex(background));
+  if (Math.abs(backgroundY - textY) < 0.0005) return 0;
+  const strength =
+    backgroundY > textY
+      ? (backgroundY ** 0.56 - textY ** 0.57) * 1.14
+      : (textY ** 0.62 - backgroundY ** 0.65) * 1.14;
+  return strength < 0.1 ? 0 : (strength - 0.027) * 100;
+}
+
+/** APCA screen luminance with its soft black clamp. @param {string} color */
+function apcaLuminance(color) {
+  const [red, green, blue] = [1, 3, 5].map(
+    (offset) => (Number.parseInt(color.slice(offset, offset + 2), 16) / 255) ** 2.4
+  );
+  const luminance = 0.2126729 * red + 0.7151522 * green + 0.072175 * blue;
+  return luminance < 0.022 ? luminance + (0.022 - luminance) ** 1.414 : luminance;
+}
+
 /** @param {string} color @returns {Oklab} */
 export function hexToOklab(color) {
   const [red, green, blue] = hexToLinearRgb(opaqueHex(color));

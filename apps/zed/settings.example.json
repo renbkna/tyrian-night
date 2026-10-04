@@ -13,7 +13,7 @@
   "theme": {
     "mode": "dark",
     "light": "Tyrian Dawn",
-    "dark": "Tyrian Nocturne"
+    "dark": "Tyrian Abyss"
   },
   "icon_theme": {
     "mode": "light",
@@ -21,6 +21,43 @@
     "dark": "Colored Zed Icons Theme Dark"
   },
   "semantic_tokens": "combined",
+  "global_lsp_settings": {
+    "semantic_token_rules": [
+      { "token_type": "keyword", "token_modifiers": ["controlFlow"], "style": ["keyword.control"] },
+      {
+        "token_type": "function",
+        "token_modifiers": ["declaration"],
+        "style": ["function.definition"]
+      },
+      {
+        "token_type": "function",
+        "token_modifiers": ["definition"],
+        "style": ["function.definition"]
+      },
+      {
+        "token_type": "method",
+        "token_modifiers": ["declaration"],
+        "style": ["function.definition"]
+      },
+      {
+        "token_type": "method",
+        "token_modifiers": ["definition"],
+        "style": ["function.definition"]
+      },
+      {
+        "token_type": "variable",
+        "token_modifiers": ["mutable"],
+        "style": ["variable"],
+        "underline": true
+      },
+      {
+        "token_type": "parameter",
+        "token_modifiers": ["mutable"],
+        "style": ["variable.parameter"],
+        "underline": true
+      }
+    ]
+  },
   "colorize_brackets": true,
   "show_whitespaces": "selection",
   "show_wrap_guides": false,

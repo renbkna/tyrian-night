@@ -21,7 +21,7 @@ Unsupported mutation semantics fail before the first backup or file change.
 
 Both profiles manage Ghostty, Foot, and fish. Each command then manages only its selected desktop surface. A Plasma apply does not write Hyprland or Caelestia runtime paths; a Caelestia apply does not write KDE or Plasma paths. The stable copied source under `~/.local/share/tyrian-night/` contains generated assets for both profiles, but it is installer-owned data rather than live desktop configuration.
 
-The theme family contract owns the selected desktop theme; it is currently Tyrian Nocturne. Terminal configuration independently uses the catalog's appearance-specific defaults: Nocturne for dark mode and Dawn for light mode. The installer derives its materialized assets, package identifiers, and Caelestia state from those owned roles rather than a hard-coded variant.
+The theme family contract owns the selected desktop theme; it is currently Tyrian Abyss. Terminal configuration independently uses the catalog's appearance-specific defaults: Abyss for dark mode and Dawn for light mode. The installer derives its materialized assets, package identifiers, and Caelestia state from those owned roles rather than a hard-coded variant.
 
 ```sh
 # Read-only Plasma plan, then apply.

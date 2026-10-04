@@ -1,12 +1,13 @@
 /** @type {import('../scripts/themeDefinition.mjs', { with: { 'resolution-mode': 'import' } }).ThemeOpacityContractSource} */
 const themeOpacityContract = {
   opacities: {
-    'ui:search.match.active': '60',
-    'ui:search.match.passive': '33',
+    'ui:search.match.active': '70',
+    'ui:search.match.passive': '3D',
     'ui:editor.highlight': '1F',
-    'ui:selection.primary': '47',
-    'ui:editor.reference.read': '2B',
-    'ui:editor.reference.write': '42',
+    'ui:editor.activeLine': '14',
+    'ui:selection.primary': '5C',
+    'ui:editor.reference.read': '1A',
+    'ui:editor.reference.write': '2E',
     'ui:editor.bracket.matchBackground': '22',
     'ui:editor.bracket.matchBorder': 'D9',
     'ui:editor.predictive.background': '80',
@@ -24,7 +25,7 @@ const themeOpacityContract = {
     'vscode:diff.editor.removed.line.background': '14',
     'vscode:diff.editor.removed.text.background': '26',
     'vscode:editor.hover.highlight.background': '22',
-    'vscode:editor.inactive.selection.background': '30',
+    'vscode:editor.inactive.selection.background': '26',
     'vscode:editor.word.highlight.border': '50',
     'vscode:editor.error.border': '00',
     'vscode:editor.hint.border': '00',

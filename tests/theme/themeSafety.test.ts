@@ -44,6 +44,37 @@ describe('theme safety authority', () => {
     }
   });
 
+  test('each contrast floor names a known metric and a minimum within that metric range', () => {
+    const definition = loadThemeDefinitionContext();
+    const cases: Array<[(entry: any) => void, string]> = [
+      [
+        (entry) => {
+          delete entry.metric;
+        },
+        "metric must be 'apca' or 'wcag'",
+      ],
+      [
+        (entry) => {
+          entry.metric = 'apca';
+          entry.minimum = 4.5;
+        },
+        'apca minimum must be within 15..106',
+      ],
+      [
+        (entry) => {
+          entry.metric = 'wcag';
+          entry.minimum = 60;
+        },
+        'wcag minimum must be within 3..7',
+      ],
+    ];
+    for (const [mutate, message] of cases) {
+      const changed = structuredClone(contract);
+      mutate(changed.contrast[0]);
+      expect(() => validateThemeSafetyContract(changed, definition)).toThrow(message);
+    }
+  });
+
   test('the historical-reference theme follows the same safety gates', () => {
     const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-night-old')!;
     const unreadable = structuredClone(sourceTheme(source));
@@ -64,8 +95,8 @@ describe('theme safety authority', () => {
     unreadable.syntax.function = unreadable.ui['surface.canvas'];
     expect(auditThemeSafety(unreadable, contract)).toContainEqual(
       expect.objectContaining({
-        constraint: 'readable-syntax',
-        kind: 'wcag-minimum-contrast',
+        constraint: 'readable-code',
+        kind: 'apca-minimum-contrast',
         role: 'syntax:function',
       })
     );

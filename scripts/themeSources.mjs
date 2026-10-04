@@ -3,7 +3,13 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { contrastRatio, hexToOklch, hueDistance } from './colorScience.mjs';
+import {
+  apcaContrast,
+  contrastRatio,
+  gamutRelativeRichness,
+  hexToOklch,
+  hueDistance,
+} from './colorScience.mjs';
 import {
   loadThemeDefinitionContext,
   resolveThemeRecipe,
@@ -17,11 +23,19 @@ import { loadSourceModule } from './sourceModule.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
+/** Saturation measures named by family saturation bands. */
+const SATURATION_MEASURES = {
+  /** @param {string} color */
+  chroma: (color) => hexToOklch(color).C,
+  richness: gamutRelativeRichness,
+};
+
 /**
  * @typedef {'dark' | 'light'} ThemeAppearance
  * @typedef {{ slug: string; terminalDefault?: boolean; islandEffects: string }} ThemeCatalogEntry
  * @typedef {{ appearance: ThemeAppearance; isDefault: boolean }} ThemeClassification
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
+ * @typedef {import('./themeDefinition.mjs').SaturationBand} SaturationBand
  * @typedef {import('./themeDefinition.mjs').ThemeRecipe} ThemeRecipe
  * @typedef {{
  *   appearance: ThemeAppearance;
@@ -303,51 +317,59 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
     throw new Error('Theme family classifications must exactly match the theme catalog.');
   }
 
+  const hierarchy = family.syntaxHierarchy;
   for (const { slug } of sources) {
     if (family.branches[slug]?.kind === 'historical-reference') continue;
     const theme = /** @type {ThemeDefinition} */ (themes.get(slug));
-    const keyword = hexToOklch(themeColor(theme, 'syntax:keyword'));
-    const type = hexToOklch(themeColor(theme, 'syntax:type'));
-    const method = hexToOklch(themeColor(theme, 'syntax:function'));
-    const balance = family.syntaxBalance;
-    requireMetricRange(
-      method.L - type.L,
-      balance.functionTypeLightnessDelta,
-      `Theme '${slug}' function/type lightness delta`
+    const canvas = themeColor(theme, 'ui:surface.canvas');
+    /** @param {readonly string[]} pigments */
+    const contrasts = (pigments) =>
+      pigments.map((pigment) => apcaContrast(themeColor(theme, pigment), canvas));
+    for (const [index, upper] of hierarchy.slice(0, -1).entries()) {
+      const lower = hierarchy[index + 1];
+      requireMetricRange(
+        Math.min(...contrasts(upper.pigments)) - Math.max(...contrasts(lower.pigments)),
+        {
+          minimum: /** @type {number} */ (upper.minimumStepOverNext),
+          maximum: Number.POSITIVE_INFINITY,
+        },
+        `Theme '${slug}' syntax tier '${upper.tier}' over '${lower.tier}' Lc step`
+      );
+    }
+    for (const pigment of family.diagnostics.pigments) {
+      requireMetricRange(
+        gamutRelativeRichness(themeColor(theme, pigment)),
+        { minimum: family.diagnostics.minimumRichness, maximum: 1 },
+        `Theme '${slug}' diagnostic '${pigment}' richness`
+      );
+    }
+    const stage = hexToOklch(themeColor(theme, family.editorStage.stage)).L;
+    for (const surface of family.editorStage.frame) {
+      if (hexToOklch(themeColor(theme, surface)).L > stage) {
+        throw new Error(
+          `Theme '${slug}' frame surface '${surface}' is lighter than the editor stage.`
+        );
+      }
+    }
+    const band = /** @type {SaturationBand} */ (
+      family.energyLine.variants[slug]?.syntaxSaturation ?? family.branches[slug]?.syntaxSaturation
     );
-    requireMetricRange(
-      keyword.C - method.C,
-      balance.keywordFunctionChromaDelta,
-      `Theme '${slug}' keyword/function chroma delta`
-    );
-    requireMetricRange(
-      keyword.C - type.C,
-      balance.keywordTypeChromaDelta,
-      `Theme '${slug}' keyword/type chroma delta`
-    );
-    requireMetricRange(
-      type.C - method.C,
-      balance.typeFunctionChromaDelta,
-      `Theme '${slug}' type/function chroma delta`
-    );
-  }
-
-  const canonicalTheme = themes.get(family.canonical);
-  if (!canonicalTheme) throw new Error('Theme family canonical theme is absent.');
-  const canonicalChroma = meanSemanticChroma(canonicalTheme, family.semanticPigments);
-  for (const [slug, variant] of Object.entries(family.energyLine.variants)) {
-    const theme = /** @type {ThemeDefinition} */ (themes.get(slug));
-    const chromaRatio = meanSemanticChroma(theme, family.semanticPigments) / canonicalChroma;
-    requireMetricRange(
-      chromaRatio,
-      variant.semanticChromaRatio,
-      `Energy variant '${slug}' semantic chroma ratio`
-    );
-    requireMetricRange(
-      meanSemanticContrast(theme, family.semanticPigments),
-      variant.semanticContrast,
-      `Energy variant '${slug}' semantic contrast`
-    );
+    for (const pigment of family.syntaxSaturation.pigments) {
+      requireMetricRange(
+        SATURATION_MEASURES[band.measure](themeColor(theme, pigment)),
+        band,
+        `Theme '${slug}' syntax pigment '${pigment}' ${band.measure}`
+      );
+    }
+    /** @param {string} pigment */
+    const chroma = (pigment) => hexToOklch(themeColor(theme, pigment)).C;
+    for (const { pigment, reference, maximumShare } of family.syntaxSaturation.ceilings) {
+      requireMetricRange(
+        chroma(pigment),
+        { minimum: 0, maximum: maximumShare * chroma(reference) },
+        `Theme '${slug}' '${pigment}' chroma under '${reference}'`
+      );
+    }
   }
 
   let previousCanvasLightness = Number.NEGATIVE_INFINITY;

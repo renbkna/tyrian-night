@@ -3,6 +3,7 @@
 import path from 'node:path';
 
 import {
+  apcaContrast,
   colorMetrics,
   compareColors,
   contrastRatio,
@@ -15,14 +16,24 @@ import { loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
 /** @typedef {Record<string, any>} JsonObject */
-/** @typedef {{ id: string; minimum: number; roles: string[] }} SafetyContrast */
+/** @typedef {'apca' | 'wcag'} SafetyContrastMetric */
+/** @typedef {{ id: string; metric: SafetyContrastMetric; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
 /** @typedef {{ id: string; pairing: 'adjacent' | 'adjacent-cycle' | 'all'; roles: string[] }} SafetyStateComparison */
 /** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
+/** Valid floor range per metric: WCAG 2 ratio, APCA Lc. */
+const CONTRAST_METRIC_RANGES = /** @type {Record<string, [number, number]>} */ ({
+  apca: [15, 106],
+  wcag: [3, 7],
+});
+
 /**
  * The safety contract contains hard rendered-contrast requirements and the
- * semantic state pairs that must not collapse to one source color. Simulated
+ * semantic state pairs that must not collapse to one source color. Each
+ * contrast floor names its metric: APCA Lc (absolute, both polarities) for
+ * code, whose readability WCAG 2 overrates on dark backgrounds, and WCAG 2
+ * ratios for UI text, state labels, and label/surface pairs. Simulated
  * color-vision distances remain observations because no repository threshold
  * has human-validation authority. Its shape is type-checked; this validates
  * references into the role contract and the numeric bounds types cannot express.
@@ -50,7 +61,16 @@ export function validateThemeSafetyContract(contract, definition) {
   invariant(contract.contrastPairs.length > 0, 'contrastPairs must not be empty');
   invariant(contract.stateComparisons.length > 0, 'stateComparisons must not be empty');
   const ids = new Set();
-  for (const entry of [...contract.contrast, ...contract.contrastPairs]) {
+  for (const entry of contract.contrast) {
+    requireId(entry.id, ids);
+    const [low, high] = CONTRAST_METRIC_RANGES[entry.metric] ?? [];
+    invariant(low !== undefined, `${entry.id} metric must be 'apca' or 'wcag'`);
+    invariant(
+      entry.minimum >= low && entry.minimum <= high,
+      `${entry.id} ${entry.metric} minimum must be within ${low}..${high}`
+    );
+  }
+  for (const entry of contract.contrastPairs) {
     requireId(entry.id, ids);
     invariant(entry.minimum >= 3 && entry.minimum <= 7, `${entry.id} minimum must be within 3..7`);
   }
@@ -78,12 +98,15 @@ export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
   for (const constraint of contract.contrast) {
     for (const role of constraint.roles) {
       const foreground = opaqueHex(themeColor(theme, role), canvas);
-      const actual = contrastRatio(foreground, canvas);
+      const actual =
+        constraint.metric === 'apca'
+          ? apcaContrast(foreground, canvas)
+          : contrastRatio(foreground, canvas);
       if (actual < constraint.minimum) {
         violations.push({
           actual,
           constraint: constraint.id,
-          kind: 'wcag-minimum-contrast',
+          kind: `${constraint.metric}-minimum-contrast`,
           minimum: constraint.minimum,
           role,
         });
@@ -149,6 +172,7 @@ export function reportThemeColorDiagnostics(
       const color = opaqueHex(themeColor(theme, role), background);
       const metrics = colorMetrics(color, background);
       return {
+        apca: quantizeDiagnosticNumber(apcaContrast(color, background)),
         contrast: quantizeDiagnosticNumber(/** @type {number} */ (metrics.contrast)),
         hex: color,
         oklch: {

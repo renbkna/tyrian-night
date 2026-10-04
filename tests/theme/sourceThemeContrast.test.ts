@@ -60,8 +60,23 @@ test('VS Code projection owns selectors, scopes, and consumer keys', () => {
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
     for (const key of requiredKeys) expect(projected.colors[key]).toBeDefined();
-    expect(projected.semanticHighlighting).toBe(false);
-    expect(projected).not.toHaveProperty('semanticTokenColors');
+    expect(projected.colors['editor.foreground']).toBe(themeColor(theme, 'syntax:variable'));
+    expect(projected.semanticHighlighting).toBe(true);
+    // References share token types with definitions; only `declaration` carries bold.
+    const type = themeColor(theme, 'syntax:type');
+    expect(projected.semanticTokenColors.class).toEqual({ foreground: type, bold: false });
+    expect(projected.semanticTokenColors['class.declaration']).toEqual({
+      foreground: type,
+      bold: true,
+    });
+    expect(projected.semanticTokenColors['function.declaration']).toEqual({
+      foreground: themeColor(theme, 'syntax:function'),
+      bold: true,
+    });
+    expect(projected.semanticTokenColors.parameter).toEqual({
+      foreground: themeColor(theme, 'syntax:data'),
+    });
+    expect(projected.semanticTokenColors['*.mutable']).toEqual({ underline: true });
     for (const [index, role] of THEME_REPOSITORY.definition.requiredThemeRoles.brackets.entries()) {
       expect(projected.colors[`editorBracketHighlight.foreground${index + 1}`]).toBe(
         themeColor(theme, `brackets:${role}`)

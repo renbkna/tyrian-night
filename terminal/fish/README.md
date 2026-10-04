@@ -11,7 +11,7 @@ bun run generate --product=desktop
 Source one generated theme from your interactive fish config:
 
 ```fish
-source /path/to/tyrian-night/terminal/fish/themes/tyrian-nocturne.fish
+source /path/to/tyrian-night/terminal/fish/themes/tyrian-abyss.fish
 ```
 
 Use `terminal/fish/conf.d/tyrian-night.fish` if you want Fish to select the repo Starship config and startup path without replacing your main Fish config. This repository file is a template: copy it into `~/.config/fish/conf.d/`, then replace `/path/to/tyrian-night` in the copied file with the absolute path to your checkout. Do not symlink the unresolved template.

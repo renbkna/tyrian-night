@@ -78,7 +78,7 @@
 }
 
 .monaco-workbench {
-  background-color: var(--islands-bg-canvas) !important;
+  background-color: var(--islands-bg-backdrop) !important;
 }
 
 .part.sidebar {
@@ -402,7 +402,7 @@
 .part.panel.bottom {
   border-radius: var(--islands-panel-radius);
   overflow: hidden !important;
-  border-top: 6px solid var(--islands-bg-canvas) !important;
+  border-top: 6px solid var(--islands-bg-backdrop) !important;
   border-left: var(--islands-surface-border-left) !important;
   border-bottom: var(--islands-surface-border-bottom) !important;
   border-right: var(--islands-surface-border-right) !important;
@@ -429,7 +429,7 @@
 }
 
 .part.activitybar {
-  background: var(--islands-bg-canvas) !important;
+  background: var(--islands-bg-backdrop) !important;
   margin: 8px 0 30px 0;
   overflow: visible !important;
 }
@@ -437,7 +437,7 @@
 .part.activitybar .composite-bar {
   background: color-mix(
     in srgb,
-    var(--islands-bg-canvas),
+    var(--islands-bg-backdrop),
     var(--islands-bg-surface) 30%
   ) !important;
   border-radius: 9999px;
@@ -523,11 +523,11 @@
 }
 
 .part.titlebar {
-  background-color: var(--islands-bg-canvas) !important;
+  background-color: var(--islands-bg-backdrop) !important;
 }
 
 .part.statusbar {
-  background-color: var(--islands-bg-canvas) !important;
+  background-color: var(--islands-bg-backdrop) !important;
   font-family: "Bear Sans UI", sans-serif !important;
 }
 
@@ -572,7 +572,7 @@
   border: none !important;
   background: color-mix(
     in srgb,
-    var(--islands-bg-canvas),
+    var(--islands-bg-backdrop),
     var(--islands-bg-surface) 30%
   ) !important;
   box-shadow: var(--islands-command-shadow) !important;

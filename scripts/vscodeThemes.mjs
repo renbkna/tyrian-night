@@ -38,10 +38,18 @@ export function buildVscodeTheme(theme, projection) {
     },
   }));
 
+  const semanticTokenColors = Object.fromEntries(
+    projection.semanticTokenColors.map(({ selector, role, ...style }) => [
+      selector,
+      { ...(role ? { foreground: grammarColor(theme, role) } : {}), ...style },
+    ])
+  );
+
   return {
     name: theme.name,
     type: theme.appearance,
-    semanticHighlighting: false,
+    semanticHighlighting: true,
+    semanticTokenColors,
     colors,
     tokenColors,
   };

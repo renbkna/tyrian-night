@@ -31,10 +31,10 @@
       .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--data); }
       .dot.rust { background: var(--warning); }
       pre { overflow: auto; margin: 0; color: var(--text); font: .76rem/1.65 "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
-      code span { color: var(--text); }
-      .keyword { color: var(--keyword); } .function { color: var(--function); } .type { color: var(--type); }
-      .data { color: var(--data); } .string { color: var(--string); } .regexp { color: var(--regexp); }
-      .comment { color: var(--comment); } .punctuation { color: var(--punctuation); } .constant { color: var(--constant); }
+      code span { color: var(--variable); }
+      .control { color: var(--control); } .declaration { color: var(--declaration); } .function { color: var(--function); } .type { color: var(--type); }
+      .data { color: var(--data); } .string { color: var(--string); } .literal { color: var(--literal); } .definition { font-weight: 700; }
+      .comment { color: var(--comment); } .punctuation { color: var(--punctuation); }
       .diagnostic { text-decoration: underline wavy var(--error); text-decoration-thickness: 1px; }
       .terminal { background: color-mix(in srgb, var(--canvas) 78%, var(--field)); }
       .terminal pre { color: var(--secondary); }
@@ -67,12 +67,12 @@
         throw new Error('Generated Tyrian production family is missing.');
       }
       const code = (palette) => `
-<span class="keyword">fn</span> <span class="function">render</span>&lt;<span class="type">Theme</span>&gt;(
+<span class="declaration">fn</span> <span class="function definition">render</span>&lt;<span class="type">Theme</span>&gt;(
   <span class="data">palette</span>: <span class="type">Theme</span>,
 ) -&gt; <span class="type">Result</span> {
   <span class="comment">// Keep the active state visible while editing.</span>
-  <span class="keyword">let</span> <span class="data">accent</span> = <span class="string">"${palette.accent}"</span>;
-  <span class="keyword">return</span> <span class="function">draw</span>(<span class="data">accent</span>, <span class="regexp">/current/</span>);
+  <span class="declaration">let</span> <span>accent</span> = <span class="string">"${palette.accent}"</span>;
+  <span class="control">return</span> <span class="function">draw</span>(<span>accent</span>, <span class="data">palette</span>, <span class="literal">2</span>);
 }`;
       for (const recipe of source) {
         const card = document.createElement('article');
@@ -89,7 +89,7 @@
 <span class="warning">! selection and diagnostics visible</span>
 <span class="prompt">$</span> _</pre></div>
           </div>
-          <div class="swatches" aria-label="${recipe.name} palette"><i style="--swatch:var(--canvas)"></i><i style="--swatch:var(--accent)"></i><i style="--swatch:var(--keyword)"></i><i style="--swatch:var(--function)"></i><i style="--swatch:var(--type)"></i><i style="--swatch:var(--data)"></i><i style="--swatch:var(--string)"></i><i style="--swatch:var(--error)"></i></div>`;
+          <div class="swatches" aria-label="${recipe.name} palette"><i style="--swatch:var(--canvas)"></i><i style="--swatch:var(--accent)"></i><i style="--swatch:var(--control)"></i><i style="--swatch:var(--function)"></i><i style="--swatch:var(--type)"></i><i style="--swatch:var(--data)"></i><i style="--swatch:var(--string)"></i><i style="--swatch:var(--error)"></i></div>`;
         family.append(card);
       }
     </script>

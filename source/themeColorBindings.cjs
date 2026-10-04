@@ -1,13 +1,8 @@
 /** @type {import('../scripts/themeDefinition.mjs', { with: { 'resolution-mode': 'import' } }).ThemeColorBindingContractSource} */
 const themeColorBindings = {
   aliases: {
-    'syntax:null': 'ui:text.muted',
-    'syntax:variable': 'ui:text.primary',
     'terminal:ansi.black': 'ui:border.default',
-    'terminal:ansi.green': 'ui:status.success',
-    'terminal:ansi.red': 'ui:status.error',
     'terminal:ansi.white': 'ui:text.primary',
-    'terminal:ansi.yellow': 'ui:status.warning',
     'terminal:background': 'ui:surface.canvas',
     'terminal:cursor': 'ui:accent.cursor',
     'terminal:foreground': 'ui:text.primary',
@@ -22,7 +17,7 @@ const themeColorBindings = {
     'ui:link.primary': 'ui:status.info',
     'ui:status.modified': 'ui:status.info',
     'ui:status.removed': 'ui:status.error',
-    'ui:surface.tab.active': 'ui:surface.field',
+    'ui:surface.tab.active': 'ui:surface.canvas',
     'ui:text.accentActive': 'ui:accent.effect',
     'ui:text.hint': 'ui:text.muted',
     'ui:badges.foreground': 'ui:text.onAccent',
@@ -55,6 +50,7 @@ const themeColorBindings = {
   derived: {
     'terminal:selection': 'ui:accent.primary',
     'ui:border.tab': 'ui:border.default',
+    'ui:editor.activeLine': 'ui:accent.primary',
     'ui:editor.bracket.matchBackground': 'ui:accent.primary',
     'ui:editor.bracket.matchBorder': 'ui:accent.glow',
     'ui:editor.highlight': 'ui:accent.primary',

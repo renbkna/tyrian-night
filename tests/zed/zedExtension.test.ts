@@ -195,6 +195,7 @@ const EXPECTED_ZED_SYNTAX_CAPTURE_KEYS = [
   'constant.builtin',
   'constructor',
   'decorator',
+  'function.decorator',
   'diff.minus',
   'diff.plus',
   'embedded',
@@ -206,10 +207,13 @@ const EXPECTED_ZED_SYNTAX_CAPTURE_KEYS = [
   'error',
   'function',
   'function.builtin',
+  'function.definition',
   'function.method',
+  'function.special.definition',
   'hint',
   'invalid.deprecated',
   'keyword',
+  'keyword.control',
   'label',
   'link_text',
   'link_uri',
@@ -251,6 +255,8 @@ const EXPECTED_ZED_SYNTAX_CAPTURE_KEYS = [
   'type',
   'type.builtin',
   'type.class',
+  'type.class.definition',
+  'type.definition',
   'type.enum',
   'type.interface',
   'type.parameter',
@@ -320,10 +326,11 @@ test('Zed generation resolves theme membership and identity from the injected ro
     }>(themePath);
     theme.name = 'Injected Zed Night';
     const injected = {
-      'ui:surface.canvas': [0.13, 0.02],
-      'syntax:function': [0.65, 0.085],
+      'ui:surface.canvas': [0.135, 0.02],
+      'syntax:function': [0.8, 0.058],
       'brackets:depth1': [0.61, 0.05],
-      'ui:status.error': [0.63, 0.11],
+      'ui:status.error': [0.76, 0.137],
+      'terminal:ansi.red': [0.63, 0.11],
     } satisfies Record<string, [number, number]>;
     Object.assign(theme.oklch, injected);
     writeSourceData(themePath, theme);
@@ -342,7 +349,8 @@ test('Zed generation resolves theme membership and identity from the injected ro
     expect(generated.themes[0]?.style['editor.background']).toBe(color('ui:surface.canvas'));
     expect(generated.themes[0]?.style.syntax.function?.color).toBe(color('syntax:function'));
     expect(generated.themes[0]?.style.accents[0]).toBe(color('brackets:depth1'));
-    expect(generated.themes[0]?.style['terminal.ansi.red']).toBe(color('ui:status.error'));
+    expect(generated.themes[0]?.style.error).toBe(color('ui:status.error'));
+    expect(generated.themes[0]?.style['terminal.ansi.red']).toBe(color('terminal:ansi.red'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -388,7 +396,7 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
 
     expect(theme.style['editor.background']).toBe(source.ui['surface.canvas']);
     expect(theme.style['editor.foreground']).toBe(source.ui['text.primary']);
-    expect(theme.style['editor.active_line.background']).toBe(source.ui['surface.hover']);
+    expect(theme.style['editor.active_line.background']).toBe(source.ui['editor.activeLine']);
     expect(theme.style['editor.highlighted_line.background']).toBe(source.ui['editor.highlight']);
     expect(theme.style['search.active_match_background']).toBe(source.ui['search.match.active']);
     expect(theme.style['search.match_background']).toBe(source.ui['search.match.passive']);
@@ -418,14 +426,16 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style.syntax.predictive?.font_style).toBeUndefined();
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.parameter.color).toBe(source.syntax.data);
-    expect(theme.style.syntax.boolean.color).toBe(source.syntax.constantLanguage);
-    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.null);
+    expect(theme.style.syntax.boolean.color).toBe(source.syntax.literal);
+    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.literal);
     expect(theme.style.syntax.constant.color).toBe(source.syntax.data);
-    expect(theme.style.syntax.number.color).toBe(source.syntax.data);
+    expect(theme.style.syntax.number.color).toBe(source.syntax.literal);
     expect(theme.style.syntax['variable.special']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax['variable.special']?.font_style).toBe('italic');
-    expect(theme.style.syntax.operator.color).toBe(source.syntax.keyword);
-    expect(theme.style.syntax['selector.pseudo']?.color).toBe(source.syntax.keyword);
+    expect(theme.style.syntax.operator.color).toBe(source.syntax.punctuation);
+    expect(theme.style.syntax['selector.pseudo']?.color).toBe(source.syntax.declaration);
+    expect(theme.style.syntax['function.definition']?.font_weight).toBe(700);
+    expect(theme.style.syntax['punctuation.bracket']?.color).toBe(source.syntax.punctuation);
     expect(theme.style.syntax['property.readonly']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.type.color).toBe(source.syntax.type);
   }
@@ -471,6 +481,16 @@ test('Zed bracket accents are exact source projections and dim ANSI colors use t
         expect(Math.abs(dimContrast - mutedContrast)).toBeCloseTo(closestRepresentableDistance, 12);
       }
     }
+  }
+});
+
+test('Zed example semantic token rules resolve to Tyrian syntax styles', () => {
+  const settings = readJson<Record<string, any>>('apps/zed/settings.example.json');
+  const syntax = (buildZedThemeFamily() as ZedThemeFamily).themes[0]!.style.syntax;
+
+  expect(settings.semantic_tokens).toBe('combined');
+  for (const rule of settings.global_lsp_settings.semantic_token_rules) {
+    expect((rule.style as string[]).some((style) => style in syntax)).toBe(true);
   }
 });
 

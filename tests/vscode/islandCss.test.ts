@@ -60,7 +60,7 @@ test('Island UI palette tokens derive from neutral theme roles', () => {
     const css = fs.readFileSync(`apps/vscode/island/${source.slug}.css`, 'utf8');
 
     expect(css).toContain(
-      `--islands-bg-canvas: ${themeColor(theme, 'ui:surface.canvas').toLowerCase()};`
+      `--islands-bg-backdrop: ${themeColor(theme, 'ui:surface.navigation').toLowerCase()};`
     );
     expect(css).toContain(
       `--islands-bg-surface: ${themeColor(theme, 'ui:surface.sidebar').toLowerCase()};`

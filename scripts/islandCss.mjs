@@ -197,7 +197,7 @@ function sourcePaletteTokens(theme) {
     '--islands-border': lowerHex(themeColor(theme, 'ui:border.default')),
     '--islands-border-rgb': rgbChannels(themeColor(theme, 'ui:border.default')),
     '--islands-button-hover-rgb': rgbChannels(themeColor(theme, 'ui:buttons.hover.background')),
-    '--islands-bg-canvas': lowerHex(themeColor(theme, 'ui:surface.canvas')),
+    '--islands-bg-backdrop': lowerHex(themeColor(theme, 'ui:surface.navigation')),
     '--islands-bg-surface': lowerHex(themeColor(theme, 'ui:surface.sidebar')),
     '--islands-effect-active-surface-rgb': rgbChannels(
       themeColor(theme, 'ui:effect.activeSurface')

@@ -16,7 +16,16 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  *   terminal: Record<string, string[]>;
  *   vscode: Record<string, string[]>;
  *   tokenColors: Array<{ scope: string[]; role: string; fontStyle?: 'bold' | 'italic' | 'strikethrough' | 'underline' }>;
+ *   semanticTokenColors: Array<VscodeSemanticTokenRule>;
  * }} VscodeProjection
+ * @typedef {{
+ *   selector: string;
+ *   role?: string;
+ *   bold?: boolean;
+ *   italic?: boolean;
+ *   underline?: boolean;
+ *   strikethrough?: boolean;
+ * }} VscodeSemanticTokenRule
  */
 
 /**
@@ -101,6 +110,22 @@ export function loadVscodeProjection(definition = loadThemeDefinitionContext(rep
       grammarScopes.set(scope, index);
     }
     requireGrammarRole(token.role, requiredThemeRoles);
+  }
+
+  const semanticSelectors = new Set();
+  for (const [index, rule] of projection.semanticTokenColors.entries()) {
+    requireNames([rule.selector], `VS Code semantic token rule ${index} selector`);
+    if (semanticSelectors.has(rule.selector)) {
+      throw new Error(`VS Code semantic token selector '${rule.selector}' has multiple owners.`);
+    }
+    semanticSelectors.add(rule.selector);
+    const styled = ['bold', 'italic', 'underline', 'strikethrough'].some(
+      (property) => property in rule
+    );
+    if (rule.role === undefined && !styled) {
+      throw new Error(`VS Code semantic token selector '${rule.selector}' sets no role or style.`);
+    }
+    if (rule.role !== undefined) requireGrammarRole(rule.role, requiredThemeRoles);
   }
 
   return projection;

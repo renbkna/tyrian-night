@@ -45,19 +45,19 @@ test('live install preparation materializes clean-checkout runtime assets', () =
 
     prepareLiveInstallRepository(root, { target: 'plasma' });
 
-    expect(fs.existsSync(path.join(root, 'terminal/foot/themes/tyrian-nocturne.ini'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'terminal/foot/themes/tyrian-abyss.ini'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'terminal/fastfetch/tyrian-night.jsonc'))).toBe(true);
-    expect(fs.existsSync(path.join(root, 'desktop/kde/color-schemes/TyrianNocturne.colors'))).toBe(
+    expect(fs.existsSync(path.join(root, 'desktop/kde/color-schemes/TyrianAbyss.colors'))).toBe(
       true
     );
     expect(
       fs.existsSync(
-        path.join(root, 'desktop/kde/plasma/look-and-feel/TyrianNocturne/contents/defaults')
+        path.join(root, 'desktop/kde/plasma/look-and-feel/TyrianAbyss/contents/defaults')
       )
     ).toBe(true);
-    expect(
-      fs.existsSync(path.join(root, 'desktop/caelestia/state/tyrian-nocturne.scheme.json'))
-    ).toBe(true);
+    expect(fs.existsSync(path.join(root, 'desktop/caelestia/state/tyrian-abyss.scheme.json'))).toBe(
+      true
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -91,7 +91,7 @@ test('live preparation rejects an install-root alias before changing generated o
 
   try {
     copyLiveInstallRepoFixture(root);
-    const outputPath = path.join(root, 'terminal/ghostty/themes/tyrian-nocturne');
+    const outputPath = path.join(root, 'terminal/ghostty/themes/tyrian-abyss');
     const originalOutput = fs.readFileSync(outputPath, 'utf8');
     const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
     fs.mkdirSync(path.dirname(installRoot), { recursive: true });
@@ -114,7 +114,7 @@ test('live preparation validates every output ancestor before the first generato
 
   try {
     copyLiveInstallRepoFixture(root);
-    const earlierOutput = path.join(root, 'terminal/ghostty/themes/tyrian-nocturne');
+    const earlierOutput = path.join(root, 'terminal/ghostty/themes/tyrian-abyss');
     const originalOutput = fs.readFileSync(earlierOutput, 'utf8');
     const invalidAncestor = path.join(root, 'terminal/foot');
     fs.rmSync(invalidAncestor, { recursive: true });
@@ -147,14 +147,14 @@ test('live installer defaults to a repo-independent materialized install root', 
     target: `${installRoot}/assets/tyrian-fetch.webp`,
   });
   expect(plan.materializedRoots).toContainEqual({
-    source: path.join(repoRoot, 'terminal/foot/themes/tyrian-nocturne.ini'),
-    target: `${installRoot}/terminal/foot/themes/tyrian-nocturne.ini`,
+    source: path.join(repoRoot, 'terminal/foot/themes/tyrian-abyss.ini'),
+    target: `${installRoot}/terminal/foot/themes/tyrian-abyss.ini`,
   });
   expect(plan.materializedRoots).toContainEqual({
-    source: path.join(repoRoot, 'desktop/kde/plasma/desktoptheme/TyrianNocturne'),
-    target: `${installRoot}/desktop/kde/plasma/desktoptheme/TyrianNocturne`,
+    source: path.join(repoRoot, 'desktop/kde/plasma/desktoptheme/TyrianAbyss'),
+    target: `${installRoot}/desktop/kde/plasma/desktoptheme/TyrianAbyss`,
   });
-  expect(plan.desktopThemeId).toBe('TyrianNocturne');
+  expect(plan.desktopThemeId).toBe('TyrianAbyss');
   expect(plan.materializedRoots.map(({ source }) => source)).not.toContain(
     path.join(repoRoot, 'terminal')
   );
@@ -183,7 +183,7 @@ test('live desktop selection follows the injected family canonical theme across 
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    selectFamilyCanonical(root, 'tyrian-abyss');
+    selectFamilyCanonical(root, 'tyrian-nocturne');
 
     const plan = buildLiveInstallPlan({
       repoRoot: root,
@@ -192,22 +192,22 @@ test('live desktop selection follows the injected family canonical theme across 
       hyprlandMode: 'legacy',
     });
 
-    expect(plan.desktopThemeId).toBe('TyrianAbyss');
+    expect(plan.desktopThemeId).toBe('TyrianNocturne');
     expect(plan.materializedPaths).toEqual(
       expect.arrayContaining([
-        'desktop/kde/color-schemes/TyrianAbyss.colors',
-        'desktop/kde/plasma/desktoptheme/TyrianAbyss',
-        'desktop/kde/plasma/look-and-feel/TyrianAbyss',
-        'desktop/caelestia/state/tyrian-abyss.scheme.json',
-        'desktop/caelestia/hypr/tyrian-abyss.conf',
-        'desktop/caelestia/hypr/tyrian-abyss.lua',
+        'desktop/kde/color-schemes/TyrianNocturne.colors',
+        'desktop/kde/plasma/desktoptheme/TyrianNocturne',
+        'desktop/kde/plasma/look-and-feel/TyrianNocturne',
+        'desktop/caelestia/state/tyrian-nocturne.scheme.json',
+        'desktop/caelestia/hypr/tyrian-nocturne.conf',
+        'desktop/caelestia/hypr/tyrian-nocturne.lua',
       ])
     );
     expect(plan.sourcePaths.caelestiaSchemeState).toBe(
-      `${FIXTURE_HOME}/${TYRIAN_INSTALL_HOME}/desktop/caelestia/state/tyrian-abyss.scheme.json`
+      `${FIXTURE_HOME}/${TYRIAN_INSTALL_HOME}/desktop/caelestia/state/tyrian-nocturne.scheme.json`
     );
     expect(plan.livePaths.kdeTyrianScheme).toBe(
-      `${FIXTURE_HOME}/.local/share/color-schemes/TyrianAbyss.colors`
+      `${FIXTURE_HOME}/.local/share/color-schemes/TyrianNocturne.colors`
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -240,10 +240,10 @@ test('live desktop selection removes a retired Plasma theme without touching unr
       path.join(environment.XDG_DATA_HOME, 'plasma/desktoptheme/TyrianNight'),
       path.join(environment.XDG_DATA_HOME, 'plasma/look-and-feel/TyrianNight'),
     ];
-    const nocturneAssets = [
-      path.join(environment.XDG_DATA_HOME, 'color-schemes/TyrianNocturne.colors'),
-      path.join(environment.XDG_DATA_HOME, 'plasma/desktoptheme/TyrianNocturne'),
-      path.join(environment.XDG_DATA_HOME, 'plasma/look-and-feel/TyrianNocturne'),
+    const abyssAssets = [
+      path.join(environment.XDG_DATA_HOME, 'color-schemes/TyrianAbyss.colors'),
+      path.join(environment.XDG_DATA_HOME, 'plasma/desktoptheme/TyrianAbyss'),
+      path.join(environment.XDG_DATA_HOME, 'plasma/look-and-feel/TyrianAbyss'),
     ];
     const unrelatedScheme = path.join(environment.XDG_DATA_HOME, 'color-schemes/CustomUser.colors');
     const unrelatedDesktopTheme = path.join(
@@ -270,7 +270,7 @@ test('live desktop selection removes a retired Plasma theme without touching unr
       fs.writeFileSync(path.join(unrelatedPackage, 'user-owned.txt'), 'user package\n');
     }
 
-    selectFamilyCanonical(root, 'tyrian-nocturne');
+    selectFamilyCanonical(root, 'tyrian-abyss');
     removeCatalogTheme(root, 'tyrian-night');
     prepareLiveInstallRepository(root, { home, target: 'plasma' });
     installLiveTyrian({
@@ -284,8 +284,8 @@ test('live desktop selection removes a retired Plasma theme without touching unr
     for (const nightAsset of nightAssets) {
       expect(fs.existsSync(nightAsset)).toBe(false);
     }
-    for (const nocturneAsset of nocturneAssets) {
-      expect(fs.existsSync(nocturneAsset)).toBe(true);
+    for (const abyssAsset of abyssAssets) {
+      expect(fs.existsSync(abyssAsset)).toBe(true);
     }
     expect(fs.readFileSync(unrelatedScheme, 'utf8')).toBe('user scheme\n');
     for (const unrelatedPackage of [unrelatedDesktopTheme, unrelatedLookAndFeel]) {
@@ -299,8 +299,8 @@ test('live desktop selection removes a retired Plasma theme without touching unr
     for (const nightAsset of nightAssets) {
       expect(ownership.profiles.plasma.paths).not.toContain(path.relative(home, nightAsset));
     }
-    for (const nocturneAsset of nocturneAssets) {
-      expect(ownership.profiles.plasma.paths).toContain(path.relative(home, nocturneAsset));
+    for (const abyssAsset of abyssAssets) {
+      expect(ownership.profiles.plasma.paths).toContain(path.relative(home, abyssAsset));
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -351,13 +351,13 @@ test('live installer materializes full Tyrian rice targets without claiming hist
     });
 
     const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
-    const footTheme = path.join(home, '.config/foot/themes/tyrian-nocturne.ini');
-    const fishTheme = path.join(installRoot, 'terminal/fish/themes/tyrian-nocturne.fish');
+    const footTheme = path.join(home, '.config/foot/themes/tyrian-abyss.ini');
+    const fishTheme = path.join(installRoot, 'terminal/fish/themes/tyrian-abyss.fish');
     const kdeglobals = path.join(home, '.config/kdeglobals');
     const plasmarc = path.join(home, '.config/plasmarc');
     const unionEnvironment = path.join(home, '.config/environment.d/tyrian-union.conf');
-    const tyrianDesktopTheme = path.join(home, '.local/share/plasma/desktoptheme/TyrianNocturne');
-    const tyrianLookAndFeel = path.join(home, '.local/share/plasma/look-and-feel/TyrianNocturne');
+    const tyrianDesktopTheme = path.join(home, '.local/share/plasma/desktoptheme/TyrianAbyss');
+    const tyrianLookAndFeel = path.join(home, '.local/share/plasma/look-and-feel/TyrianAbyss');
 
     expect(fs.existsSync(path.join(home, '.local/share/plasma/desktoptheme/Monochrome'))).toBe(
       false
@@ -383,7 +383,7 @@ test('live installer materializes full Tyrian rice targets without claiming hist
     );
     expect(fs.existsSync(fishTheme)).toBe(true);
     expect(fs.readFileSync(fishConfig, 'utf8')).toContain(
-      'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-nocturne.fish'
+      'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-abyss.fish'
     );
     expect(fs.readFileSync(fishGreeting, 'utf8')).toContain(
       'fastfetch --config $tyrian_night_root/terminal/fastfetch/tyrian-night.jsonc'
@@ -406,10 +406,10 @@ test('live installer materializes full Tyrian rice targets without claiming hist
     expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toContain('font-size = 99');
     expect(fs.readFileSync(footConfig, 'utf8')).not.toContain('font=stale:size=99');
     expect(fs.readFileSync(kdeglobals, 'utf8')).toContain(
-      '[KDE]\nLookAndFeelPackage=TyrianNocturne\nwidgetStyle=Breeze'
+      '[KDE]\nLookAndFeelPackage=TyrianAbyss\nwidgetStyle=Breeze'
     );
-    expect(fs.readFileSync(kdeglobals, 'utf8')).toContain('[General]\nColorScheme=TyrianNocturne');
-    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('[Theme]\nname=TyrianNocturne');
+    expect(fs.readFileSync(kdeglobals, 'utf8')).toContain('[General]\nColorScheme=TyrianAbyss');
+    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('[Theme]\nname=TyrianAbyss');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -454,10 +454,10 @@ test('Caelestia target follows the active Hyprland provider and honors XDG roots
     });
 
     expect(fs.readFileSync(plan.livePaths.hyprCurrentScheme, 'utf8')).toBe(
-      fs.readFileSync('desktop/caelestia/hypr/tyrian-nocturne.lua', 'utf8')
+      fs.readFileSync('desktop/caelestia/hypr/tyrian-abyss.lua', 'utf8')
     );
     expect(fs.readFileSync(plan.livePaths.caelestiaSchemeState, 'utf8')).toBe(
-      fs.readFileSync('desktop/caelestia/state/tyrian-nocturne.scheme.json', 'utf8')
+      fs.readFileSync('desktop/caelestia/state/tyrian-abyss.scheme.json', 'utf8')
     );
     expect(fs.existsSync(path.join(environment.XDG_CONFIG_HOME, 'hypr/scheme/current.conf'))).toBe(
       false
@@ -826,10 +826,10 @@ test('live installer renders from its injected repo and materializes only declar
 
   try {
     copyLiveInstallRepoFixture(repoRoot);
-    removeCatalogTheme(repoRoot, 'tyrian-abyss');
-    const themePath = path.join(repoRoot, 'source/themes/tyrian-nocturne.cjs');
+    removeCatalogTheme(repoRoot, 'tyrian-nocturne');
+    const themePath = path.join(repoRoot, 'source/themes/tyrian-abyss.cjs');
     const theme = readSourceData(themePath);
-    theme.oklch['ui:surface.canvas'] = [0.11, 0.03];
+    theme.oklch['ui:surface.canvas'] = [0.065, 0.03];
     theme.oklch['ui:text.primary'] = [0.86, 0.02];
     writeSourceData(themePath, theme);
     const definition = loadThemeDefinitionContext(repoRoot);
@@ -844,7 +844,7 @@ test('live installer renders from its injected repo and materializes only declar
         h: hue,
       });
     };
-    const injectedCanvas = resolvedInjectedColor('ui:surface.canvas', 0.11, 0.03);
+    const injectedCanvas = resolvedInjectedColor('ui:surface.canvas', 0.065, 0.03);
     const injectedText = resolvedInjectedColor('ui:text.primary', 0.86, 0.02);
     fs.writeFileSync(path.join(repoRoot, 'terminal/ghostty/themes/tyrian-stale'), 'stale\n');
 
@@ -860,16 +860,16 @@ test('live installer renders from its injected repo and materializes only declar
     const ghosttyConfig = fs.readFileSync(path.join(home, '.config/ghostty/config'), 'utf8');
 
     expect(ghosttyConfig).not.toContain('window-titlebar-background');
-    const installedNocturne = fs.readFileSync(
-      path.join(home, '.config/ghostty/themes/tyrian-nocturne'),
+    const installedAbyss = fs.readFileSync(
+      path.join(home, '.config/ghostty/themes/tyrian-abyss'),
       'utf8'
     );
-    expect(installedNocturne).toContain(`window-titlebar-background = ${injectedCanvas}`);
-    expect(installedNocturne).toContain(`window-titlebar-foreground = ${injectedText}`);
+    expect(installedAbyss).toContain(`window-titlebar-background = ${injectedCanvas}`);
+    expect(installedAbyss).toContain(`window-titlebar-foreground = ${injectedText}`);
     expect(fs.existsSync(path.join(installRoot, 'terminal/ghostty/themes/tyrian-stale'))).toBe(
       false
     );
-    expect(fs.existsSync(path.join(installRoot, 'terminal/ghostty/themes/tyrian-abyss'))).toBe(
+    expect(fs.existsSync(path.join(installRoot, 'terminal/ghostty/themes/tyrian-nocturne'))).toBe(
       false
     );
   } finally {
@@ -885,7 +885,7 @@ test('live installer validates generated content before backup or mutation', () 
 
   try {
     copyLiveInstallRepoFixture(repoRoot);
-    fs.rmSync(path.join(repoRoot, 'desktop/caelestia/state/tyrian-nocturne.sequences.txt'));
+    fs.rmSync(path.join(repoRoot, 'desktop/caelestia/state/tyrian-abyss.sequences.txt'));
     fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
     fs.writeFileSync(ghosttyConfig, 'font-size = 99\n');
 
@@ -915,7 +915,7 @@ test('live installer rejects wrong source types before replacing the managed run
 
   try {
     copyLiveInstallRepoFixture(repoRoot);
-    const fishThemePath = path.join(repoRoot, 'terminal/fish/themes/tyrian-nocturne.fish');
+    const fishThemePath = path.join(repoRoot, 'terminal/fish/themes/tyrian-abyss.fish');
     fs.rmSync(fishThemePath);
     fs.mkdirSync(fishThemePath);
     fs.mkdirSync(installRoot, { recursive: true });
@@ -928,7 +928,7 @@ test('live installer rejects wrong source types before replacing the managed run
         apply: true,
         target: 'plasma',
       })
-    ).toThrow('terminal/fish/themes/tyrian-nocturne.fish must be a file');
+    ).toThrow('terminal/fish/themes/tyrian-abyss.fish must be a file');
     expect(fs.readFileSync(markerPath, 'utf8')).toBe('existing runtime\n');
     expect(fs.existsSync(path.join(home, TYRIAN_BACKUP_HOME))).toBe(false);
   } finally {
@@ -1075,32 +1075,32 @@ test('live ownership manifest removes catalog outputs and preserves unrelated th
   try {
     copyLiveInstallRepoFixture(repositoryRoot);
     installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
-    const ghosttyAbyss = path.join(home, '.config/ghostty/themes/tyrian-abyss');
-    const footAbyss = path.join(home, '.config/foot/themes/tyrian-abyss.ini');
+    const ghosttyNocturne = path.join(home, '.config/ghostty/themes/tyrian-nocturne');
+    const footNocturne = path.join(home, '.config/foot/themes/tyrian-nocturne.ini');
     const unrelatedGhostty = path.join(home, '.config/ghostty/themes/custom-user-theme');
     const recreatedLegacyPath = path.join(home, '.config/environment.d/tyrian-union.conf');
     fs.writeFileSync(unrelatedGhostty, 'keep\n');
     fs.mkdirSync(path.dirname(recreatedLegacyPath), { recursive: true });
     fs.writeFileSync(recreatedLegacyPath, 'keep legacy name\n');
-    expect(fs.existsSync(ghosttyAbyss)).toBe(true);
-    expect(fs.existsSync(footAbyss)).toBe(true);
+    expect(fs.existsSync(ghosttyNocturne)).toBe(true);
+    expect(fs.existsSync(footNocturne)).toBe(true);
 
-    removeCatalogTheme(repositoryRoot, 'tyrian-abyss');
+    removeCatalogTheme(repositoryRoot, 'tyrian-nocturne');
     prepareLiveInstallRepository(repositoryRoot, { home, target: 'plasma' });
     installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
 
-    expect(fs.existsSync(ghosttyAbyss)).toBe(false);
-    expect(fs.existsSync(footAbyss)).toBe(false);
+    expect(fs.existsSync(ghosttyNocturne)).toBe(false);
+    expect(fs.existsSync(footNocturne)).toBe(false);
     expect(fs.readFileSync(unrelatedGhostty, 'utf8')).toBe('keep\n');
     expect(fs.readFileSync(recreatedLegacyPath, 'utf8')).toBe('keep legacy name\n');
 
     fs.rmSync(path.join(home, '.local/state/tyrian-night/live-owned-paths.json'));
-    fs.writeFileSync(ghosttyAbyss, 'user recreated after catalog change\n');
-    fs.writeFileSync(footAbyss, 'user recreated after catalog change\n');
+    fs.writeFileSync(ghosttyNocturne, 'user recreated after catalog change\n');
+    fs.writeFileSync(footNocturne, 'user recreated after catalog change\n');
     installLiveTyrian({ repoRoot: repositoryRoot, home, apply: true, target: 'plasma' });
 
-    expect(fs.readFileSync(ghosttyAbyss, 'utf8')).toBe('user recreated after catalog change\n');
-    expect(fs.readFileSync(footAbyss, 'utf8')).toBe('user recreated after catalog change\n');
+    expect(fs.readFileSync(ghosttyNocturne, 'utf8')).toBe('user recreated after catalog change\n');
+    expect(fs.readFileSync(footNocturne, 'utf8')).toBe('user recreated after catalog change\n');
     expect(fs.readFileSync(recreatedLegacyPath, 'utf8')).toBe('keep legacy name\n');
   } finally {
     fs.rmSync(repositoryRoot, { recursive: true, force: true });
@@ -1113,7 +1113,7 @@ test('live installer rejects recursive source symlinks before mutation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-source-link-repo-'));
   const linkedAsset = path.join(
     root,
-    'desktop/kde/plasma/desktoptheme/TyrianNocturne/dialogs/background.svg'
+    'desktop/kde/plasma/desktoptheme/TyrianAbyss/dialogs/background.svg'
   );
   const liveConfig = path.join(home, '.config/ghostty/config');
 
@@ -1239,11 +1239,11 @@ test('live installer normalizes link sources to absolute physical paths', () => 
       target: 'plasma',
     });
 
-    const linkedTheme = path.join(home, '.config/ghostty/themes/tyrian-nocturne');
-    const lookAndFeel = path.join(home, '.local/share/plasma/look-and-feel/TyrianNocturne');
+    const linkedTheme = path.join(home, '.config/ghostty/themes/tyrian-abyss');
+    const lookAndFeel = path.join(home, '.local/share/plasma/look-and-feel/TyrianAbyss');
     expect(path.isAbsolute(fs.readlinkSync(linkedTheme))).toBe(true);
     expect(fs.realpathSync(linkedTheme)).toBe(
-      fs.realpathSync(path.join(process.cwd(), 'terminal/ghostty/themes/tyrian-nocturne'))
+      fs.realpathSync(path.join(process.cwd(), 'terminal/ghostty/themes/tyrian-abyss'))
     );
     expect(fs.lstatSync(lookAndFeel).isDirectory()).toBe(true);
     expect(fs.lstatSync(lookAndFeel).isSymbolicLink()).toBe(false);
@@ -1523,23 +1523,8 @@ function copyWorkspaceManifests(targetRoot: string): void {
 
 function selectFamilyCanonical(repositoryRoot: string, slug: string): void {
   const familyPath = path.join(repositoryRoot, 'source/themeFamilyContract.cjs');
-  const family = readSourceData(familyPath) as {
-    canonical: string;
-    energyLine: {
-      variants: Record<
-        string,
-        {
-          semanticChromaRatio: { maximum: number; minimum: number };
-          semanticContrast: { maximum: number; minimum: number };
-        }
-      >;
-    };
-  };
+  const family = readSourceData(familyPath) as { canonical: string };
   family.canonical = slug;
-  for (const variant of Object.values(family.energyLine.variants)) {
-    variant.semanticChromaRatio = { minimum: 0, maximum: 100 };
-    variant.semanticContrast = { minimum: 1, maximum: 21 };
-  }
   writeSourceData(familyPath, family);
 }
 

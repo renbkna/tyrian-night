@@ -780,7 +780,7 @@ test('full rice install shares injected XDG roots between style and layout', () 
       'qdbus6',
     ]);
     expect(fs.readFileSync(kdeglobals, 'utf8')).toContain('widgetStyle=Breeze');
-    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('name=TyrianNocturne');
+    expect(fs.readFileSync(plasmarc, 'utf8')).toContain('name=TyrianAbyss');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

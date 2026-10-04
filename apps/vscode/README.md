@@ -2,12 +2,14 @@
 
 Tyrian Night provides six generated VS Code color themes:
 
-- **Night** — the quiet, low-energy dark variant;
-- **Nocturne** — the canonical tempered-cosmic center;
-- **Pastel** — the independent soft-focus branch;
-- **Abyss** — the deeper, more chromatic dark variant;
-- **Dawn** — the related light counterpart;
+- **Night** — the quiet, low-energy dark variant at 60% of Abyss's saturation;
+- **Nocturne** — the tempered middle step at 80%;
+- **Pastel** — the family's pastel model: soft tints on a dusk-plum editor;
+- **Abyss** — the default: the deepest editor and the most saturation sRGB allows;
+- **Dawn** — the family in daylight: Nocturne's vividness on lavender-tinted paper;
 - **Night Old** — the historical reference translated onto the current theme contract.
+
+The themes enable semantic highlighting. Language servers that report semantic tokens keep parameters colored at every use, bold only declarations of functions and types, underline mutable bindings (rust-analyzer), and strike through deprecated symbols; other languages fall back to the TextMate grammar colors.
 
 The projection covers a curated set of documented public VS Code colors for control states, selection and keyboard focus, chat and inline chat, notebooks, testing, terminal symbol icons, gauges, and agent-session indicators. High-contrast-only borders, shadows, and opacity controls intentionally keep VS Code defaults.
 
@@ -27,7 +29,7 @@ The color themes use the normal VS Code extension contract. Merely installing or
 
 The repository includes a [`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) companion for typography and editor preferences. It is not applied automatically.
 
-Tyrian keeps VS Code semantic highlighting disabled by theme default so language-server overlays do not replace callable TextMate scopes with readonly-variable colors. The companion settings use `configuredByTheme`, preserving that choice for Tyrian without forcing it on other themes.
+Tyrian enables VS Code semantic highlighting by theme default and maps semantic token types explicitly: references never pick up declaration bold, readonly variables stay plain text, and rust-analyzer types whose fallback scope would land in the wrong role are pinned. The companion settings use `configuredByTheme`, which follows the theme's choice without forcing semantic highlighting on other themes.
 
 ## Island UI
 
