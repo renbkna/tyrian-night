@@ -29,7 +29,6 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * @typedef {{ slug: string; terminalDefault?: boolean; islandEffects: string }} ThemeCatalogEntry
  * @typedef {{ appearance: ThemeAppearance; isDefault: boolean }} ThemeClassification
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
- * @typedef {import('./themeDefinition.mjs').SaturationBand} SaturationBand
  * @typedef {import('./themeDefinition.mjs').ThemeRecipe} ThemeRecipe
  * @typedef {{
  *   appearance: ThemeAppearance;

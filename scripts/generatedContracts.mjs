@@ -1,7 +1,5 @@
 // @ts-check
 
-import path from 'node:path';
-
 import { readOwnedGeneratedFile, syncGeneratedAssets } from './generatedAssets.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 import { VSCODE_PACKAGE_COPIED_FILES } from './vscodePackageAssets.mjs';
@@ -16,7 +14,6 @@ import {
   vscodeThemeFile,
 } from './vscodePackageLayout.mjs';
 
-const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const themeCatalogOutputPath = inVscodePackage(
   `${VSCODE_GENERATED_SOURCE_DIRECTORY}/themeCatalog.ts`
 );
@@ -137,11 +134,11 @@ function buildPackageThemeContractAsset(sourceThemes, root) {
 }
 
 /**
- * @param {string} [root]
+ * @param {string} root
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncGeneratedContracts(root = defaultRepoRoot, options = {}) {
+export function syncGeneratedContracts(root, options = {}) {
   const check = options.check ?? false;
   const sourceThemes = readThemeSources(root);
   const generatedContracts = [

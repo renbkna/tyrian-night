@@ -81,8 +81,10 @@ export async function inspectIslandRoot(
   registration: ManagedRootRegistration
 ): Promise<IslandRootState> {
   const registered = registration.kind !== 'absent';
-  // The style a valid record names, `null` when it disables Island UI.
-  const recordedCssFile = registration.kind === 'valid' ? registration.desiredCssFile : undefined;
+  const desired = desiredStateOf(registration);
+  // The style a sound record names, `null` when it disables Island UI.
+  const recordedCssFile =
+    desired.kind === 'enabled' ? desired.cssFile : desired.kind === 'disabled' ? null : undefined;
   const paths = buildIslandPatchPaths(appRoot);
   const currentHtml = await readLayoutFile(paths.workbenchHtmlPath);
   const currentProductJson = await readLayoutFile(paths.productJsonPath);
@@ -103,8 +105,7 @@ export async function inspectIslandRoot(
   const backupHtmlExists = backupHtml !== undefined;
   const backupProductExists = backupProductJson !== undefined;
   const hasTyrianSidecars = [...sidecars.values()].some((content) => content !== undefined);
-  const desiredEnabled = registration.kind === 'valid' && registration.desiredCssFile !== null;
-  const managed = desiredEnabled || hasTyrianSidecars;
+  const managed = desired.kind === 'enabled' || hasTyrianSidecars;
   const workbenchChecksum = sha256Base64(currentHtml);
   const checksumMatches = productWorkbenchChecksum === workbenchChecksum;
   const backupMismatch = backupHtmlExists !== backupProductExists;
@@ -208,7 +209,7 @@ export async function inspectIslandRoot(
     restore,
     status: {
       appRoot,
-      desired: desiredStateOf(registration),
+      desired,
       active,
       managed,
       classification,

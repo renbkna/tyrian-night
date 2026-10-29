@@ -83,7 +83,7 @@ export function syncGeneratedAssets(assets, repoRoot, options) {
 
     for (const rule of ownership) {
       if ('directory' in rule && !rule.match) {
-        removeEmptyDirectories(path.join(repoRoot, requireRelativePath(rule.directory)));
+        removeEmptyDirectories(path.join(repoRoot, ownedDirectory(rule)));
       }
     }
 
@@ -138,7 +138,7 @@ function listOwnedFiles(repoRoot, ownership) {
       if (assertRegularFileOrAbsent(repoRoot, file)) files.add(file);
       continue;
     }
-    const directory = requireRelativePath(rule.directory);
+    const directory = ownedDirectory(rule);
     const absoluteDirectory = path.join(repoRoot, directory);
     assertNoGeneratedPathSymlink(repoRoot, directory);
 
@@ -263,7 +263,7 @@ function removeEmptyDirectories(directory) {
  */
 function ownsPath(rule, filePath) {
   if ('file' in rule) return requireRelativePath(rule.file) === filePath;
-  const prefix = `${requireRelativePath(rule.directory)}/`;
+  const prefix = `${ownedDirectory(rule)}/`;
   return (
     filePath.startsWith(prefix) &&
     (!rule.match || matches(rule.match, filePath.slice(prefix.length)))
@@ -296,7 +296,16 @@ function requireRelativePath(filePath) {
     throw new Error(`Generated path must stay inside the repository: '${filePath}'`);
   }
 
-  return normalized.replaceAll('\\', '/').replace(/\/+$/u, '');
+  return normalized.replaceAll('\\', '/');
+}
+
+/**
+ * A directory rule's path; a trailing slash names the same directory.
+ * @param {{ directory: string }} rule
+ * @returns {string}
+ */
+function ownedDirectory(rule) {
+  return requireRelativePath(rule.directory).replace(/\/+$/u, '');
 }
 
 /**

@@ -38,9 +38,7 @@ test('manifest declares the VS Code host and contribution contracts this extensi
     }))
   );
   for (const themeContribution of manifest.contributes.themes) {
-    const theme = readJson<{ name: string; type: string }>(
-      resolveVscodePackagePath(themeContribution.path)
-    );
+    const theme = readJson<{ name: string; type: string }>(inVscodePackage(themeContribution.path));
 
     expect(theme.name).toBe(themeContribution.label);
     expect(theme.type).toBe(themeContribution.uiTheme === 'vs' ? 'light' : 'dark');
@@ -138,10 +136,6 @@ test('VS Code companion settings example is parseable and aligned with Tyrian de
 
 function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
-}
-
-function resolveVscodePackagePath(filePath: string): string {
-  return path.join(VSCODE_PACKAGE_ROOT, filePath);
 }
 
 function pathBasename(filePath: string, extension: string): string {

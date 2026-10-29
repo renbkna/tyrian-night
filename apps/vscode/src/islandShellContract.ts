@@ -213,7 +213,7 @@ function collectIslandFailureCauses(
     const hasChildren = hasChildErrors(candidate);
 
     if (!(candidate instanceof Error)) {
-      const reason = String(candidate);
+      const reason = errorMessage(candidate);
       if (!seen.has(reason)) {
         causes.push({ code: 'blocked', reason });
         seen.add(reason);

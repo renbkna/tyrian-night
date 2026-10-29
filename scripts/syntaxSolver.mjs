@@ -6,6 +6,7 @@ import {
   hexToOklch,
   maximumSrgbChroma,
   oklchToHex,
+  SRGB_MAXIMUM_CHROMA,
 } from './colorScience.mjs';
 
 /**
@@ -30,7 +31,7 @@ import {
 /**
  * Each saturation measure: how it reads a rendered color, the OKLCH chroma a
  * saturation level asks for at one lightness and hue, and the largest level it
- * admits (OKLCH chroma beyond 0.4 lies outside sRGB at every lightness and hue).
+ * admits.
  * @type {Readonly<Record<SaturationMeasure, {
  *   of: (color: string) => number;
  *   chromaAt: (level: number, lightness: number, hue: number) => number;
@@ -38,7 +39,11 @@ import {
  * }>>}
  */
 export const SATURATION_MEASURES = Object.freeze({
-  chroma: { of: (color) => hexToOklch(color).C, chromaAt: (level) => level, ceiling: 0.4 },
+  chroma: {
+    of: (color) => hexToOklch(color).C,
+    chromaAt: (level) => level,
+    ceiling: SRGB_MAXIMUM_CHROMA,
+  },
   richness: {
     of: gamutRelativeRichness,
     chromaAt: (level, lightness, hue) => level * maximumSrgbChroma(lightness, hue),

@@ -1,7 +1,7 @@
 // @ts-check
 
 import path from 'node:path';
-import { ACHROMATIC_CHROMA, oklchToHex } from './colorScience.mjs';
+import { ACHROMATIC_CHROMA, oklchToHex, SRGB_MAXIMUM_CHROMA } from './colorScience.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 import { PLAIN_TARGET, SATURATION_MEASURES, solveSyntaxPigments } from './syntaxSolver.mjs';
 
@@ -47,7 +47,7 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  * available at each pigment's own lightness and hue, so every hue is equally
  * vivid for what it can reach; `chroma` is absolute OKLCH chroma, so every hue
  * is equally colorful (soft tints, where gamut room differs widely by hue).
- * @typedef {NumericRange & { measure: 'chroma' | 'richness' }} SaturationBand
+ * @typedef {NumericRange & { measure: import('./syntaxSolver.mjs').SaturationMeasure }} SaturationBand
  */
 /** @typedef {{ syntaxSaturation: SaturationBand }} EnergyVariantContract */
 /**
@@ -261,13 +261,10 @@ function validateSyntaxTargets(targets, classification, sourceName, familyContra
     'neutral syntax pigments'
   );
   for (const [pigment, chroma] of Object.entries(targets.chroma)) {
-    if (!(chroma >= 0 && chroma <= 0.4)) {
-      throw new Error(`${owner} chroma '${pigment}' must be within 0 and 0.4.`);
+    if (!(chroma >= 0 && chroma <= SRGB_MAXIMUM_CHROMA)) {
+      throw new Error(`${owner} chroma '${pigment}' must be within 0 and ${SRGB_MAXIMUM_CHROMA}.`);
     }
-    if (
-      familyContract.pigmentHues[pigment]?.[classification.hueProfile] === null &&
-      chroma > ACHROMATIC_CHROMA
-    ) {
+    if (hasUnownedChroma(familyContract, pigment, classification.hueProfile, chroma)) {
       throw new Error(`${owner} chroma '${pigment}' has chroma without an owned hue.`);
     }
   }
@@ -430,6 +427,17 @@ export function isKnownThemeRole(qualifiedRole, requiredThemeRoles) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a pigment the family gives no hue in this profile still carries chroma.
+ * @param {Readonly<ThemeFamilyContract>} familyContract
+ * @param {string} pigment
+ * @param {string} hueProfile
+ * @param {number} chroma
+ */
+function hasUnownedChroma(familyContract, pigment, hueProfile, chroma) {
+  return familyContract.pigmentHues[pigment]?.[hueProfile] === null && chroma > ACHROMATIC_CHROMA;
 }
 
 /** @param {ThemeColorBinding} binding */
@@ -672,7 +680,7 @@ function validateOklchMap(values, requiredPigments, hueProfile, sourceName, fami
     if (lightness < 0 || lightness > 1 || chroma < 0 || chroma > 0.5) {
       throw new Error(`Theme recipe '${sourceName}' has invalid oklch value '${pigment}'.`);
     }
-    if (familyContract.pigmentHues[pigment]?.[hueProfile] === null && chroma > ACHROMATIC_CHROMA) {
+    if (hasUnownedChroma(familyContract, pigment, hueProfile, chroma)) {
       throw new Error(
         `Theme recipe '${sourceName}' pigment '${pigment}' has chroma without an owned hue.`
       );

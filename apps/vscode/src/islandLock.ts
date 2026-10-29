@@ -21,7 +21,8 @@ type PipeLock = { release(): Promise<void> };
  * Run one CLI command while holding the per-user Island lock. The operating
  * system owns the lock and drops it however its holder exits, so it never goes
  * stale. Linux and macOS re-run this process under flock(1) or lockf(1): the
- * child runs `command` and this process exits with the child's status. Windows
+ * child runs `command` and this process exits with the child's status, or
+ * throws a `blocked` failure when the lock stays held past the wait. Windows
  * listens on a named pipe, which exists only while its process lives, and runs
  * `command` here.
  */

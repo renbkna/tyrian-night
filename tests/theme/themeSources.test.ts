@@ -229,10 +229,13 @@ test('the role contract must name exactly the sixteen ANSI palette roles', () =>
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const contractPath = path.join(root, 'source/themeRoleContract.cjs');
     const contract = readSourceData<{ terminal: string[] }>(contractPath);
-    contract.terminal.push('ansi.orange');
-    writeSourceData(contractPath, contract);
-
-    expect(() => loadThemeRepository(root)).toThrow('Theme role contract terminal ANSI roles');
+    for (const terminal of [
+      [...contract.terminal, 'ansi.orange'],
+      contract.terminal.filter((role) => role !== 'ansi.brightWhite'),
+    ]) {
+      writeSourceData(contractPath, { ...contract, terminal });
+      expect(() => loadThemeRepository(root)).toThrow('Theme role contract terminal ANSI roles');
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

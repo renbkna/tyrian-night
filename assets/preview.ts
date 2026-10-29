@@ -11,6 +11,7 @@ import path from 'node:path';
 
 import { TYRIAN_THEME_CATALOG } from '../apps/vscode/src/generated/themeCatalog.js';
 import { isDirectRun } from '../scripts/cli.mjs';
+import { inVscodePackage, vscodeThemeFile } from '../scripts/vscodePackageLayout.mjs';
 
 // TODO(theme): check comments, notes, and AI ghost text against Monaspace Radon.
 // NOTE: JSON property names should read like attributes, not function calls.
@@ -19,7 +20,7 @@ declare const THEME_MODE: unique symbol;
 
 export type ThemeMode = string & { readonly [THEME_MODE]: true };
 
-const THEME_DIRECTORY = path.resolve(import.meta.dirname, '../apps/vscode/themes');
+const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 
 export const THEME_MODES: ReadonlyArray<ThemeMode> = TYRIAN_THEME_CATALOG.map(previewModeForSource);
 
@@ -87,12 +88,15 @@ export class ThemePreviewController {
 
   #cache = new Map<ThemeMode, CachedThemePreview>();
 
-  constructor(private readonly themeDirectory = THEME_DIRECTORY) {}
+  constructor(private readonly repoRoot = REPO_ROOT) {}
 
   async readThemeManifest(mode: ThemeMode): Promise<ReadonlyArray<ThemeToken>> {
     const slug = `tyrian-${mode}`;
     const theme = JSON.parse(
-      await fs.promises.readFile(path.join(this.themeDirectory, `${slug}.json`), 'utf8')
+      await fs.promises.readFile(
+        path.join(this.repoRoot, inVscodePackage(vscodeThemeFile(slug))),
+        'utf8'
+      )
     ) as VscodeThemeFile;
 
     if (!theme.name.includes('Tyrian') || !['dark', 'light'].includes(theme.type)) {

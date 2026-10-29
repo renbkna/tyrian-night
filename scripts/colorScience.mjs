@@ -4,6 +4,8 @@ import { opaqueHex, parseHexColor, toHexByte } from './colorUtils.mjs';
 
 /** OKLCH chroma at or below which a color has no meaningful hue. */
 export const ACHROMATIC_CHROMA = 0.000004;
+/** OKLCH chroma beyond this lies outside sRGB at every lightness and hue. */
+export const SRGB_MAXIMUM_CHROMA = 0.4;
 const GAMUT_EPSILON = 1e-7;
 const DIAGNOSTIC_SIGNIFICANT_DIGITS = 9;
 
@@ -225,7 +227,7 @@ export function hexToLinearRgb(color) {
 }
 
 /** @param {number} value */
-export function srgbToLinearChannel(value) {
+function srgbToLinearChannel(value) {
   return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
 }
 

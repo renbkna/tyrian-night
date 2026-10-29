@@ -1,11 +1,15 @@
 import { parseArgs } from 'node:util';
 
+import type { IslandShellEnvironment } from './islandPatchContract.js';
 import type {
+  applyIslandUiSupervised,
+  convergeIslandUiSupervised,
   IslandUiApplySupervisionResult,
-  IslandUiConvergeIntent,
   IslandUiConvergeResult,
   IslandUiRestoreSupervisionResult,
   IslandUiSupervisorInventory,
+  readIslandUiSupervisorStatuses,
+  restoreIslandUiSupervised,
 } from './islandSupervisor.js';
 
 /**
@@ -23,17 +27,18 @@ export type IslandCliResults = {
 
 export type IslandCliCommand = keyof IslandCliResults;
 
-/** What each command acts on, as the extension states it and the CLI receives it. */
+/** A supervisor operation's options without the test-only registry seam. */
+type SupervisorInput<Operation extends (options: never) => unknown> = Omit<
+  NonNullable<Parameters<Operation>[0]>,
+  keyof IslandShellEnvironment
+>;
+
+/** What each command acts on: the options of the supervisor operation it runs. */
 export type IslandCliInputs = {
-  'apply-supervised': { appRoot: string; cssSourcePath: string; themeVersion: string };
-  converge: {
-    appRoot: string;
-    islandDirectory: string;
-    themeVersion: string;
-    intent: IslandUiConvergeIntent;
-  };
-  'restore-supervised': { preferredAppRoots: string[] };
-  'status-all-supervised': { preferredAppRoots: string[] };
+  'apply-supervised': SupervisorInput<typeof applyIslandUiSupervised>;
+  converge: SupervisorInput<typeof convergeIslandUiSupervised>;
+  'restore-supervised': SupervisorInput<typeof restoreIslandUiSupervised>;
+  'status-all-supervised': SupervisorInput<typeof readIslandUiSupervisorStatuses>;
 };
 
 export type IslandCliInvocation = {
@@ -61,10 +66,16 @@ function commandWire<Input>() {
   return <const Options extends WireOptions>(wire: CommandWire<Input, Options>) => wire;
 }
 
-const APP_ROOTS_WIRE = commandWire<{ preferredAppRoots: string[] }>()({
+const APP_ROOTS_WIRE = commandWire<IslandCliInputs['restore-supervised']>()({
   options: { 'app-root': { type: 'string', multiple: true } },
   encode: (input) => ({ 'app-root': input.preferredAppRoots }),
-  decode: (values) => ({ preferredAppRoots: values['app-root'] ?? [] }),
+  decode: (values) => {
+    const preferredAppRoots = values['app-root'] ?? [];
+    if (preferredAppRoots.some((appRoot) => !appRoot)) {
+      throw new Error("Argument '--app-root' must not be empty.");
+    }
+    return { preferredAppRoots };
+  },
 });
 
 /** Each command's options, parsed strictly, and how its input maps onto them. */
@@ -134,7 +145,7 @@ const ERASED_WIRE = ISLAND_CLI_WIRE as unknown as Record<
   }
 >;
 
-/** The CLI arguments, after the command name, that carry `input`. */
+/** The CLI arguments for one command: its name, then the options that carry `input`. */
 export function encodeIslandCliInvocation<Command extends IslandCliCommand>(
   command: Command,
   input: IslandCliInputs[Command]

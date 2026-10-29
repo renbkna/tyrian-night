@@ -73,5 +73,8 @@ test('the CLI rejects options another command owns and incomplete inputs', () =>
   expect(() => decodeIslandCliInvocation(['status-all-supervised', 'extra'])).toThrow(
     "Unexpected argument 'extra'"
   );
+  expect(() => decodeIslandCliInvocation(['restore-supervised', '--app-root', ''])).toThrow(
+    "Argument '--app-root' must not be empty."
+  );
   expect(() => decodeIslandCliInvocation(['patch'])).toThrow('Unknown Tyrian Night CLI command');
 });

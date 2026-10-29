@@ -567,7 +567,7 @@ test('permission-required restore routes only to setup guidance, Doctor, or dism
   expect(informationMessages.at(-1)?.[0]).toContain('remains incomplete');
 });
 
-test('Doctor treats a null desired record as disabled and recommends restore for evidence', async () => {
+test('Doctor shows a disabled desired state and recommends restore for evidence', async () => {
   const doctor = await activateAndGetCommand('tyrianNight.doctorIslandUi');
   resetObservations();
   queuedSpawnResponses.push({

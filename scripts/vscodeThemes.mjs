@@ -101,11 +101,11 @@ function projectColors(target, projection, resolve) {
 }
 
 /**
- * @param {string} [root]
+ * @param {string} root
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncVscodeThemes(root = repoRoot, options = {}) {
+export function syncVscodeThemes(root, options = {}) {
   return syncGeneratedAssets(collectVscodeThemeAssets(root), root, {
     check: options.check,
     ownership: [{ directory: inVscodePackage(VSCODE_THEMES_DIRECTORY), match: /\.json$/u }],

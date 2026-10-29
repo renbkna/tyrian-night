@@ -123,7 +123,7 @@ button#primary {
   ]);
 });
 
-test('Union CSS flattener rejects imports that resolve outside the source root', () => {
+test('Union CSS flattener rejects imports that resolve outside the entry directory', () => {
   const root = makeTempRoot();
 
   try {
@@ -138,7 +138,7 @@ test('Union CSS flattener rejects imports that resolve outside the source root',
   }
 });
 
-test('Union CSS flattener rejects symlinked imports that leave the source root', () => {
+test('Union CSS flattener rejects symlinked imports that leave the entry directory', () => {
   const root = makeTempRoot();
 
   try {

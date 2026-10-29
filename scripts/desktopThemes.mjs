@@ -23,7 +23,7 @@ const UNION_TOKENS_PLACEHOLDER = '  /* TYRIAN_GENERATED_TOKENS */';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
- * @typedef {import('./generatedAssets.mjs').GeneratedTextAsset} GeneratedAsset
+ * @typedef {import('./generatedAssets.mjs').GeneratedTextAsset} GeneratedTextAsset
  * @typedef {{
  *   background: string;
  *   foreground: string;
@@ -95,7 +95,7 @@ export function caelestiaFlavour(slug) {
 
 /**
  * @param {string} [repoRoot]
- * @returns {GeneratedAsset[]}
+ * @returns {GeneratedTextAsset[]}
  */
 export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const repository = loadThemeRepository(repoRoot);
@@ -327,7 +327,7 @@ function buildKdeColorScheme(schemeId, schemeName, palette, options) {
 /**
  * @param {string} themeRoot
  * @param {DesktopPalette} palette
- * @returns {GeneratedAsset[]}
+ * @returns {GeneratedTextAsset[]}
  */
 function buildPlasmaWidgetSkinAssets(themeRoot, palette) {
   return [
@@ -362,7 +362,7 @@ function buildPlasmaWidgetSkinAssets(themeRoot, palette) {
  * @param {string} themeRoot
  * @param {string} schemeId
  * @param {string} schemeName
- * @returns {GeneratedAsset[]}
+ * @returns {GeneratedTextAsset[]}
  */
 function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName) {
   return [

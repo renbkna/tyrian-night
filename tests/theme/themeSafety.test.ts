@@ -12,7 +12,7 @@ import {
 const contract = readThemeSafetyContract();
 
 describe('theme safety authority', () => {
-  test('every production theme clears readability and state-identity gates', () => {
+  test('the safety contract guards the bright ANSI labels and warm and cool states', () => {
     const independentLabels = contract.contrast.find(
       ({ id }) => id === 'readable-independent-state-labels'
     )!;
@@ -44,6 +44,12 @@ describe('theme safety authority', () => {
   test('each contrast floor names a known metric and a minimum within that metric range', () => {
     const definition = loadThemeDefinitionContext();
     const cases: Array<[(entry: any) => void, string]> = [
+      [
+        (entry) => {
+          delete entry.metric;
+        },
+        "metric must be 'apca' or 'wcag'",
+      ],
       [
         (entry) => {
           entry.metric = 'apca';
@@ -125,5 +131,9 @@ describe('theme safety authority', () => {
     expect(report.contrastPairs.map(({ id }) => id)).toEqual(
       contract.contrastPairs.map(({ id }) => id)
     );
+    // Admitted themes clear every pair floor, so the report must show that.
+    for (const [index, pair] of report.contrastPairs.entries()) {
+      expect(pair.contrast).toBeGreaterThanOrEqual(contract.contrastPairs[index]!.minimum);
+    }
   });
 });

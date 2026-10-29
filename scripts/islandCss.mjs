@@ -135,11 +135,11 @@ export function readIslandEffectProfiles(repoRoot, sourceThemes) {
 }
 
 /**
- * @param {string} [repoRoot]
+ * @param {string} repoRoot
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncIslandCss(repoRoot = defaultRepoRoot, options = {}) {
+export function syncIslandCss(repoRoot, options = {}) {
   return syncGeneratedAssets(
     buildAllIslandCss(repoRoot).map(({ outputPath, css }) => ({ path: outputPath, content: css })),
     repoRoot,

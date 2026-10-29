@@ -179,7 +179,7 @@ export async function readManagedAppRootRegistration(
   appRoot: string,
   environment: IslandShellEnvironment
 ): Promise<ManagedRootRegistration> {
-  const recordPath = buildManagedRootRecordPath(appRoot, environment?.registryHome);
+  const recordPath = buildManagedRootRecordPath(appRoot, environment.registryHome);
   let content: string | undefined;
   try {
     content = await readRecordFile(recordPath);
@@ -206,7 +206,7 @@ export async function publishManagedRootRecord(
   desiredCssFile: string | null,
   environment: IslandShellEnvironment
 ): Promise<boolean> {
-  const recordPath = buildManagedRootRecordPath(appRoot, environment?.registryHome);
+  const recordPath = buildManagedRootRecordPath(appRoot, environment.registryHome);
   const record: ManagedRootRecord = {
     appRoot,
     desiredCssFile,

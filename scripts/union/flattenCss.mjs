@@ -70,7 +70,7 @@ function flattenCssPath(filePath, rootPath, seen) {
     }
 
     const resolvedImportPath = path.resolve(directory, importPath);
-    assertInsideUnionCssRoot(resolvedImportPath, rootPath, importPath);
+    assertInsideEntryDirectory(resolvedImportPath, rootPath, importPath);
 
     return trimTrailingWhitespace(flattenCssPath(resolvedImportPath, rootPath, seen));
   });
@@ -100,7 +100,7 @@ function trimTrailingWhitespace(lines) {
  * @param {string} importPath
  * @returns {void}
  */
-function assertInsideUnionCssRoot(candidatePath, rootPath, importPath) {
+function assertInsideEntryDirectory(candidatePath, rootPath, importPath) {
   if (
     !isInsidePath(candidatePath, rootPath) ||
     !isInsidePath(fs.realpathSync.native(candidatePath), fs.realpathSync.native(rootPath))

@@ -49,6 +49,28 @@ test('every file the extension manifest names exists after the bundle', () => {
   expect(named.filter((file) => !fs.existsSync(path.join(packageRoot, file)))).toEqual([]);
   expect(manifest.files).toContain(path.posix.normalize(manifest.main));
   expect(manifest.files).toContain(manifest.icon);
+  // Every file the bundle writes must ship: a new entry point needs its output in the layout.
+  const bundled = fs.readdirSync(path.join(packageRoot, 'out')).map((name) => `out/${name}`);
+  expect(bundled.filter((file) => !manifest.files.includes(file))).toEqual([]);
+});
+
+test('the bundled CLI rejects bad arguments with a failure line and a nonzero exit', async () => {
+  const child = Bun.spawn(['node', cliPath, 'apply-supervised', '--app-root', root], {
+    env: { ...environmentWithoutHeldLock(), HOME: makeHome('bad-arguments') },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+
+  expect(exitCode).toBe(1);
+  expect(stdout).toBe('');
+  expect(JSON.parse(stderr)).toMatchObject({
+    reason: expect.stringContaining("Missing required argument '--css-source'."),
+  });
 });
 
 test('the bundled CLI applies and restores Island UI', async () => {
@@ -163,12 +185,9 @@ test('a pipe lock admits one holder and frees its name on release', async () => 
 });
 
 async function runCli(home: string, args: string[]): Promise<unknown> {
-  const environment = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => name !== ISLAND_LOCK_HELD_ENV)
-  );
   const child = Bun.spawn(['node', cliPath, ...args], {
     // os.homedir() reads HOME on Linux and macOS and USERPROFILE on Windows.
-    env: { ...environment, HOME: home, USERPROFILE: home },
+    env: { ...environmentWithoutHeldLock(), HOME: home, USERPROFILE: home },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -179,6 +198,12 @@ async function runCli(home: string, args: string[]): Promise<unknown> {
   ]);
   if (exitCode !== 0) throw new Error(`Island CLI ${args[0]} exited ${exitCode}: ${stderr}`);
   return JSON.parse(stdout);
+}
+
+function environmentWithoutHeldLock(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== ISLAND_LOCK_HELD_ENV)
+  );
 }
 
 function makeHome(name: string): string {

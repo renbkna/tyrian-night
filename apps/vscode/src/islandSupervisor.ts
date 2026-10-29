@@ -221,7 +221,8 @@ export async function restoreIslandUiSupervised(
     ...result.failedAppRoots.map(({ code }) => code),
     ...(result.enumerationFailure ? [result.enumerationFailure.code] : []),
   ];
-  const kind = failureCodes.every((code) => code === 'permission-required')
+  // Restore reports a permission problem only when every failure is one.
+  const kind = failureCodes.every((code) => islandFailureResultKind(code) === 'permission-required')
     ? 'permission-required'
     : 'blocked';
 

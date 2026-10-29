@@ -573,6 +573,19 @@ test('restore removes a stale sidecar from an unpatched root', async () => {
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
 
+test('an active patch whose stylesheet is gone is reported as broken backup', async () => {
+  const appRoot = await createAppRoot('missing-stylesheet');
+  const cssSource = path.join(testRoot, 'missing-stylesheet.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
+  await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
+  await fs.rm(buildIslandPatchPaths(appRoot).islandCssPath);
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'broken-backup',
+    issues: expect.arrayContaining(['Tyrian marker is present but the stylesheet is missing.']),
+  });
+});
+
 test('restore strips active Island UI when backup evidence is broken', async () => {
   const appRoot = await createAppRoot('broken-backup');
   const cssSource = path.join(testRoot, 'theme.css');

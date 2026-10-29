@@ -128,9 +128,7 @@ export function auditThemeSafety(theme, contract) {
     }
   }
   for (const constraint of contract.contrastPairs) {
-    const background = opaqueHex(themeColor(theme, constraint.background), canvas);
-    const foreground = opaqueHex(themeColor(theme, constraint.foreground), background);
-    const actual = contrastRatio(foreground, background);
+    const actual = pairContrast(theme, constraint, canvas);
     if (actual < constraint.minimum) {
       violations.push({
         actual,
@@ -195,10 +193,8 @@ export function reportThemeColorDiagnostics(theme, themeSlug, contract) {
       };
     }),
     contrastPairs: contract.contrastPairs.map((pair) => {
-      const pairBackground = opaqueHex(themeColor(theme, pair.background), background);
-      const foreground = opaqueHex(themeColor(theme, pair.foreground), pairBackground);
       return {
-        contrast: quantizeDiagnosticNumber(contrastRatio(foreground, pairBackground)),
+        contrast: quantizeDiagnosticNumber(pairContrast(theme, pair, background)),
         id: pair.id,
         roles: [pair.foreground, pair.background],
       };
@@ -227,6 +223,17 @@ export function reportThemeColorDiagnostics(theme, themeSlug, contract) {
     })),
     theme: themeSlug,
   };
+}
+
+/**
+ * WCAG contrast of a pair's foreground on its background, which sits on the canvas.
+ * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
+ * @param {SafetyContrastPair} pair
+ * @param {string} canvas
+ */
+function pairContrast(theme, pair, canvas) {
+  const background = opaqueHex(themeColor(theme, pair.background), canvas);
+  return contrastRatio(opaqueHex(themeColor(theme, pair.foreground), background), background);
 }
 
 /** @param {string[]} roles @param {SafetyStateComparison['pairing']} pairing @returns {Array<[string, string]>} */

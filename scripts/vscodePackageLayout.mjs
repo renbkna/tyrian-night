@@ -1,9 +1,10 @@
 // @ts-check
 
 /**
- * Where the VS Code package keeps its files. Paths are relative to the package
- * root, as package.json and the running extension see them; `inVscodePackage`
- * makes one repository-relative.
+ * Where the VS Code package keeps its files. VSCODE_PACKAGE_ROOT is relative to
+ * the repository; every other path is relative to the package root, as
+ * package.json and the running extension see them, and `inVscodePackage` makes
+ * one repository-relative.
  */
 export const VSCODE_PACKAGE_ROOT = 'apps/vscode';
 export const VSCODE_PACKAGE_MANIFEST = 'package.json';

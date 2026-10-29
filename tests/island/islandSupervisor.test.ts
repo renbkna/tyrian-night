@@ -89,6 +89,7 @@ test('repair changes physical state while desired state is unchanged', async () 
     })
   ).resolves.toMatchObject({
     kind: 'applied',
+    registryChanged: false,
     physicalChanged: true,
   });
 });
@@ -106,6 +107,7 @@ test('already-disabled restore changes physical state without rewriting desired 
     })
   ).resolves.toMatchObject({
     kind: 'restored',
+    registryChanged: false,
     physicalChanged: true,
     failedAppRoots: [],
   });
