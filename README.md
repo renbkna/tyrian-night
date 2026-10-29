@@ -43,7 +43,7 @@ Five expressions of one semantic system, not near-duplicate palettes:
 
 - **Steps.** Abyss is the semantic base. Night, Nocturne and Abyss share one hue profile: Nocturne takes about 80% and Night about 60% of Abyss's saturation per syntax role, with editor depth and plain-text contrast stepping down alongside. Pastel and Dawn use related branch hue profiles.
 - **Solved, not authored.** A recipe sets APCA targets per syntax tier and for plain text, a saturation level and the chroma of its near-neutral pigments; `scripts/syntaxSolver.mjs` derives every syntax and bracket color against the canvas.
-- **Matte lightness.** In the three dark variants colored code sits at jewel-tone brightness (APCA Lc about 55 for leads, 49 for supports) while plain text stays bright: bright saturated color on near-black reads as neon.
+- **Matte lightness.** In the three near-black variants (Night, Nocturne, Abyss) colored code sits at jewel-tone brightness (APCA Lc about 55 for leads, 49 for supports) while plain text stays bright: bright saturated color on near-black reads as neon.
 - **Saturation bands** (`syntaxSaturation`), as a share of the sRGB chroma available at each role's lightness and hue: Abyss 85–90%, Nocturne 66–74%, Night 48–56%, Dawn 75–80%. Pastel caps absolute chroma at 0.10 instead, because sRGB leaves green far more room than blue at pastel lightness.
 - **Syntax ladder** (`syntaxHierarchy`, APCA against the canvas): control flow and functions lead; types, data, strings, literals and Markdown emphasis and links support; declaration and import keywords sit below; comments, documentation, punctuation and bracket pairs recede furthest. Symbolic operators belong to punctuation; word operators (`typeof`, `new`, Python's `and`) to declarations.
 - **Weight.** Function and type definitions are bold where defined; calls and references keep normal weight in VS Code and Zed.
@@ -83,7 +83,7 @@ See [Ghostty](terminal/ghostty/README.md), [foot](terminal/foot/README.md), [fis
 - `source/islandEffects.cjs`: hand-tuned Island effect profiles (shadows, borders, glow opacity); colors come from roles.
 - `source/themeColorBindings.cjs`: role aliases and alpha derivations; unlisted roles own one opaque pigment.
 - `source/themeOpacityContract.cjs`: the family opacity policy, with appearance-only overrides.
-- `source/themeFamilyContract.cjs`: the default theme, pigment vocabulary, hue profiles, appearance classes, syntax tiers with contrast steps and colorfulness ceilings, saturation bands, branch hue limits.
+- `source/themeFamilyContract.cjs`: the default theme, pigment vocabulary, hue profiles, the energy line and its branches, syntax tiers with contrast steps and colorfulness ceilings, saturation bands, branch hue limits.
 - `source/themePigmentPolicy.cjs`: the green-through-cyan reservation.
 - `source/themes/`: each variant's OKLCH lightness and chroma for UI, terminal and status pigments, plus its syntax targets.
 - `source/themeSafetyContract.cjs`: hard contrast and state-identity requirements for every catalog theme.

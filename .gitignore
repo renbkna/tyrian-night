@@ -3,7 +3,6 @@
 
 # Local environment
 .env*
-!.env.example
 
 # Build and Packaging
 *.vsix
@@ -12,7 +11,6 @@
 .DS_Store
 node_modules/
 dist/
-user.settings.json
 
 # Local tool state
 .codex-logs/
@@ -20,11 +18,8 @@ user.settings.json
 
 # Build artifacts
 out/
-apps/vscode/out/*.js
-apps/vscode/out/*.map
 apps/vscode/LICENSE
 apps/vscode/assets/icon.png
-.vscode-test/
 
 # Generated theme/package artifacts
 apps/vscode/island/tyrian-*.css

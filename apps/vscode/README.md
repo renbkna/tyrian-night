@@ -23,7 +23,7 @@ The themes color a curated set of documented VS Code colors (control states, sel
 1. Open the Extensions panel and install **Tyrian Night**.
 2. Run **Preferences: Color Theme** and select a Tyrian theme.
 
-[`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) suggests typography and editor settings; it is not applied automatically. It sets semantic highlighting to `configuredByTheme`, which follows the theme without forcing it on others.
+[`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) is the full setup the themes were tuned in (typography, workbench layout, terminal and per-language editor settings); it is not applied automatically. It sets semantic highlighting to `configuredByTheme`, which follows the theme without forcing it on others.
 
 ## Island UI
 
@@ -35,7 +35,7 @@ An optional workbench patch. On unsupported platforms its commands report so and
 Commands: **Tyrian Night: Apply Island UI**, **Repair Island UI**, **Restore Classic UI**, **Doctor Island UI**.
 
 - **What Apply changes:** after preflighting the application root, stylesheet, current patch, backup receipts, checksums and write access, one stylesheet link in `workbench.html`, one CSS file and the matching `product.json` checksum. A target that changed after planning (for example during a VS Code update) stops the command before it is overwritten.
-- **Safe to interrupt:** every change holds one per-user lock the OS releases when the process exits (`flock` on Linux, `lockf` on macOS, both on `~/.tyrian-night/island.lock`; a named pipe on Windows), so a second window waits. Files are replaced atomically. Apply writes the stylesheet before its link and Restore removes the link first, so an interrupted command leaves VS Code loadable, and rerunning it finishes the job. Doctor reports an interrupted state and names the command to rerun. Startup reconciliation and Repair act on the saved style under the same lock, so a window starting during another's Apply cannot revert it.
+- **Safe to interrupt:** every change holds one per-user lock the OS releases when the process exits (`flock` on Linux, `lockf` on macOS, both on `~/.tyrian-night/island.lock`; a named pipe on Windows), so a second window waits. Files are replaced atomically. Apply writes the stylesheet before its link and Restore removes the link first, so an interrupted command leaves VS Code loadable, and rerunning it finishes the job; the failure message says so. Doctor shows each installation's state, its restore plan and the recommended action. Startup reconciliation and Repair act on the saved style under the same lock, so a window starting during another's Apply cannot revert it.
 - **Backups:** kept beside the patched files, with the application root and hashes in a manifest. Restore uses them only when the full receipt proves they belong to the current patch; otherwise it removes Tyrian's files and repairs the checksum.
 - **Read-only installs:** package-managed VS Code may make application files read-only. Fix permissions through the package or system administrator, then retry Repair or Restore. Permission and partial-cleanup failures are reported, never hidden.
 - VS Code may say "Your installation appears to be corrupt" while Island UI is active, because `workbench.html` is patched on purpose.

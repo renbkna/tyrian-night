@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "verify": "bun run check:tracked-generated && bun run generate && bun run check && bun run lint && bun run test:isolated ./tests && bun run format:check && bun run check:union-css",
-    "verify:vscode": "bun run check:tracked-generated --product=vscode && bun run generate --untracked --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode ./tests/island && bun run --cwd apps/vscode bundle",
+    "verify:vscode": "bun run verify:vscode-portable && bun run test:isolated ./tests/island",
     "verify:vscode-portable": "bun run check:tracked-generated --product=vscode && bun run generate --untracked --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode && bun run --cwd apps/vscode bundle",
     "package:vscode": "bun run verify:vscode && bun run --cwd apps/vscode package:artifact",
     "generate": "node scripts/generate.mjs",
@@ -37,8 +37,5 @@
     "@types/node": "^26.6.6",
     "oxlint": "^1.90.0",
     "typescript": "^7.0.2"
-  },
-  "overrides": {
-    "picomatch": "^4.0.4"
   }
 }
