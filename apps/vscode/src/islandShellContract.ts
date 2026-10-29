@@ -103,6 +103,13 @@ export function describeIslandShellFailure(error: unknown): IslandShellFailureDe
   return { code: failureCodeOf(error), ...readIslandMutationFacts(error), reason, causes };
 }
 
+/** The result kind a failure reports: a corrupt record blocks like any other refusal. */
+export function islandFailureResultKind(
+  code: IslandShellFailureCode
+): 'permission-required' | 'unsupported' | 'blocked' {
+  return code === 'corrupt' ? 'blocked' : code;
+}
+
 export function readIslandShellFailureStatus(error: unknown): IslandShellStatus | undefined {
   return findNestedError(error, (candidate) =>
     candidate instanceof IslandShellTransitionFailure ? candidate.status : undefined
@@ -169,7 +176,6 @@ function hasChildErrors(candidate: unknown): boolean {
   );
 }
 
-/** The failure code one error asserts by itself. */
 /**
  * The code of a failure and everything it wraps: the first typed failure's code;
  * otherwise permission-required only when every leaf cause is a permission error.

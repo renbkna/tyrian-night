@@ -36,6 +36,7 @@ import {
 import {
   corruptDesiredStateFailure,
   describeIslandShellFailure,
+  islandFailureResultKind,
   isPermissionError,
   type IslandShellApplyReadiness,
   type IslandShellCleanupSummary,
@@ -148,7 +149,9 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
 
     return { kind: 'ready', appRoot, changed, status, writeAccess };
   } catch (error) {
-    if (isPermissionError(error)) {
+    const failure = describeIslandShellFailure(error);
+    const kind = islandFailureResultKind(failure.code);
+    if (kind === 'permission-required') {
       status ??= await readIslandShellStatus(options);
       writeAccess ??= await readIslandShellWriteAccess(options);
 
@@ -163,9 +166,8 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
       };
     }
 
-    const failure = describeIslandShellFailure(error);
     return {
-      kind: failure.code === 'unsupported' ? 'unsupported' : 'blocked',
+      kind,
       appRoot,
       status,
       writeAccess,

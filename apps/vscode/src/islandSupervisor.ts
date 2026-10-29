@@ -14,6 +14,7 @@ import {
 import {
   corruptDesiredStateFailure,
   describeIslandShellFailure,
+  islandFailureResultKind,
   IslandShellFailure,
   readIslandShellFailureStatus,
   type IslandShellCleanupSummary,
@@ -128,16 +129,11 @@ export async function applyIslandUiSupervised(options: {
   } catch (error) {
     const failure = describeIslandShellFailure(error);
     const failureStatus = readIslandShellFailureStatus(error) ?? status;
+    const kind = islandFailureResultKind(failure.code);
 
-    if (failure.code === 'permission-required') {
-      return { ...failure, kind: 'permission-required', status: failureStatus, writeAccess };
-    }
-
-    return {
-      ...failure,
-      kind: failure.code === 'unsupported' ? 'unsupported' : 'blocked',
-      status: failureStatus,
-    };
+    return kind === 'permission-required'
+      ? { ...failure, kind, status: failureStatus, writeAccess }
+      : { ...failure, kind, status: failureStatus };
   }
 }
 
