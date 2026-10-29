@@ -18,9 +18,9 @@ import type {
   IslandUiRecommendedAction,
 } from './islandSupervisor.js';
 import {
-  encodeIslandCliArgs,
-  type IslandCliArgs,
+  encodeIslandCliInvocation,
   type IslandCliCommand,
+  type IslandCliInputs,
   type IslandCliResults,
 } from './islandWire.js';
 
@@ -223,10 +223,10 @@ async function repairIslandUi(): Promise<void> {
  */
 function convergeIslandUi(intent: IslandUiConvergeIntent): Promise<IslandUiConvergeResult> {
   return runIslandCli('converge', {
-    'app-root': vscode.env.appRoot,
-    'island-dir': islandDirectory(),
-    'theme-version': themeVersion(),
-    ...(intent.kind === 'repair' ? { repair: true, 'fallback-css': intent.fallbackCssFile } : {}),
+    appRoot: vscode.env.appRoot,
+    islandDirectory: islandDirectory(),
+    themeVersion: themeVersion(),
+    intent,
   });
 }
 
@@ -245,9 +245,9 @@ async function applyIslandCssFile(
   presentation: IslandApplyPresentation
 ): Promise<void> {
   const result = await runIslandCli('apply-supervised', {
-    'app-root': vscode.env.appRoot,
-    'css-source': path.join(islandDirectory(), cssFile),
-    'theme-version': themeVersion(),
+    appRoot: vscode.env.appRoot,
+    cssSourcePath: path.join(islandDirectory(), cssFile),
+    themeVersion: themeVersion(),
   });
   await presentApplyResult(result, presentation);
 }
@@ -337,7 +337,7 @@ function isSelfHealable(action: IslandUiRecommendedAction): boolean {
 
 async function doctorIslandUi(): Promise<void> {
   const { statuses, registryDiagnostics } = await runIslandCli('status-all-supervised', {
-    'app-root': vscode.env.appRoot,
+    preferredAppRoots: [vscode.env.appRoot],
   });
   if (statuses.length === 0 && registryDiagnostics.length === 0) {
     vscode.window.showInformationMessage(
@@ -429,7 +429,9 @@ async function doctorIslandUi(): Promise<void> {
 }
 
 async function restoreIslandUi(): Promise<void> {
-  const result = await runIslandCli('restore-supervised', { 'app-root': vscode.env.appRoot });
+  const result = await runIslandCli('restore-supervised', {
+    preferredAppRoots: [vscode.env.appRoot],
+  });
 
   if (result.kind === 'permission-required') {
     await showPermissionRequired(
@@ -465,12 +467,12 @@ async function restoreIslandUi(): Promise<void> {
 
 function runIslandCli<Command extends IslandCliCommand>(
   command: Command,
-  args: IslandCliArgs
+  input: IslandCliInputs[Command]
 ): Promise<IslandCliResults[Command]> {
   const cliPath = path.join(extContext.extensionPath, ISLAND_CLI_BUNDLE_PATH);
 
   return runIslandJsonProcess<IslandCliResults[Command]>(
-    [process.execPath, cliPath, command, ...encodeIslandCliArgs(args)],
+    [process.execPath, cliPath, ...encodeIslandCliInvocation(command, input)],
     { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   );
 }

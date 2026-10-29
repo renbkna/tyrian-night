@@ -33,6 +33,7 @@ import {
   readManagedAppRootRegistration,
 } from '../../apps/vscode/src/islandRegistry.js';
 import { applyFileMutations } from '../../apps/vscode/src/islandFileSystem.js';
+import { ISLAND_LOCK_HELD_ENV } from '../../apps/vscode/src/islandLock.js';
 import {
   buildIslandApplyPlan,
   buildRestoreMutations,
@@ -1209,7 +1210,7 @@ test.skipIf(process.platform !== 'linux')(
         '--app-root',
         appRoot,
       ],
-      { env: { ...process.env, HOME: registryHome }, stdout: 'pipe', stderr: 'pipe' }
+      { env: { ...envWithoutHeldLock(), HOME: registryHome }, stdout: 'pipe', stderr: 'pipe' }
     );
     const [exitCode, stdout] = await Promise.all([cli.exited, new Response(cli.stdout).text()]);
     const cliFinishedAt = Date.now();
@@ -1220,6 +1221,12 @@ test.skipIf(process.platform !== 'linux')(
     expect(cliFinishedAt - started).toBeGreaterThanOrEqual(500);
   }
 );
+
+function envWithoutHeldLock(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== ISLAND_LOCK_HELD_ENV)
+  );
+}
 
 async function expectStylesheetReferenceResolves(appRoot: string): Promise<void> {
   const paths = buildIslandPatchPaths(appRoot);

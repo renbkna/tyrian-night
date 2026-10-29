@@ -9,37 +9,44 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { buildIslandLockPath } from './islandPatchContract.js';
 import { IslandShellFailure, isNodeError } from './islandShellContract.js';
 
-const LOCK_HELD_ENV = 'TYRIAN_ISLAND_LOCK_HELD';
+/** Set in the child a lock tool runs, which already holds the lock. */
+export const ISLAND_LOCK_HELD_ENV = 'TYRIAN_ISLAND_LOCK_HELD';
 const LOCK_WAIT_SECONDS = 60;
 /** EX_TEMPFAIL: flock's configured conflict status and BSD lockf's timeout status. */
 const LOCK_TIMEOUT_EXIT_CODE = 75;
 const PIPE_RETRY_MS = 250;
 
-/**
- * `held`: this process owns the lock until `release`. `delegated`: the command
- * already ran to completion in a child that held the lock.
- */
-export type IslandLock =
-  | { kind: 'held'; release(): Promise<void> }
-  | { kind: 'delegated'; exitCode: number };
+export type PipeLock = { release(): Promise<void> };
 
 /**
- * Take the per-user Island lock for one CLI command. The operating system
- * owns the lock and drops it however its holder exits, so it never goes
- * stale: Linux and macOS re-run the command under flock(1) or lockf(1);
- * Windows listens on a named pipe, which exists only while its process lives.
+ * Run one CLI command while holding the per-user Island lock. The operating
+ * system owns the lock and drops it however its holder exits, so it never goes
+ * stale. Linux and macOS re-run this process under flock(1) or lockf(1): the
+ * child runs `command` and this process exits with the child's status. Windows
+ * listens on a named pipe, which exists only while its process lives, and runs
+ * `command` here.
  */
-export async function acquireIslandLock(): Promise<IslandLock> {
-  if (process.env[LOCK_HELD_ENV] === '1') {
-    return { kind: 'held', release: async () => {} };
+export async function runUnderIslandLock(command: () => Promise<void>): Promise<void> {
+  if (process.env[ISLAND_LOCK_HELD_ENV] === '1') {
+    await command();
+    return;
   }
 
   if (process.platform === 'win32') {
     const pipeIdentity = crypto.hash('sha256', os.homedir(), 'hex').slice(0, 16);
-    return holdPipeLock(`\\\\.\\pipe\\tyrian-night-island-${pipeIdentity}`, LOCK_WAIT_SECONDS);
+    const lock = await holdPipeLock(
+      `\\\\.\\pipe\\tyrian-night-island-${pipeIdentity}`,
+      LOCK_WAIT_SECONDS
+    );
+    try {
+      await command();
+    } finally {
+      await lock.release();
+    }
+    return;
   }
 
-  return { kind: 'delegated', exitCode: rerunUnderLockCommand() };
+  process.exitCode = rerunUnderLockCommand();
 }
 
 function rerunUnderLockCommand(): number {
@@ -62,7 +69,7 @@ function rerunUnderLockCommand(): number {
   const child = spawnSync(
     tool,
     [...toolArgs, process.execPath, ...process.execArgv, ...process.argv.slice(1)],
-    { stdio: 'inherit', env: { ...process.env, [LOCK_HELD_ENV]: '1' } }
+    { stdio: 'inherit', env: { ...process.env, [ISLAND_LOCK_HELD_ENV]: '1' } }
   );
 
   if (child.error) {
@@ -84,7 +91,7 @@ function rerunUnderLockCommand(): number {
  * Hold a lock by listening on a local pipe or socket name: only one process
  * can listen on it, and the name is freed when that process closes or dies.
  */
-export async function holdPipeLock(pipePath: string, waitSeconds: number): Promise<IslandLock> {
+export async function holdPipeLock(pipePath: string, waitSeconds: number): Promise<PipeLock> {
   const deadline = Date.now() + waitSeconds * 1000;
 
   for (;;) {
@@ -95,10 +102,7 @@ export async function holdPipeLock(pipePath: string, waitSeconds: number): Promi
         server.listen(pipePath, () => resolve());
       });
       server.unref();
-      return {
-        kind: 'held',
-        release: () => new Promise<void>((resolve) => server.close(() => resolve())),
-      };
+      return { release: () => new Promise<void>((resolve) => server.close(() => resolve())) };
     } catch (error) {
       if (!isNodeError(error) || error.code !== 'EADDRINUSE') throw error;
       if (Date.now() >= deadline) throw lockTimeout();

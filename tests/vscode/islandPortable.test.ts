@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from 'bun:test';
 
-import { holdPipeLock } from '../../apps/vscode/src/islandLock.js';
+import { holdPipeLock, ISLAND_LOCK_HELD_ENV } from '../../apps/vscode/src/islandLock.js';
 import { ISLAND_CLI_BUNDLE_PATH } from '../../apps/vscode/src/generated/packageLayout.js';
 import {
   WORKBENCH_CHECKSUM_KEY,
@@ -144,7 +144,6 @@ test('a pipe lock admits one holder and frees its name on release', async () => 
       ? `\\\\.\\pipe\\tyrian-night-test-${crypto.randomUUID()}`
       : path.join(root, `lock-${crypto.randomUUID().slice(0, 8)}.sock`);
   const first = await holdPipeLock(pipePath, 5);
-  if (first.kind !== 'held') throw new Error('The first pipe lock must be held.');
 
   await expect(holdPipeLock(pipePath, 0)).rejects.toMatchObject({ code: 'blocked' });
 
@@ -156,14 +155,12 @@ test('a pipe lock admits one holder and frees its name on release', async () => 
   expect(secondSettled).toBe(false);
 
   await first.release();
-  const acquired = await second;
-  expect(acquired.kind).toBe('held');
-  if (acquired.kind === 'held') await acquired.release();
+  await (await second).release();
 });
 
 async function runCli(home: string, args: string[]): Promise<unknown> {
   const environment = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => name !== 'TYRIAN_ISLAND_LOCK_HELD')
+    Object.entries(process.env).filter(([name]) => name !== ISLAND_LOCK_HELD_ENV)
   );
   const child = Bun.spawn(['node', cliPath, ...args], {
     // os.homedir() reads HOME on Linux and macOS and USERPROFILE on Windows.
