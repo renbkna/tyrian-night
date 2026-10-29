@@ -402,7 +402,7 @@
 .part.panel.bottom {
   border-radius: var(--islands-panel-radius);
   overflow: hidden !important;
-  border-top: 6px solid var(--islands-bg-backdrop) !important;
+  border-top: var(--islands-panel-gap) solid var(--islands-bg-backdrop) !important;
   border-left: var(--islands-surface-border-left) !important;
   border-bottom: var(--islands-surface-border-bottom) !important;
   border-right: var(--islands-surface-border-right) !important;
@@ -800,7 +800,7 @@
 
 /* Adjusts the bottom panel content to fit perfectly inside the "island" gap */
 .part.panel.bottom > .content {
-  margin-top: -6px !important;
+  margin-top: calc(-1 * var(--islands-panel-gap)) !important;
   position: relative !important;
   border-radius: 0 0 calc(var(--islands-panel-radius) - var(--islands-panel-gap))
     calc(var(--islands-panel-radius) - var(--islands-panel-gap)) !important;
@@ -820,12 +820,12 @@
 /* Rounds the terminal to prevent it from clipping out of the bottom island */
 .part.panel.bottom .terminal-outer-container {
   border-left: var(--islands-terminal-border-left) !important;
-  border-radius: 0 0 0 18px !important;
+  border-radius: 0 0 0 calc(var(--islands-panel-radius) - var(--islands-panel-gap)) !important;
   box-sizing: border-box !important;
   overflow: hidden !important;
 }
 .part.panel.bottom .terminal.xterm {
-  border-radius: 0 0 0 18px !important;
+  border-radius: 0 0 0 calc(var(--islands-panel-radius) - var(--islands-panel-gap)) !important;
 }
 
 /* Hides a legacy dropdown separator */

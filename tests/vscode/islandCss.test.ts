@@ -181,6 +181,25 @@ test('an effect profile cannot redefine a palette or layout token', () => {
   }
 });
 
+test('the Island base template cannot reference an undefined token', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-island-undefined-token-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    fs.mkdirSync(path.join(root, path.dirname(BASE_TEMPLATE)), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, BASE_TEMPLATE),
+      `${fs.readFileSync(BASE_TEMPLATE, 'utf8')}.x { color: var(--islands-missing); }\n`
+    );
+
+    expect(() => buildAllIslandCss(root)).toThrow(
+      `${VSCODE_ISLAND_BASE_TEMPLATE} references undefined tokens: --islands-missing.`
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Island UI keeps the editor island offset outside VS Code tab internals', () => {
   for (const cssFile of ISLAND_CSS_FILES) {
     const css = fs.readFileSync(cssFile, 'utf8');

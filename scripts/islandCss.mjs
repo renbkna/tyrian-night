@@ -48,17 +48,24 @@ function renderIslandCss(theme, repoRoot, repository) {
     'utf8'
   );
   const sourceTheme = readSourceTheme(theme.source, repository);
+  const tokens = mergeDisjointTokens([
+    ['layout', ROOT_LAYOUT_TOKENS],
+    [`effect profile '${theme.source.islandEffects}'`, theme.tokens],
+    ['source palette', sourcePaletteTokens(sourceTheme)],
+  ]);
+  const undefinedTokens = [
+    ...new Set([...baseCss.matchAll(/var\((--islands-[\w-]+)/gu)].map(([, name]) => name)),
+  ].filter((name) => !Object.hasOwn(tokens, /** @type {string} */ (name)));
+  if (undefinedTokens.length > 0) {
+    throw new Error(
+      `${VSCODE_ISLAND_BASE_TEMPLATE} references undefined tokens: ${undefinedTokens.join(', ')}.`
+    );
+  }
 
   return `${header(theme.label)}
 
 :root {
-${formatCssVariables(
-  mergeDisjointTokens([
-    ['layout', ROOT_LAYOUT_TOKENS],
-    [`effect profile '${theme.source.islandEffects}'`, theme.tokens],
-    ['source palette', sourcePaletteTokens(sourceTheme)],
-  ])
-)}
+${formatCssVariables(tokens)}
 }
 
 ${baseCss}`;
