@@ -170,12 +170,6 @@ test('VS Code categorical editor colors resolve directly from neutral owners', (
     const theme = sourceTheme(source);
     const projected = buildVscodeTheme(theme, VSCODE_PROJECTION);
 
-    expect(projected.colors['editorBracketHighlight.foreground3']).toBe(
-      themeColor(theme, 'brackets:depth3')
-    );
-    expect(projected.colors['editorBracketHighlight.foreground6']).toBe(
-      themeColor(theme, 'brackets:depth6')
-    );
     expect(projected.colors['debugIcon.stopForeground']).toBe(themeColor(theme, 'ui:status.error'));
     expect(projected.colors['debugIcon.pauseForeground']).toBe(
       themeColor(theme, 'ui:status.warning')

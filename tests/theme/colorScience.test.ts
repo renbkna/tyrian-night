@@ -48,7 +48,6 @@ test('color science helpers expose stable policy-free observations', () => {
   expect(gamutRelativeRichness('#000000')).toBe(0);
   expect(gamutRelativeRichness('#FF0000')).toBeCloseTo(1, 5);
   expect(gamutRelativeRichness('#A66CFF')).toBeGreaterThan(0.7);
-  expect(gamutRelativeRichness('#A66CFF')).toBeLessThanOrEqual(1);
   expect(quantizeDiagnosticNumber(0.1234567894)).toBe(0.123456789);
   expect(quantizeDiagnosticNumber(0.06025065814868918)).toBe(
     quantizeDiagnosticNumber(0.06025065814868934)

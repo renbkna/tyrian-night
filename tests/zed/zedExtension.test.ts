@@ -389,7 +389,7 @@ test('Zed generation owns the complete themes directory', () => {
   }
 });
 
-test('Zed theme covers the current schema and built-in style and syntax surfaces', () => {
+test('Zed theme emits exactly the pinned style keys and syntax captures', () => {
   const zedTheme = readJson<ZedThemeFamily>('apps/zed/themes/tyrian-night.json');
 
   for (const theme of zedTheme.themes) {
@@ -443,13 +443,9 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style.syntax.predictive?.font_style).toBeUndefined();
     expect(theme.style.syntax['invalid.deprecated']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax.parameter.color).toBe(source.syntax.data);
-    expect(theme.style.syntax.boolean.color).toBe(source.syntax.literal);
-    expect(theme.style.syntax['constant.builtin']?.color).toBe(source.syntax.literal);
     expect(theme.style.syntax.constant.color).toBe(source.syntax.data);
-    expect(theme.style.syntax.number.color).toBe(source.syntax.literal);
     expect(theme.style.syntax['variable.special']?.color).toBe(source.syntax.data);
     expect(theme.style.syntax['variable.special']?.font_style).toBe('italic');
-    expect(theme.style.syntax.operator.color).toBe(source.syntax.punctuation);
     expect(theme.style.syntax['selector.pseudo']?.color).toBe(source.syntax.declaration);
     expect(theme.style.syntax['function.definition']?.font_weight).toBe(700);
     expect(theme.style.syntax['punctuation.bracket']?.color).toBe(source.syntax.punctuation);

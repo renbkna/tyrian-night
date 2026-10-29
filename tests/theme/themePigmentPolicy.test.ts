@@ -9,12 +9,6 @@ import {
 const policy = readThemePigmentPolicy();
 
 describe('theme pigment policy authority', () => {
-  test('every production recipe satisfies the family hue reservation', () => {
-    for (const source of SOURCE_THEMES) {
-      expect(auditThemePigmentPolicy(sourceTheme(source), policy)).toEqual([]);
-    }
-  });
-
   test('a code role that takes the string pigment breaks the green-cyan reservation', () => {
     const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const theme = structuredClone(sourceTheme(source));

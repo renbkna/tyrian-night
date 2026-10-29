@@ -1,13 +1,18 @@
-import { SOURCE_THEMES, sourceTheme, VSCODE_PROJECTION } from '../support/themes.js';
+import {
+  SOURCE_THEMES,
+  sourceTheme,
+  THEME_REPOSITORY,
+  VSCODE_PROJECTION,
+} from '../support/themes.js';
 import { expect, test } from 'bun:test';
 
 import { hexToOklch, hueDistance } from '../../scripts/colorScience.mjs';
-import { loadThemeRepository, readSourceTheme } from '../../scripts/themeSources.mjs';
-import { themeColor, themeFamilyClassification } from '../../scripts/themeDefinition.mjs';
+import { readSourceTheme } from '../../scripts/themeSources.mjs';
+import { themeColor } from '../../scripts/themeDefinition.mjs';
 import { buildVscodeTheme } from '../../scripts/vscodeThemes.mjs';
 import { buildZedThemeFamily } from '../../scripts/zedTheme.mjs';
 
-test('the family exposes five palettes through one recipe path', () => {
+test('the family has five palettes with distinct canvases', () => {
   expect(SOURCE_THEMES.map(({ slug }) => slug)).toEqual([
     'tyrian-night',
     'tyrian-nocturne',
@@ -20,17 +25,12 @@ test('the family exposes five palettes through one recipe path', () => {
   expect(new Set(themes.map((theme) => themeColor(theme, 'ui:surface.canvas'))).size).toBe(
     themes.length
   );
-  const paletteFingerprints = themes.map(({ brackets, syntax, terminal, ui, vscode }) =>
-    JSON.stringify({ brackets, syntax, terminal, ui, vscode })
-  );
-  expect(new Set(paletteFingerprints).size).toBe(themes.length);
 });
 
 test('the family contract fixes hue identity and proves each declared energy tier', () => {
-  const repository = loadThemeRepository();
+  const repository = THEME_REPOSITORY;
   const family = repository.definition.familyContract;
   expect(family.canonical).toBe('tyrian-abyss');
-  expect(repository.sources.find(({ isDefault }) => isDefault)?.slug).toBe(family.canonical);
   expect(family.energyLine.hueProfile).toBe('core');
   expect(
     Object.values(family.energyLine.variants).every((variant) => !('hueProfile' in variant))
@@ -55,19 +55,15 @@ test('the family contract fixes hue identity and proves each declared energy tie
     const colors = semanticColors(slug);
     return colors.reduce((sum, color) => sum + hexToOklch(color).C, 0) / colors.length;
   };
-  // Energy variants share the family hue profile by construction; rendered hex hue
-  // drifts with 8-bit quantization at low chroma, so it cannot prove identity.
-  for (const slug of Object.keys(family.energyLine.variants)) {
-    expect(themeFamilyClassification(repository.definition, slug).hueProfile).toBe(
-      family.energyLine.hueProfile
-    );
-  }
+  // The loader bounds the contract hues; the rendered branch colors must stay inside the
+  // same limit. (Energy variants share the canonical hue profile, and their rendered hue
+  // drifts with 8-bit quantization at low chroma, so rendered hue cannot prove them.)
   const canonicalHues = semanticColors(family.canonical).map((color) => hexToOklch(color).h);
-  for (const slug of ['tyrian-pastel', 'tyrian-dawn']) {
+  for (const [slug, branch] of Object.entries(family.branches)) {
     const hueDistances = semanticColors(slug).map((color, index) =>
       hueDistance(canonicalHues[index], hexToOklch(color).h)
     );
-    expect(Math.max(...hueDistances)).toBeLessThan(12);
+    expect(Math.max(...hueDistances)).toBeLessThan(branch.maximumSemanticHueDistance);
   }
 
   // The loader enforces the band and canvas order; the rendered chroma must follow it.

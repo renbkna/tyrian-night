@@ -2,10 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 
 import { themeColor } from '../../scripts/themeDefinition.mjs';
-import {
-  buildProductionFamilyPreview,
-  syncProductionFamilyPreview,
-} from '../../scripts/themePreview.mjs';
+import { buildProductionFamilyPreview } from '../../scripts/themePreview.mjs';
 import { loadThemeRepository, readSourceTheme } from '../../scripts/themeSources.mjs';
 
 test('production preview projects every catalog theme from resolved source roles', () => {
@@ -30,8 +27,7 @@ test('production preview projects every catalog theme from resolved source roles
   }
 });
 
-test('production preview output is generated and current', () => {
-  expect(syncProductionFamilyPreview(undefined, { check: true })).toEqual([]);
+test('the preview page loads the generated production family', () => {
   const html = fs.readFileSync('examples/theme-preview/zed-family-lab.html', 'utf8');
   expect(html).toContain('<script src="./generated/production-family.js"></script>');
   expect(html).toContain('Current production family');

@@ -8,40 +8,21 @@ import {
 import { expect, test } from 'bun:test';
 
 import { parseHexColor } from '../../scripts/colorUtils.mjs';
-import { themeColor } from '../../scripts/themeDefinition.mjs';
+import { THEME_ROLE_NAMESPACES, themeColor } from '../../scripts/themeDefinition.mjs';
 import { buildVscodeTheme } from '../../scripts/vscodeThemes.mjs';
 
 test('theme definitions expose one strict consumer-neutral role contract', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
 
-    expect(Object.keys(theme).toSorted()).toEqual([
-      'appearance',
-      'brackets',
-      'name',
-      'syntax',
-      'terminal',
-      'ui',
-      'vscode',
-    ]);
-    expect(Object.keys(theme.brackets).toSorted()).toEqual([
-      ...THEME_REPOSITORY.definition.requiredThemeRoles.brackets,
-    ]);
-    expect(Object.keys(theme.ui).toSorted()).toEqual([
-      ...THEME_REPOSITORY.definition.requiredThemeRoles.ui,
-    ]);
-    expect(Object.keys(theme.syntax).toSorted()).toEqual([
-      ...THEME_REPOSITORY.definition.requiredThemeRoles.syntax,
-    ]);
-    expect(Object.keys(theme.terminal).toSorted()).toEqual([
-      ...THEME_REPOSITORY.definition.requiredThemeRoles.terminal,
-    ]);
-    expect(Object.keys(theme.vscode).toSorted()).toEqual([
-      ...THEME_REPOSITORY.definition.requiredThemeRoles.vscode,
-    ]);
-    expect(theme).not.toHaveProperty('colors');
-    expect(theme).not.toHaveProperty('semanticTokenColors');
-    expect(theme).not.toHaveProperty('tokenColors');
+    expect(Object.keys(theme).toSorted()).toEqual(
+      ['appearance', 'name', ...THEME_ROLE_NAMESPACES].toSorted()
+    );
+    for (const namespace of THEME_ROLE_NAMESPACES) {
+      expect(Object.keys(theme[namespace]).toSorted()).toEqual([
+        ...THEME_REPOSITORY.definition.requiredThemeRoles[namespace],
+      ]);
+    }
   }
 });
 

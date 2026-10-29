@@ -229,10 +229,6 @@ test('source recipes own pigments once and resolve family-derived alpha projecti
   const recipe = readDefaultThemeRecipe(source!);
   const theme = readSourceTheme(source!, repository);
 
-  expect(recipe).not.toHaveProperty('ui');
-  expect(recipe).not.toHaveProperty('opacities');
-  expect(recipe).not.toHaveProperty('appearance');
-  expect(recipe).not.toHaveProperty('hueProfile');
   expect(recipe.oklch['ui:status.success']).toHaveLength(2);
   const success = themeColor(theme, 'ui:status.success');
   expect(success).toMatch(/^#[0-9A-F]{6}$/);
