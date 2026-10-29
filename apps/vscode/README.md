@@ -1,58 +1,44 @@
 # Tyrian Night for VS Code
 
-Tyrian Night provides five generated VS Code color themes:
+Five generated color themes:
 
-- **Night** — the quiet, low-energy dark variant at 60% of Abyss's saturation;
-- **Nocturne** — the tempered middle step at 80%;
-- **Pastel** — the family's pastel model: soft tints on a dusk-plum editor;
-- **Abyss** — the default: the deepest editor and the richest matte jewel tones;
-- **Dawn** — the family in daylight: deep, vivid colors on lavender-tinted paper;
+- **Night**: quiet and low-energy, at 60% of Abyss's saturation
+- **Nocturne**: the tempered middle step, at 80%
+- **Pastel**: soft tints on a dusk-plum editor
+- **Abyss**: the default, with the deepest editor and the richest matte jewel tones
+- **Dawn**: daylight, deep and vivid on lavender-tinted paper
 
-The themes enable semantic highlighting. Language servers that report semantic tokens keep parameters colored at every use, bold only declarations of functions and types, underline mutable bindings (rust-analyzer), and strike through deprecated symbols; other languages fall back to the TextMate grammar colors.
+Semantic highlighting is on by theme default, with token types mapped explicitly. Where a language server reports semantic tokens, parameters stay colored at every use, only function and type declarations are bold (references never are), readonly variables stay plain, mutable bindings are underlined (rust-analyzer) and deprecated symbols are struck through; rust-analyzer types whose fallback scope would land in the wrong role are pinned. Other languages use the TextMate colors.
 
-The projection covers a curated set of documented public VS Code colors for control states, selection and keyboard focus, chat and inline chat, notebooks, testing, terminal symbol icons, gauges, and agent-session indicators. High-contrast-only borders, shadows, and opacity controls intentionally keep VS Code defaults.
+The themes color a curated set of documented VS Code colors (control states, selection and focus, chat and inline chat, notebooks, testing, terminal symbol icons, gauges, agent sessions) and leave high-contrast-only borders, shadows and opacity at VS Code's defaults.
 
 ## Support
 
-- Color themes and the packaged extension support VS Code 1.118 or newer on Linux, macOS, and Windows.
-- Island UI (Apply, Repair, Restore Classic UI, and Doctor) supports Linux, macOS, and Windows. VS Code must be installed where your user account can write it: a per-user install on Windows, not one under `Program Files`.
-- Tyrian never requests administrator privileges or changes file ownership or permissions.
-
-The color themes use the normal VS Code extension contract. Merely installing or selecting a theme does not modify the VS Code application.
+- Themes and the extension: VS Code 1.118 or newer on Linux, macOS and Windows. Installing or selecting a theme does not modify VS Code.
+- Island UI (Apply, Repair, Restore Classic UI, Doctor): Linux, macOS and Windows, with VS Code installed where your account can write it (on Windows a per-user install, not one under `Program Files`).
+- Tyrian never asks for administrator rights or changes file ownership or permissions.
 
 ## Install and select a theme
 
 1. Open the Extensions panel and install **Tyrian Night**.
-2. Run **Preferences: Color Theme**.
-3. Select a Tyrian theme.
+2. Run **Preferences: Color Theme** and select a Tyrian theme.
 
-The repository includes a [`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) companion for typography and editor preferences. It is not applied automatically.
-
-Tyrian enables VS Code semantic highlighting by theme default and maps semantic token types explicitly: references never pick up declaration bold, readonly variables stay plain text, and rust-analyzer types whose fallback scope would land in the wrong role are pinned. The companion settings use `configuredByTheme`, which follows the theme's choice without forcing semantic highlighting on other themes.
+[`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) suggests typography and editor settings; it is not applied automatically. It sets semantic highlighting to `configuredByTheme`, which follows the theme without forcing it on others.
 
 ## Island UI
 
-Island UI is an optional workbench patch for VS Code on Linux, macOS, and Windows. On any other platform the commands report unsupported and change nothing, and startup reconciliation is skipped.
-
-Every Island change holds one per-user lock that the operating system releases when the process exits: `flock` on Linux and `lockf` on macOS, both on `~/.tyrian-night/island.lock`, and a named pipe on Windows. A second VS Code window waits for the first. Startup reconciliation and Repair read the installation's desired style and act on it while holding that lock, so a window that starts during another window's Apply cannot revert it. Each file is replaced atomically, so no file is ever partial or missing. Apply writes the stylesheet before the `workbench.html` link that loads it, and Restore removes the link before the stylesheet, so an interrupted command leaves VS Code loadable; running the same command again completes it. Doctor reports an interrupted state as broken or checksum-mismatched and recommends that command.
+An optional workbench patch. On unsupported platforms its commands report so and change nothing, and startup reconciliation is skipped.
 
 > [!WARNING]
-> Before uninstalling Tyrian Night, run **Tyrian Night: Restore Classic UI**, reload VS Code, and confirm that the custom UI is gone. Uninstalling the extension alone cannot remove an active patch.
+> Before uninstalling Tyrian Night, run **Tyrian Night: Restore Classic UI**, reload VS Code, and confirm the custom UI is gone. Uninstalling alone cannot remove an active patch.
 
-Commands:
+Commands: **Tyrian Night: Apply Island UI**, **Repair Island UI**, **Restore Classic UI**, **Doctor Island UI**.
 
-- **Tyrian Night: Apply Island UI**
-- **Tyrian Night: Repair Island UI**
-- **Tyrian Night: Restore Classic UI**
-- **Tyrian Night: Doctor Island UI**
-
-Apply preflights the canonical application root, desired stylesheet, current patch, backup receipts, checksums, and write access. It then updates one stylesheet link in `workbench.html`, one CSS file, and the matching `product.json` checksum. A target that changed after planning, such as during a VS Code update, stops the command before it is overwritten.
-
-Tyrian stores backups beside the patched files and records the exact physical application root and hashes in a manifest. Restore accepts backups only when the complete receipt proves they belong to the current patch; otherwise it removes Tyrian-owned evidence and repairs the checksum.
-
-Package-managed VS Code installations may make application files read-only. Fix permissions through the package or system administrator, then retry Repair or Restore. Tyrian reports permission and partial-cleanup failures instead of claiming success.
-
-VS Code may display “Your installation appears to be corrupt” while Island UI is active because `workbench.html` is intentionally patched.
+- **What Apply changes:** after preflighting the application root, stylesheet, current patch, backup receipts, checksums and write access, one stylesheet link in `workbench.html`, one CSS file and the matching `product.json` checksum. A target that changed after planning (for example during a VS Code update) stops the command before it is overwritten.
+- **Safe to interrupt:** every change holds one per-user lock the OS releases when the process exits (`flock` on Linux, `lockf` on macOS, both on `~/.tyrian-night/island.lock`; a named pipe on Windows), so a second window waits. Files are replaced atomically. Apply writes the stylesheet before its link and Restore removes the link first, so an interrupted command leaves VS Code loadable, and rerunning it finishes the job. Doctor reports an interrupted state and names the command to rerun. Startup reconciliation and Repair act on the saved style under the same lock, so a window starting during another's Apply cannot revert it.
+- **Backups:** kept beside the patched files, with the application root and hashes in a manifest. Restore uses them only when the full receipt proves they belong to the current patch; otherwise it removes Tyrian's files and repairs the checksum.
+- **Read-only installs:** package-managed VS Code may make application files read-only. Fix permissions through the package or system administrator, then retry Repair or Restore. Permission and partial-cleanup failures are reported, never hidden.
+- VS Code may say "Your installation appears to be corrupt" while Island UI is active, because `workbench.html` is patched on purpose.
 
 Island UI is based on [vscode-dark-islands](https://github.com/bwya77/vscode-dark-islands) by [bwya77](https://github.com/bwya77).
 
@@ -66,7 +52,7 @@ bun run verify:vscode
 bun run package:vscode
 ```
 
-`apps/vscode/package.json` owns extension metadata, dependencies, and build output. Its marketplace file allowlist (`files`) and theme list (`contributes.themes`) are generated by `scripts/generatedContracts.mjs`, so edit them there. The root package only orchestrates the workspace.
+`apps/vscode/package.json` owns extension metadata, dependencies and build output; its `files` allowlist and `contributes.themes` are generated by `scripts/generatedContracts.mjs`, so edit them there.
 
 ## License
 
