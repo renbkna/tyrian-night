@@ -282,7 +282,7 @@ test('an unreadable desired-state record recommends fixing permissions', async (
       statuses: [
         {
           appRoot,
-          registrationState: 'unreadable',
+          desired: { kind: 'unreadable' },
           classification: 'permission-denied',
           recommendedAction: 'fix-permissions',
         },
@@ -321,7 +321,7 @@ test('corrupt registration records recommend Classic UI restore', async () => {
     statuses: [
       {
         appRoot,
-        registrationState: 'corrupt',
+        desired: { kind: 'corrupt' },
         classification: 'broken-backup',
         recommendedAction: 'restore',
       },
@@ -560,7 +560,10 @@ test('converge applies the desired style instead of the repair fallback', async 
 
   expect(convergence).toMatchObject({
     action: 'apply',
-    result: { kind: 'already-current', status: { desiredCssFile: 'tyrian-nocturne.css' } },
+    result: {
+      kind: 'already-current',
+      status: { desired: { kind: 'enabled', cssFile: 'tyrian-nocturne.css' } },
+    },
   });
 });
 

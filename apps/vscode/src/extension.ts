@@ -508,13 +508,15 @@ function formatDoctorClassification(classification: IslandShellStatus['classific
 }
 
 function formatDesiredState(status: IslandShellStatus): string {
-  switch (status.registrationState) {
+  switch (status.desired.kind) {
     case 'corrupt':
     case 'unreadable':
-      return `unknown (the desired-state record is ${status.registrationState})`;
+      return `unknown (the desired-state record is ${status.desired.kind})`;
+    case 'enabled':
+      return `enabled (${status.desired.cssFile})`;
     case 'absent':
-    case 'valid':
-      return status.desiredCssFile ? `enabled (${status.desiredCssFile})` : 'disabled';
+    case 'disabled':
+      return 'disabled';
   }
 }
 

@@ -134,7 +134,10 @@ test('the bundled CLI converge leaves an installation already on its desired sty
   ]);
   expect(converged).toMatchObject({
     action: 'apply',
-    result: { kind: 'already-current', status: { desiredCssFile: 'tyrian-nocturne.css' } },
+    result: {
+      kind: 'already-current',
+      status: { desired: { kind: 'enabled', cssFile: 'tyrian-nocturne.css' } },
+    },
   });
 });
 

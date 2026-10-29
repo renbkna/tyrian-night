@@ -543,8 +543,7 @@ test('Doctor treats a null desired record as disabled and recommends restore for
     statuses: [
       supervisedStatus(
         {
-          registrationState: 'valid',
-          desiredCssFile: null,
+          desired: { kind: 'disabled' },
           classification: 'broken-backup',
         },
         'restore'
@@ -567,7 +566,7 @@ test('Doctor names unsupported layouts, unknown desired state and the restore pl
     statuses: [
       supervisedStatus(
         {
-          registrationState: 'corrupt',
+          desired: { kind: 'corrupt' },
           classification: 'unsupported-layout',
           restorePlan: 'strip-tyrian-block',
         },
@@ -722,8 +721,7 @@ function defaultCliResult(args: string[]): unknown {
 function fakeStatus(overrides: Partial<IslandShellStatus> = {}): IslandShellStatus {
   return {
     appRoot: vscodeAppRoot,
-    desiredCssFile: undefined,
-    registrationState: 'absent',
+    desired: { kind: 'absent' },
     active: false,
     managed: false,
     classification: 'clean',
@@ -739,8 +737,8 @@ function fakeStatus(overrides: Partial<IslandShellStatus> = {}): IslandShellStat
 
 function validStatus(desiredCssFile: string | null): IslandShellStatus {
   return fakeStatus({
-    registrationState: 'valid',
-    desiredCssFile,
+    desired:
+      desiredCssFile === null ? { kind: 'disabled' } : { kind: 'enabled', cssFile: desiredCssFile },
     managed: true,
     active: true,
   });

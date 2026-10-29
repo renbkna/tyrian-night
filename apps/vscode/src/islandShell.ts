@@ -30,7 +30,7 @@ import {
   listIslandDoctorRoots,
   listIslandRestoreRoots,
   publishManagedRootRecord,
-  readDesiredCssFile,
+  desiredStateOf,
   readManagedAppRootRegistration,
 } from './islandRegistry.js';
 import {
@@ -125,15 +125,14 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
     if (status.classification === 'missing') {
       return { kind: 'blocked', appRoot, status, writeAccess, reason: status.issues.join(' ') };
     }
-    if (status.registrationState === 'corrupt') {
+    if (status.desired.kind === 'corrupt') {
       const { message } = corruptDesiredStateFailure();
       return { kind: 'blocked', appRoot, status, writeAccess, reason: message };
     }
     writeAccess = await readIslandShellWriteAccess(options);
     const plan = await buildIslandApplyPlan(options);
     const changed =
-      status.registrationState !== 'valid' ||
-      status.desiredCssFile !== plan.desiredCssFile ||
+      !(status.desired.kind === 'enabled' && status.desired.cssFile === plan.desiredCssFile) ||
       plan.changed;
 
     if (!writeAccess.writable && changed) {
@@ -441,8 +440,7 @@ function uninspectedStatus(
 ): IslandShellStatus {
   return {
     appRoot,
-    desiredCssFile: registration === 'unreadable' ? undefined : readDesiredCssFile(registration),
-    registrationState: registration === 'unreadable' ? 'unreadable' : registration.kind,
+    desired: desiredStateOf(registration),
     active: false,
     managed: false,
     classification,

@@ -164,7 +164,7 @@ test('status-all reports registered missing roots without mutating the registry'
     appRoot: missingAppRoot,
     classification: 'missing',
     managed: false,
-    registrationState: 'valid',
+    desired: { kind: 'disabled' },
     verificationPassed: false,
   });
   expect(await fs.readFile(recordPath, 'utf8')).toBe(before);
@@ -194,9 +194,7 @@ test('concurrent app roots register and unregister without overwriting each othe
   expect(await readStatuses({ registryHome })).toHaveLength(appRoots.length);
   expect(await readStatuses({ registryHome })).toEqual(
     expect.arrayContaining(
-      appRoots.map((appRoot) =>
-        expect.objectContaining({ appRoot, registrationState: 'valid', desiredCssFile: null })
-      )
+      appRoots.map((appRoot) => expect.objectContaining({ appRoot, desired: { kind: 'disabled' } }))
     )
   );
   expect((await fs.stat(buildManagedRootsDirectoryPath(registryHome))).isDirectory()).toBe(true);
@@ -225,7 +223,9 @@ test('registry enumeration observes stable snapshots during concurrent publicati
   expect(snapshots.some((statuses) => statuses.length > 0)).toBe(true);
   for (const statuses of snapshots) {
     expect(new Set(statuses.map(({ appRoot }) => appRoot)).size).toBe(statuses.length);
-    expect(statuses.every(({ registrationState }) => registrationState === 'valid')).toBe(true);
+    expect(
+      statuses.every(({ desired }) => desired.kind === 'enabled' || desired.kind === 'disabled')
+    ).toBe(true);
   }
 });
 
@@ -280,8 +280,7 @@ test('clean roots with semantically correct checksum are not rewritten during re
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
-    registrationState: 'valid',
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
 });
 
@@ -306,7 +305,7 @@ test('restore-all retains a current disabled desired record without touching wor
   expect(result.failedAppRoots).toEqual([]);
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
   await expect(readStatuses({ registryHome })).resolves.toMatchObject([
-    { appRoot, registrationState: 'valid', desiredCssFile: null, classification: 'clean' },
+    { appRoot, desired: { kind: 'disabled' }, classification: 'clean' },
   ]);
 });
 
@@ -342,7 +341,7 @@ test('restore-all cleans preferred active roots even when the managed root regis
   expect(result.enumerationFailure).toBeUndefined();
   await expectRestoredAppRoot(appRoot);
   await expect(readStatuses({ registryHome })).resolves.toMatchObject([
-    { appRoot, registrationState: 'valid', desiredCssFile: null, classification: 'clean' },
+    { appRoot, desired: { kind: 'disabled' }, classification: 'clean' },
   ]);
 });
 
@@ -397,8 +396,7 @@ test('a desired-state record with fields outside its format is corrupt', async (
   );
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    registrationState: 'corrupt',
-    desiredCssFile: undefined,
+    desired: { kind: 'corrupt' },
   });
 });
 
@@ -597,8 +595,7 @@ test('restore strips active Island UI when backup evidence is broken', async () 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registrationState: 'valid',
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
@@ -612,8 +609,7 @@ test('a patched root without its desired-state record is classified as broken ba
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     active: true,
-    registrationState: 'absent',
-    desiredCssFile: undefined,
+    desired: { kind: 'absent' },
     classification: 'broken-backup',
     verificationPassed: false,
     issues: expect.arrayContaining([
@@ -635,7 +631,7 @@ test('direct restore replaces a corrupt owned record with durable disabled state
   );
 
   await expect(readIslandShellInventory({ registryHome })).resolves.toMatchObject({
-    statuses: [{ appRoot, registrationState: 'corrupt', classification: 'broken-backup' }],
+    statuses: [{ appRoot, desired: { kind: 'corrupt' }, classification: 'broken-backup' }],
     registryDiagnostics: [
       expect.stringContaining('desiredCssFile must be null or a CSS asset name'),
     ],
@@ -757,7 +753,7 @@ test('restore repairs checksum when broken sidecars mask the mismatch classifica
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
@@ -788,7 +784,7 @@ test('status treats a stale Island manifest checksum as self-healable broken sta
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
 });
 
@@ -906,7 +902,7 @@ test('status rejects drift between desired style and the physical manifest recei
   );
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
-    desiredCssFile: 'desired-second.css',
+    desired: { kind: 'enabled', cssFile: 'desired-second.css' },
     classification: 'broken-backup',
     verificationPassed: false,
     receipt: { desiredCssFile: 'desired-first.css' },
@@ -970,7 +966,7 @@ test('restore validates and uses a complete backup pair before deleting managed 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
 });
 
@@ -1025,7 +1021,7 @@ test('restore refuses an invalid manifest receipt before trusting backup sidecar
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    desiredCssFile: null,
+    desired: { kind: 'disabled' },
   });
 });
 

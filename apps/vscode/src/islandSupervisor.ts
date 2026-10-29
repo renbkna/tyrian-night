@@ -151,13 +151,13 @@ export async function convergeIslandUiSupervised(options: {
 }): Promise<IslandUiConvergeResult> {
   const status = await readIslandShellStatus(options);
 
-  if (status.registrationState === 'corrupt') {
+  if (status.desired.kind === 'corrupt') {
     throw corruptDesiredStateFailure();
   }
 
   const cssFile =
-    typeof status.desiredCssFile === 'string'
-      ? status.desiredCssFile
+    status.desired.kind === 'enabled'
+      ? status.desired.cssFile
       : options.intent.kind === 'repair'
         ? options.intent.fallbackCssFile
         : undefined;
@@ -180,7 +180,7 @@ export async function convergeIslandUiSupervised(options: {
     };
   }
 
-  if (options.intent.kind === 'startup' && (status.managed || status.active)) {
+  if (options.intent.kind === 'startup' && hasIslandEvidence(status)) {
     return {
       action: 'restore',
       result: await restoreIslandShell({
@@ -280,17 +280,17 @@ function recommendIslandUiAction(
   status: IslandShellStatus,
   writeAccess: IslandShellWriteAccess
 ): IslandUiRecommendedAction {
-  const registered = status.registrationState !== 'absent';
-  if (status.registrationState === 'unreadable') return 'fix-permissions';
+  const registered = status.desired.kind !== 'absent';
+  if (status.desired.kind === 'unreadable') return 'fix-permissions';
   if (status.classification === 'missing') return registered ? 'prune-missing' : 'none';
   if (status.classification === 'unsupported-layout') {
-    return registered || status.managed || status.active ? 'manual-recovery' : 'none';
+    return registered || hasIslandEvidence(status) ? 'manual-recovery' : 'none';
   }
-  if (status.registrationState === 'corrupt') return 'restore';
+  if (status.desired.kind === 'corrupt') return 'restore';
 
-  const desired = typeof status.desiredCssFile === 'string';
+  const desired = status.desired.kind === 'enabled';
   if (status.classification === 'permission-denied' || !writeAccess.writable) {
-    return desired || status.managed || status.active || registered ? 'fix-permissions' : 'none';
+    return registered || hasIslandEvidence(status) ? 'fix-permissions' : 'none';
   }
 
   if (desired) {
@@ -304,5 +304,10 @@ function recommendIslandUiAction(
     return 'apply';
   }
 
-  return status.managed || status.active ? 'restore' : 'none';
+  return hasIslandEvidence(status) ? 'restore' : 'none';
+}
+
+/** Whether Tyrian has enabled, patched or left files on this root. */
+function hasIslandEvidence(status: IslandShellStatus): boolean {
+  return status.managed || status.active;
 }

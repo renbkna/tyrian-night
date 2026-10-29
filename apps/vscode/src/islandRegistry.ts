@@ -20,6 +20,7 @@ import {
 } from './islandPatchContract.js';
 import {
   describeIslandShellFailure,
+  type IslandDesiredState,
   type IslandShellFailureDescription,
   isPermissionError,
 } from './islandShellContract.js';
@@ -219,10 +220,14 @@ export async function publishManagedRootRecord(
   return true;
 }
 
-export function readDesiredCssFile(
-  registration: ManagedRootRegistration
-): string | null | undefined {
-  return registration.kind === 'valid' ? registration.desiredCssFile : undefined;
+export function desiredStateOf(
+  registration: ManagedRootRegistration | 'unreadable'
+): IslandDesiredState {
+  if (registration === 'unreadable') return { kind: 'unreadable' };
+  if (registration.kind !== 'valid') return { kind: registration.kind };
+  return registration.desiredCssFile === null
+    ? { kind: 'disabled' }
+    : { kind: 'enabled', cssFile: registration.desiredCssFile };
 }
 
 export type IslandAccessRequirement = {

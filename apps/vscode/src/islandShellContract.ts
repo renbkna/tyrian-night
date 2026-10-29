@@ -7,11 +7,17 @@ import {
 } from './islandMutationFacts.js';
 import type { RestorePlan } from './islandPatchPlan.js';
 
+/** What a root's desired-state record says, or why it says nothing usable. */
+export type IslandDesiredState =
+  | { kind: 'absent' }
+  | { kind: 'enabled'; cssFile: string }
+  | { kind: 'disabled' }
+  | { kind: 'corrupt' }
+  | { kind: 'unreadable' };
+
 export type IslandShellStatus = {
   appRoot: string;
-  /** The desired style, `null` when disabled, `undefined` without a valid record. */
-  desiredCssFile: string | null | undefined;
-  registrationState: 'absent' | 'valid' | 'corrupt' | 'unreadable';
+  desired: IslandDesiredState;
   active: boolean;
   managed: boolean;
   classification:

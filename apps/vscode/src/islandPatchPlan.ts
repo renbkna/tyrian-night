@@ -14,7 +14,7 @@ import {
   isIslandManifestShape,
 } from './islandPatchContract.js';
 import { type IslandShellStatus, IslandShellFailure } from './islandShellContract.js';
-import { type ManagedRootRegistration, readDesiredCssFile } from './islandRegistry.js';
+import { desiredStateOf, type ManagedRootRegistration } from './islandRegistry.js';
 import {
   type FileMutation,
   escapeRegExp,
@@ -79,7 +79,8 @@ export async function inspectIslandRoot(
   registration: ManagedRootRegistration
 ): Promise<IslandRootState> {
   const registered = registration.kind !== 'absent';
-  const desiredCssFile = readDesiredCssFile(registration);
+  // The style a valid record names, `null` when it disables Island UI.
+  const recordedCssFile = registration.kind === 'valid' ? registration.desiredCssFile : undefined;
   const paths = buildIslandPatchPaths(appRoot);
   const currentHtml = await readLayoutFile(paths.workbenchHtmlPath);
   const currentProductJson = await readLayoutFile(paths.productJsonPath);
@@ -141,8 +142,8 @@ export async function inspectIslandRoot(
     (active && !registered) ||
     registration.kind === 'corrupt' ||
     (manifest !== undefined &&
-      desiredCssFile !== undefined &&
-      manifest.desiredCssFile !== desiredCssFile);
+      recordedCssFile !== undefined &&
+      manifest.desiredCssFile !== recordedCssFile);
 
   if (active) {
     issues.push('Tyrian workbench patch evidence is present.');
@@ -170,8 +171,8 @@ export async function inspectIslandRoot(
 
   if (
     manifest !== undefined &&
-    desiredCssFile !== undefined &&
-    manifest.desiredCssFile !== desiredCssFile
+    recordedCssFile !== undefined &&
+    manifest.desiredCssFile !== recordedCssFile
   ) {
     issues.push('Tyrian manifest style does not match the desired-state record.');
   }
@@ -245,8 +246,7 @@ export async function inspectIslandRoot(
     restore,
     status: {
       appRoot,
-      desiredCssFile,
-      registrationState: registration.kind,
+      desired: desiredStateOf(registration),
       active,
       managed,
       classification,
