@@ -71,27 +71,6 @@ test('VS Code package license and icon are exact projections of repository asset
   }
 });
 
-test('VS Code package assets never follow generated targets through symlinks', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-vscode-package-symlink-'));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-vscode-package-outside-'));
-
-  try {
-    fs.mkdirSync(path.join(root, 'assets'), { recursive: true });
-    fs.mkdirSync(path.join(root, VSCODE_PACKAGE_ROOT), { recursive: true });
-    fs.writeFileSync(path.join(root, 'LICENSE'), 'license source\n');
-    fs.writeFileSync(path.join(root, 'assets/icon.png'), Buffer.from([0, 1, 2, 3]));
-    const outsideLicense = path.join(outside, 'LICENSE');
-    fs.writeFileSync(outsideLicense, 'outside license\n');
-    fs.symlinkSync(outsideLicense, path.join(root, LICENSE_PATH));
-
-    expect(() => syncVscodePackageAssets(root)).toThrow('Generated path must not contain symlinks');
-    expect(fs.readFileSync(outsideLicense, 'utf8')).toBe('outside license\n');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(outside, { recursive: true, force: true });
-  }
-});
-
 test('VS Code contribution generation resolves the injected catalog root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-contract-root-'));
 

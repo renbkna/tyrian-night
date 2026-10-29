@@ -94,6 +94,19 @@ test('Island UI palette tokens derive from neutral theme roles', () => {
     expect(css).toContain(
       `--islands-effect-status-hover: ${themeColor(theme, 'ui:effect.statusHover').toLowerCase()};`
     );
+    expect(css).toContain(
+      `--islands-border: ${themeColor(theme, 'ui:border.default').toLowerCase()};`
+    );
+    for (const [token, role] of [
+      ['--islands-border-rgb', 'ui:border.default'],
+      ['--islands-button-hover-rgb', 'ui:buttons.hover.background'],
+      ['--islands-hover-rgb', 'ui:surface.hover'],
+      ['--islands-selection-rgb', 'ui:selection.active'],
+      ['--islands-selection-inactive-rgb', 'ui:selection.inactive'],
+      ['--islands-terminal-black-rgb', 'terminal:ansi.black'],
+    ]) {
+      expect(css).toContain(`${token}: ${rgbChannels(themeColor(theme, role))};`);
+    }
   }
 });
 

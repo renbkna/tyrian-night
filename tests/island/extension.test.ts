@@ -180,6 +180,35 @@ test('repair Island UI requires warning acknowledgement and delegates desired st
   ]);
 });
 
+test('apply Island UI applies the active Tyrian style and offers reload', async () => {
+  const applyCommand = await activateAndGetCommand('tyrianNight.applyIslandUi');
+  resetObservations();
+  queuedSpawnResponses.push({
+    kind: 'applied',
+    ...mutationFacts({ registryChanged: true, physicalChanged: true }),
+    status: validStatus('tyrian-night.css'),
+  } satisfies CliResult<'apply-supervised'>);
+
+  await applyCommand();
+
+  expect(spawnCalls.map((call) => call.args.slice(1))).toEqual([
+    [
+      'apply-supervised',
+      '--app-root',
+      '/test-vscode-app-root',
+      '--css-source',
+      '/test-extension-root/island/tyrian-night.css',
+      '--theme-version',
+      'test',
+    ],
+  ]);
+  expect(informationMessages.at(-1)).toEqual([
+    'Tyrian Night: Island UI applied. Reload VS Code to apply it.',
+    'Reload Window',
+    'Later',
+  ]);
+});
+
 test('repair Island UI does not patch when warning acknowledgement is cancelled', async () => {
   const repairCommand = await activateAndGetCommand('tyrianNight.repairIslandUi');
   resetObservations();
@@ -491,6 +520,8 @@ test('repair Island UI handles permission-required supervisor result through Doc
   expect(warningMessages.at(-1)?.[0]).toContain('VS Code app files are not writable');
   expect(warningMessages.at(-1)?.[0]).toContain('outside Tyrian');
   expect(warningMessages.at(-1)?.slice(1)).toEqual(['Why This Is Needed', 'Open Doctor', 'Later']);
+  const content = (openedDocuments.at(-1) as { content?: string } | undefined)?.content;
+  expect(content).toContain('  Blocked path: /test-vscode-app-root/product.json (EACCES)');
 });
 
 test('permission-required Island UI prompt can open the public setup guidance', async () => {

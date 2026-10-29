@@ -25,6 +25,7 @@ import {
 } from '../../apps/vscode/src/islandPatchContract.js';
 import {
   describeIslandShellFailure,
+  errorMessage,
   type IslandShellStatus,
 } from '../../apps/vscode/src/islandShellContract.js';
 import {
@@ -714,13 +715,14 @@ for (const [name, replacement] of [
       /<link rel="stylesheet" href="\.\/tyrian-night\.island\.css\?v=[^"]+">/u,
       replacement
     );
+    expect(mutatedHtml).toContain(replacement);
     await fs.writeFile(workbenchHtmlPath, mutatedHtml, 'utf8');
     await fs.writeFile(productJsonPath, productJson(sha256Base64(mutatedHtml)), 'utf8');
 
     try {
       await restoreIslandShell({ appRoot, registryHome });
     } catch (error) {
-      throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`${name}: ${errorMessage(error)}`);
     }
 
     const restoredHtml = await fs.readFile(workbenchHtmlPath, 'utf8');

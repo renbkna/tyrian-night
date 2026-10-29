@@ -20,7 +20,6 @@ const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @typedef {{
- *   label: string;
  *   outputPath: string;
  *   source: import('./themeSources.mjs').ThemeSource;
  *   tokens: Readonly<Record<string, string>>;
@@ -62,7 +61,7 @@ function renderIslandCss(theme, repoRoot, repository) {
     );
   }
 
-  return `${header(theme.label)}
+  return `${header(theme.source.label)}
 
 :root {
 ${formatCssVariables(tokens)}
@@ -91,7 +90,6 @@ export function buildAllIslandCss(repoRoot = defaultRepoRoot) {
  */
 function projectIslandCssThemes(sourceThemes, profiles) {
   return sourceThemes.map((source) => ({
-    label: source.label,
     outputPath: inVscodePackage(vscodeIslandCssFile(source.islandCssFile)),
     source,
     tokens: /** @type {Record<string, string>} */ (profiles[source.islandEffects]),
@@ -239,14 +237,7 @@ function rgbChannels(color) {
   return `${red}, ${green}, ${blue}`;
 }
 
-/**
- * @param {string | undefined} color
- * @returns {string}
- */
+/** @param {string} color */
 function lowerHex(color) {
-  if (!color) {
-    throw new Error('Missing Island source palette color');
-  }
-
   return color.toLowerCase();
 }

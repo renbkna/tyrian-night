@@ -388,7 +388,7 @@ async function doctorIslandUi(): Promise<void> {
         detailLines.push(`  Writable: ${writeAccess.writable ? 'yes' : 'no'}`);
 
         for (const blockedPath of writeAccess.blockedPaths) {
-          detailLines.push(`  Blocked path: ${blockedPath.path}`);
+          detailLines.push(`  Blocked path: ${blockedPath.path} (${blockedPath.reason})`);
         }
       } else {
         detailLines.push(`  Write-access inspection failed: ${status.accessInspection.reason}`);
