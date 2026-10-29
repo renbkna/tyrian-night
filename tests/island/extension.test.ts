@@ -503,7 +503,7 @@ test('permission-required Island UI prompt can open the public setup guidance', 
 
   expect(warningMessages.at(-1)?.slice(1)).toEqual(['Why This Is Needed', 'Open Doctor', 'Later']);
   expect(externalUrls).toEqual([
-    'https://github.com/renbkna/tyrian-night/blob/main/apps/vscode/README.md#island-ui',
+    'https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/README.md#island-ui',
   ]);
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['converge']);
 });

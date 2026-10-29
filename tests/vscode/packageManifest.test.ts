@@ -10,13 +10,22 @@ import { TYRIAN_THEME_CATALOG } from '../../apps/vscode/src/generated/themeCatal
 import { syncGeneratedContracts } from '../../scripts/generatedContracts.mjs';
 import { getDefaultThemeSource } from '../../scripts/themeSources.mjs';
 import { syncVscodePackageAssets } from '../../scripts/vscodePackageAssets.mjs';
+import {
+  inVscodePackage,
+  VSCODE_PACKAGE_ICON,
+  VSCODE_PACKAGE_MANIFEST,
+  VSCODE_PACKAGE_ROOT,
+  vscodeThemeFile,
+} from '../../scripts/vscodePackageLayout.mjs';
 
 type ExtensionPackage = {
   contributes: { themes: Array<{ label: string; path: string; uiTheme: string }> };
 };
 
-const VSCODE_ROOT = 'apps/vscode';
-const VSCODE_PACKAGE_PATH = path.join(VSCODE_ROOT, 'package.json');
+const VSCODE_PACKAGE_PATH = inVscodePackage(VSCODE_PACKAGE_MANIFEST);
+const LICENSE_PATH = inVscodePackage('LICENSE');
+const ICON_PATH = inVscodePackage(VSCODE_PACKAGE_ICON);
+const THEME_CATALOG_PATH = inVscodePackage('src/generated/themeCatalog.ts');
 
 test('manifest declares the VS Code host and contribution contracts this extension depends on', () => {
   const manifest = readJson<ExtensionPackage>(VSCODE_PACKAGE_PATH);
@@ -25,7 +34,7 @@ test('manifest declares the VS Code host and contribution contracts this extensi
     SOURCE_THEMES.map((source) => ({
       label: source.label,
       uiTheme: source.vscodeUiTheme,
-      path: source.vscodeContributionPath,
+      path: `./${vscodeThemeFile(source.slug)}`,
     }))
   );
   for (const themeContribution of manifest.contributes.themes) {
@@ -52,18 +61,11 @@ test('VS Code package license and icon are exact projections of repository asset
     fs.writeFileSync(path.join(root, 'LICENSE'), 'license source\n');
     fs.writeFileSync(path.join(root, 'assets/icon.png'), Buffer.from([0, 1, 2, 3]));
 
-    expect(syncVscodePackageAssets(root, { check: true })).toEqual([
-      'apps/vscode/LICENSE',
-      'apps/vscode/assets/icon.png',
-    ]);
+    expect(syncVscodePackageAssets(root, { check: true })).toEqual([LICENSE_PATH, ICON_PATH]);
     syncVscodePackageAssets(root);
     expect(syncVscodePackageAssets(root, { check: true })).toEqual([]);
-    expect(fs.readFileSync(path.join(root, 'apps/vscode/LICENSE'), 'utf8')).toBe(
-      'license source\n'
-    );
-    expect(fs.readFileSync(path.join(root, 'apps/vscode/assets/icon.png'))).toEqual(
-      Buffer.from([0, 1, 2, 3])
-    );
+    expect(fs.readFileSync(path.join(root, LICENSE_PATH), 'utf8')).toBe('license source\n');
+    expect(fs.readFileSync(path.join(root, ICON_PATH))).toEqual(Buffer.from([0, 1, 2, 3]));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -75,12 +77,12 @@ test('VS Code package assets never follow generated targets through symlinks', (
 
   try {
     fs.mkdirSync(path.join(root, 'assets'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/vscode'), { recursive: true });
+    fs.mkdirSync(path.join(root, VSCODE_PACKAGE_ROOT), { recursive: true });
     fs.writeFileSync(path.join(root, 'LICENSE'), 'license source\n');
     fs.writeFileSync(path.join(root, 'assets/icon.png'), Buffer.from([0, 1, 2, 3]));
     const outsideLicense = path.join(outside, 'LICENSE');
     fs.writeFileSync(outsideLicense, 'outside license\n');
-    fs.symlinkSync(outsideLicense, path.join(root, 'apps/vscode/LICENSE'));
+    fs.symlinkSync(outsideLicense, path.join(root, LICENSE_PATH));
 
     expect(() => syncVscodePackageAssets(root)).toThrow('Generated path must not contain symlinks');
     expect(fs.readFileSync(outsideLicense, 'utf8')).toBe('outside license\n');
@@ -95,7 +97,7 @@ test('VS Code contribution generation resolves the injected catalog root', () =>
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/vscode'), { recursive: true });
+    fs.mkdirSync(path.join(root, VSCODE_PACKAGE_ROOT), { recursive: true });
     fs.writeFileSync(path.join(root, VSCODE_PACKAGE_PATH), '{"contributes":{}}\n');
     const themePath = path.join(root, 'source/themes/tyrian-night.cjs');
     const theme = readSourceData<Record<string, unknown>>(themePath);
@@ -104,23 +106,24 @@ test('VS Code contribution generation resolves the injected catalog root', () =>
 
     const packageBeforeCheck = fs.readFileSync(path.join(root, VSCODE_PACKAGE_PATH), 'utf8');
     expect(syncGeneratedContracts(root, { check: true })).toEqual([
-      'apps/vscode/package.json',
-      'apps/vscode/src/generated/themeCatalog.ts',
+      VSCODE_PACKAGE_PATH,
+      inVscodePackage('src/generated/packageLayout.ts'),
+      THEME_CATALOG_PATH,
     ]);
     expect(fs.readFileSync(path.join(root, VSCODE_PACKAGE_PATH), 'utf8')).toBe(packageBeforeCheck);
-    expect(fs.existsSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(root, THEME_CATALOG_PATH))).toBe(false);
 
     syncGeneratedContracts(root);
-    expect(
-      fs.readFileSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'), 'utf8')
-    ).toContain("label: 'Injected Tyrian Night'");
+    expect(fs.readFileSync(path.join(root, THEME_CATALOG_PATH), 'utf8')).toContain(
+      "label: 'Injected Tyrian Night'"
+    );
     expect(
       readJson<{ contributes: { themes: Array<{ label: string }> } }>(
         path.join(root, VSCODE_PACKAGE_PATH)
       ).contributes.themes[0]?.label
     ).toBe('Injected Tyrian Night');
     expect(readJson<{ files: string[] }>(path.join(root, VSCODE_PACKAGE_PATH)).files).toContain(
-      'themes/tyrian-night.json'
+      vscodeThemeFile('tyrian-night')
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -133,7 +136,7 @@ test('generated contracts cannot redirect the mixed-authority package manifest',
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/vscode'), { recursive: true });
+    fs.mkdirSync(path.join(root, VSCODE_PACKAGE_ROOT), { recursive: true });
     const outsidePackage = path.join(outside, 'package.json');
     const outsideContent = '{"name":"outside","contributes":{},"files":[]}\n';
     fs.writeFileSync(outsidePackage, outsideContent);
@@ -141,7 +144,7 @@ test('generated contracts cannot redirect the mixed-authority package manifest',
 
     expect(() => syncGeneratedContracts(root)).toThrow('Generated path must not contain symlinks');
     expect(fs.readFileSync(outsidePackage, 'utf8')).toBe(outsideContent);
-    expect(fs.existsSync(path.join(root, 'apps/vscode/src/generated/themeCatalog.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(root, THEME_CATALOG_PATH))).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(outside, { recursive: true, force: true });
@@ -149,7 +152,7 @@ test('generated contracts cannot redirect the mixed-authority package manifest',
 });
 
 test('VS Code companion settings example is parseable and aligned with Tyrian defaults', () => {
-  const settings = readJson<Record<string, unknown>>('apps/vscode/settings.example.json');
+  const settings = readJson<Record<string, unknown>>(inVscodePackage('settings.example.json'));
 
   expect(settings['workbench.colorTheme']).toBe(getDefaultThemeSource(SOURCE_THEMES).label);
 });
@@ -159,7 +162,7 @@ function readJson<T>(filePath: string): T {
 }
 
 function resolveVscodePackagePath(filePath: string): string {
-  return path.join(VSCODE_ROOT, filePath);
+  return path.join(VSCODE_PACKAGE_ROOT, filePath);
 }
 
 function pathBasename(filePath: string, extension: string): string {

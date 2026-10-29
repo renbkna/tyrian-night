@@ -10,8 +10,16 @@ import { oklchToHex } from '../../scripts/colorScience.mjs';
 import { buildAllIslandCss, readIslandEffectProfiles } from '../../scripts/islandCss.mjs';
 import { parseHexColor } from '../../scripts/colorUtils.mjs';
 import { loadThemeDefinitionContext, themeColor } from '../../scripts/themeDefinition.mjs';
+import {
+  inVscodePackage,
+  VSCODE_ISLAND_BASE_TEMPLATE,
+  vscodeIslandCssFile,
+} from '../../scripts/vscodePackageLayout.mjs';
 
-const ISLAND_CSS_FILES = SOURCE_THEMES.map(({ islandCssPath }) => islandCssPath);
+const ISLAND_CSS_FILES = SOURCE_THEMES.map(({ islandCssFile }) =>
+  inVscodePackage(vscodeIslandCssFile(islandCssFile))
+);
+const BASE_TEMPLATE = inVscodePackage(VSCODE_ISLAND_BASE_TEMPLATE);
 
 test('Island CSS is generated for exactly the catalog themes', () => {
   expect(buildAllIslandCss().map(({ outputPath }) => outputPath)).toEqual(ISLAND_CSS_FILES);
@@ -28,8 +36,8 @@ test('Island CSS generation resolves catalog identity from the injected reposito
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/vscode/island'), { recursive: true });
-    fs.copyFileSync('apps/vscode/island/base.css', path.join(root, 'apps/vscode/island/base.css'));
+    fs.mkdirSync(path.join(root, path.dirname(BASE_TEMPLATE)), { recursive: true });
+    fs.copyFileSync(BASE_TEMPLATE, path.join(root, BASE_TEMPLATE));
     const themePath = path.join(root, 'source/themes/tyrian-night.cjs');
     const theme = readSourceData(themePath) as {
       name: string;
@@ -57,7 +65,7 @@ test('Island CSS generation resolves catalog identity from the injected reposito
 test('Island UI palette tokens derive from neutral theme roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const css = fs.readFileSync(`apps/vscode/island/${source.slug}.css`, 'utf8');
+    const css = fs.readFileSync(inVscodePackage(vscodeIslandCssFile(source.islandCssFile)), 'utf8');
 
     expect(css).toContain(
       `--islands-bg-backdrop: ${themeColor(theme, 'ui:surface.navigation').toLowerCase()};`
@@ -155,8 +163,8 @@ test('an effect profile cannot redefine a palette or layout token', () => {
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/vscode/island'), { recursive: true });
-    fs.copyFileSync('apps/vscode/island/base.css', path.join(root, 'apps/vscode/island/base.css'));
+    fs.mkdirSync(path.join(root, path.dirname(BASE_TEMPLATE)), { recursive: true });
+    fs.copyFileSync(BASE_TEMPLATE, path.join(root, BASE_TEMPLATE));
     expect(buildAllIslandCss(root)).toHaveLength(SOURCE_THEMES.length);
 
     for (const token of ['--islands-border', '--islands-panel-radius']) {

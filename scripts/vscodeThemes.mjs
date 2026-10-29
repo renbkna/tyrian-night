@@ -6,6 +6,11 @@ import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import { qualifyRole, THEME_ROLE_NAMESPACES, themeColor } from './themeDefinition.mjs';
+import {
+  inVscodePackage,
+  VSCODE_THEMES_DIRECTORY,
+  vscodeThemeFile,
+} from './vscodePackageLayout.mjs';
 import { loadVscodeProjection } from './vscodeProjection.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -74,7 +79,7 @@ export function collectVscodeThemeAssets(root = repoRoot) {
   const projection = loadVscodeProjection(repository.definition);
 
   return repository.sources.map((source) => ({
-    path: source.vscodeThemePath,
+    path: inVscodePackage(vscodeThemeFile(source.slug)),
     content: `${JSON.stringify(
       buildVscodeTheme(readSourceTheme(source, repository), projection),
       null,
@@ -91,11 +96,7 @@ export function collectVscodeThemeAssets(root = repoRoot) {
 function projectColors(target, projection, resolve) {
   for (const [role, keys] of Object.entries(projection)) {
     const color = resolve(role);
-    for (const key of keys) {
-      if (Object.hasOwn(target, key))
-        throw new Error(`VS Code color '${key}' has multiple owners.`);
-      target[key] = color;
-    }
+    for (const key of keys) target[key] = color;
   }
 }
 
@@ -107,6 +108,6 @@ function projectColors(target, projection, resolve) {
 export function syncVscodeThemes(root = repoRoot, options = {}) {
   return syncGeneratedAssets(collectVscodeThemeAssets(root), root, {
     check: options.check,
-    ownership: [{ directory: 'apps/vscode/themes', match: /\.json$/u }],
+    ownership: [{ directory: inVscodePackage(VSCODE_THEMES_DIRECTORY), match: /\.json$/u }],
   });
 }

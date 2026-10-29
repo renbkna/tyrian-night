@@ -6,11 +6,13 @@ import path from 'node:path';
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from 'bun:test';
 
 import { holdPipeLock } from '../../apps/vscode/src/islandLock.js';
+import { ISLAND_CLI_BUNDLE_PATH } from '../../apps/vscode/src/generated/packageLayout.js';
 import {
   WORKBENCH_CHECKSUM_KEY,
   WORKBENCH_CSS_LINK,
   buildIslandPatchPaths,
 } from '../../apps/vscode/src/islandPatchContract.js';
+import { VSCODE_PACKAGE_ROOT } from '../../scripts/vscodePackageLayout.mjs';
 
 // These tests run on every CI operating system: they build the extension with its own
 // `bundle` script and execute the shipped out/islandCli.js under Node, the way the
@@ -18,11 +20,11 @@ import {
 setDefaultTimeout(60_000);
 
 let root: string;
-const cliPath = path.resolve('apps/vscode/out/islandCli.js');
+const cliPath = path.resolve(VSCODE_PACKAGE_ROOT, ISLAND_CLI_BUNDLE_PATH);
 
 beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-island-portable-'));
-  const build = Bun.spawnSync(['bun', 'run', '--cwd', 'apps/vscode', 'bundle'], {
+  const build = Bun.spawnSync(['bun', 'run', '--cwd', VSCODE_PACKAGE_ROOT, 'bundle'], {
     stderr: 'pipe',
   });
   if (build.exitCode !== 0) {
@@ -35,7 +37,7 @@ afterAll(() => {
 });
 
 test('every file the extension manifest names exists after the bundle', () => {
-  const packageRoot = path.resolve('apps/vscode');
+  const packageRoot = path.resolve(VSCODE_PACKAGE_ROOT);
   const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as {
     main: string;
     icon: string;

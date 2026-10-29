@@ -44,13 +44,9 @@ const SATURATION_MEASURES = {
  *   isTerminalDefault: boolean;
  *   islandCssFile: string;
  *   islandEffects: string;
- *   islandCssPath: string;
  *   label: string;
  *   paletteName: string;
  *   slug: string;
- *   sourcePath: string;
- *   vscodeContributionPath: string;
- *   vscodeThemePath: string;
  *   vscodeUiTheme: 'vs' | 'vs-dark';
  * }} ThemeSource
  * @typedef {{
@@ -227,14 +223,10 @@ export function normalizeThemeCatalog(catalog, readThemeName, readThemeClassific
       isDefault,
       isTerminalDefault: entry.terminalDefault === true,
       islandCssFile: `${slug}.css`,
-      islandCssPath: `apps/vscode/island/${slug}.css`,
       islandEffects: entry.islandEffects,
       label,
       paletteName: slug.replaceAll('-', '_'),
       slug,
-      sourcePath: `source/themes/${slug}.cjs`,
-      vscodeContributionPath: `./themes/${slug}.json`,
-      vscodeThemePath: `apps/vscode/themes/${slug}.json`,
       vscodeUiTheme: /** @type {'vs' | 'vs-dark'} */ (appearance === 'light' ? 'vs' : 'vs-dark'),
     };
   });

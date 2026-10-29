@@ -528,7 +528,7 @@ test('production source reads keep the validated snapshot when editable files ch
     const repository = loadThemeRepository(root);
     const source = repository.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const theme = readSourceTheme(source, repository);
-    const themePath = path.join(root, source.sourcePath);
+    const themePath = path.join(root, `source/themes/${source.slug}.cjs`);
     const recipe = readSourceData<any>(themePath);
     recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);

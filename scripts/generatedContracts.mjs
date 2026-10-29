@@ -5,16 +5,28 @@ import path from 'node:path';
 import { readOwnedGeneratedFile, syncGeneratedAssets } from './generatedAssets.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
 import { VSCODE_PACKAGE_COPIED_FILES } from './vscodePackageAssets.mjs';
+import {
+  inVscodePackage,
+  VSCODE_BUNDLE_FILES,
+  VSCODE_GENERATED_SOURCE_DIRECTORY,
+  VSCODE_PACKAGE_ICON,
+  VSCODE_PACKAGE_MANIFEST,
+  vscodeIslandCssFile,
+  vscodeThemeFile,
+} from './vscodePackageLayout.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
-const themeCatalogOutputPath = 'apps/vscode/src/generated/themeCatalog.ts';
-const vscodePackagePath = 'apps/vscode/package.json';
+const themeCatalogOutputPath = inVscodePackage(
+  `${VSCODE_GENERATED_SOURCE_DIRECTORY}/themeCatalog.ts`
+);
+const packageLayoutOutputPath = inVscodePackage(
+  `${VSCODE_GENERATED_SOURCE_DIRECTORY}/packageLayout.ts`
+);
+const vscodePackagePath = inVscodePackage(VSCODE_PACKAGE_MANIFEST);
 const GENERATED_CONTRACT_OWNERSHIP = [
-  { directory: 'apps/vscode/src/generated' },
+  { directory: inVscodePackage(VSCODE_GENERATED_SOURCE_DIRECTORY) },
   { file: vscodePackagePath },
 ];
-/** The bundle outputs of `apps/vscode` `bundle`, which writes one file per entry point. */
-const PACKAGE_BUNDLE_FILES = ['out/extension.js', 'out/islandCli.js'];
 
 /**
  * @typedef {{ label: string; path: string; uiTheme: string }} VscodeThemeContribution
@@ -28,7 +40,7 @@ function vscodeThemeContributions(sourceThemes) {
   return sourceThemes.map((theme) => ({
     label: theme.label,
     uiTheme: theme.vscodeUiTheme,
-    path: theme.vscodeContributionPath,
+    path: `./${vscodeThemeFile(theme.slug)}`,
   }));
 }
 
@@ -59,6 +71,13 @@ export function getIslandCssFileForTheme(theme: string): string | undefined {
 export function isTyrianIslandCssFile(cssFile: string): boolean {
   return TYRIAN_THEME_CATALOG.some(({ islandCssFile }) => islandCssFile === cssFile);
 }
+`;
+}
+
+/** @returns {string} */
+function buildPackageLayoutTs() {
+  return `/** Package-relative path of the bundled Island CLI the extension runs. */
+export const ISLAND_CLI_BUNDLE_PATH = ${formatTsString(VSCODE_BUNDLE_FILES.islandCli)};
 `;
 }
 
@@ -93,18 +112,20 @@ function formatTsString(value) {
  */
 function buildPackageThemeContractAsset(sourceThemes, root) {
   const packageJson =
-    /** @type {{ contributes?: { themes?: VscodeThemeContribution[] }; files?: string[] }} */ (
+    /** @type {{ contributes?: { themes?: VscodeThemeContribution[] }; files?: string[]; icon?: string; main?: string }} */ (
       JSON.parse(readOwnedGeneratedFile(root, vscodePackagePath).toString('utf8'))
     );
   const expectedContributions = vscodeThemeContributions(sourceThemes);
   const expectedFiles = [
     'README.md',
     ...Object.keys(VSCODE_PACKAGE_COPIED_FILES),
-    ...PACKAGE_BUNDLE_FILES,
-    ...sourceThemes.map(({ islandCssFile }) => `island/${islandCssFile}`),
-    ...sourceThemes.map(({ slug }) => `themes/${slug}.json`),
+    ...Object.values(VSCODE_BUNDLE_FILES),
+    ...sourceThemes.map(({ islandCssFile }) => vscodeIslandCssFile(islandCssFile)),
+    ...sourceThemes.map(({ slug }) => vscodeThemeFile(slug)),
   ];
 
+  packageJson.main = `./${VSCODE_BUNDLE_FILES.extension}`;
+  packageJson.icon = VSCODE_PACKAGE_ICON;
   packageJson.contributes ??= {};
   packageJson.contributes.themes = expectedContributions;
   packageJson.files = expectedFiles;
@@ -124,6 +145,7 @@ export function syncGeneratedContracts(root = defaultRepoRoot, options = {}) {
   const sourceThemes = readThemeSources(root);
   const generatedContracts = [
     { path: themeCatalogOutputPath, content: buildThemeCatalogTs(sourceThemes) },
+    { path: packageLayoutOutputPath, content: buildPackageLayoutTs() },
     buildPackageThemeContractAsset(sourceThemes, root),
   ];
 

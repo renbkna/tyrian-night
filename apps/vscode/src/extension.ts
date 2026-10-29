@@ -7,6 +7,7 @@ import {
   getIslandCssFileForTheme,
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
+import { ISLAND_CLI_BUNDLE_PATH } from './generated/packageLayout.js';
 import { readIslandPlatformSupport } from './islandPlatform.js';
 import { IslandProcessFailure, runIslandJsonProcess } from './islandProcess.js';
 import type { IslandShellStatus } from './islandShellContract.js';
@@ -28,7 +29,7 @@ const TRUST_DOCS_ACTION = 'Why This Is Needed';
 const LATER_ACTION = 'Later';
 const PERMISSION_ACTIONS = [TRUST_DOCS_ACTION, OPEN_DOCTOR_ACTION, LATER_ACTION] as const;
 const ISLAND_UI_TRUST_DOCS_URL =
-  'https://github.com/renbkna/tyrian-night/blob/main/apps/vscode/README.md#island-ui';
+  'https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/README.md#island-ui';
 const THEME_PROMPT_KEY = 'tyrianNight.themePrompted';
 const UNINSTALL_WARNING_ACKNOWLEDGED_KEY = 'tyrianNight.uninstallWarningAcknowledged';
 const UNINSTALL_WARNING_MESSAGE =
@@ -466,7 +467,7 @@ function runIslandCli<Command extends IslandCliCommand>(
   command: Command,
   args: IslandCliArgs
 ): Promise<IslandCliResults[Command]> {
-  const cliPath = path.join(extContext.extensionPath, 'out', 'islandCli.js');
+  const cliPath = path.join(extContext.extensionPath, ISLAND_CLI_BUNDLE_PATH);
 
   return runIslandJsonProcess<IslandCliResults[Command]>(
     [process.execPath, cliPath, command, ...encodeIslandCliArgs(args)],

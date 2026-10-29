@@ -8,8 +8,13 @@ import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 import { themeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
+import {
+  inVscodePackage,
+  VSCODE_ISLAND_BASE_TEMPLATE,
+  VSCODE_ISLAND_DIRECTORY,
+  vscodeIslandCssFile,
+} from './vscodePackageLayout.mjs';
 
-const BASE_TEMPLATE_PATH = 'apps/vscode/island/base.css';
 const EFFECT_PROFILES_PATH = 'source/islandEffects.cjs';
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -38,7 +43,10 @@ const ROOT_LAYOUT_TOKENS = {
  * @returns {string}
  */
 function renderIslandCss(theme, repoRoot, repository) {
-  const baseCss = fs.readFileSync(path.join(repoRoot, BASE_TEMPLATE_PATH), 'utf8');
+  const baseCss = fs.readFileSync(
+    path.join(repoRoot, inVscodePackage(VSCODE_ISLAND_BASE_TEMPLATE)),
+    'utf8'
+  );
   const sourceTheme = readSourceTheme(theme.source, repository);
 
   return `${header(theme.label)}
@@ -77,7 +85,7 @@ export function buildAllIslandCss(repoRoot = defaultRepoRoot) {
 function projectIslandCssThemes(sourceThemes, profiles) {
   return sourceThemes.map((source) => ({
     label: source.label,
-    outputPath: source.islandCssPath,
+    outputPath: inVscodePackage(vscodeIslandCssFile(source.islandCssFile)),
     source,
     tokens: /** @type {Record<string, string>} */ (profiles[source.islandEffects]),
   }));
@@ -132,7 +140,9 @@ export function syncIslandCss(repoRoot = defaultRepoRoot, options = {}) {
     repoRoot,
     {
       check: options.check,
-      ownership: [{ directory: 'apps/vscode/island', match: /^tyrian-[^/]+\.css$/u }],
+      ownership: [
+        { directory: inVscodePackage(VSCODE_ISLAND_DIRECTORY), match: /^tyrian-[^/]+\.css$/u },
+      ],
     }
   );
 }
