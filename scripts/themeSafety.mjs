@@ -16,16 +16,21 @@ import {
   CANVAS_ROLE,
   isKnownThemeRole,
   loadThemeDefinitionContext,
+  POLICY_ID_PATTERN,
   themeColor,
 } from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
-/** @typedef {Record<string, any>} JsonObject */
 /** @typedef {'apca' | 'wcag'} SafetyContrastMetric */
 /** @typedef {{ id: string; metric: SafetyContrastMetric; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
 /** @typedef {{ id: string; pairing: 'adjacent' | 'all'; roles: string[] }} SafetyStateComparison */
 /** @typedef {{ contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
+/**
+ * @typedef {{ kind: `${SafetyContrastMetric}-minimum-contrast`; constraint: string; role: string; actual: number; minimum: number }
+ *   | { kind: 'wcag-minimum-pair-contrast'; constraint: string; roles: [string, string]; actual: number; minimum: number }
+ *   | { kind: 'identical-independent-state-color'; constraint: string; roles: [string, string] }} ThemeSafetyViolation
+ */
 
 /** Valid floor range per metric: WCAG 2 ratio, APCA Lc. */
 const CONTRAST_METRIC_RANGES = /** @type {Record<string, [number, number]>} */ ({
@@ -76,7 +81,11 @@ export function validateThemeSafetyContract(contract, definition) {
   }
   for (const entry of contract.contrastPairs) {
     requireId(entry.id, ids);
-    invariant(entry.minimum >= 3 && entry.minimum <= 7, `${entry.id} minimum must be within 3..7`);
+    const [low, high] = CONTRAST_METRIC_RANGES.wcag;
+    invariant(
+      entry.minimum >= low && entry.minimum <= high,
+      `${entry.id} minimum must be within ${low}..${high}`
+    );
   }
   for (const entry of contract.contrast) {
     requireRoles(entry.id, entry.roles, 1, definition);
@@ -93,11 +102,12 @@ export function validateThemeSafetyContract(contract, definition) {
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- * @param {ReturnType<typeof readThemeSafetyContract>} [contract]
+ * @param {ThemeSafetyContract} contract
+ * @returns {ThemeSafetyViolation[]}
  */
-export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
+export function auditThemeSafety(theme, contract) {
   const canvas = opaqueHex(themeColor(theme, CANVAS_ROLE));
-  /** @type {JsonObject[]} */
+  /** @type {ThemeSafetyViolation[]} */
   const violations = [];
   for (const constraint of contract.contrast) {
     for (const role of constraint.roles) {
@@ -110,7 +120,7 @@ export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
         violations.push({
           actual,
           constraint: constraint.id,
-          kind: `${constraint.metric}-minimum-contrast`,
+          kind: /** @type {const} */ (`${constraint.metric}-minimum-contrast`),
           minimum: constraint.minimum,
           role,
         });
@@ -152,13 +162,9 @@ export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
  * report has no pass/fail fields, thresholds, ranking, or candidate score.
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  * @param {string} themeSlug
- * @param {ReturnType<typeof readThemeSafetyContract>} [contract]
+ * @param {ThemeSafetyContract} contract
  */
-export function reportThemeColorDiagnostics(
-  theme,
-  themeSlug,
-  contract = readThemeSafetyContract()
-) {
+export function reportThemeColorDiagnostics(theme, themeSlug, contract) {
   const background = opaqueHex(themeColor(theme, CANVAS_ROLE));
   const roles = /** @type {string[]} */ (
     [
@@ -186,6 +192,15 @@ export function reportThemeColorDiagnostics(
         },
         richness: quantizeDiagnosticNumber(gamutRelativeRichness(color)),
         role,
+      };
+    }),
+    contrastPairs: contract.contrastPairs.map((pair) => {
+      const pairBackground = opaqueHex(themeColor(theme, pair.background), background);
+      const foreground = opaqueHex(themeColor(theme, pair.foreground), pairBackground);
+      return {
+        contrast: quantizeDiagnosticNumber(contrastRatio(foreground, pairBackground)),
+        id: pair.id,
+        roles: [pair.foreground, pair.background],
       };
     }),
     stateComparisons: contract.stateComparisons.map((comparison) => ({
@@ -233,7 +248,7 @@ function channelPairs(roles, pairing) {
 
 /** @param {string} id @param {Set<string>} ids */
 function requireId(id, ids) {
-  invariant(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id), `constraint id '${id}' must be kebab-case`);
+  invariant(POLICY_ID_PATTERN.test(id), `constraint id '${id}' must be kebab-case`);
   invariant(!ids.has(id), `constraint id ${id} is duplicated`);
   ids.add(id);
 }

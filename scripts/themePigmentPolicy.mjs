@@ -3,9 +3,11 @@
 import path from 'node:path';
 
 import { hexToOklch, hueInsideRange } from './colorScience.mjs';
+import { parseHexColor } from './colorUtils.mjs';
 import {
   isKnownThemeRole,
   loadThemeDefinitionContext,
+  POLICY_ID_PATTERN,
   qualifyRole,
   THEME_ROLE_NAMESPACES,
 } from './themeDefinition.mjs';
@@ -34,7 +36,7 @@ export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()
   invariant(policy.reservations.length > 0, 'reservations must not be empty');
   for (const reservation of policy.reservations) {
     invariant(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(reservation.id),
+      POLICY_ID_PATTERN.test(reservation.id),
       `reservation id '${reservation.id}' must be kebab-case`
     );
     invariant(!ids.has(reservation.id), `reservation id ${reservation.id} is duplicated`);
@@ -72,7 +74,8 @@ export function auditThemePigmentPolicy(theme, policy) {
   for (const namespace of THEME_ROLE_NAMESPACES) {
     for (const [name, color] of Object.entries(theme[namespace])) {
       const role = qualifyRole(namespace, name);
-      const hue = hexToOklch(color.slice(0, 7)).h;
+      // A translucent role's hue is its pigment's hue.
+      const hue = hexToOklch(`#${parseHexColor(color).hex}`).h;
       if (!Number.isFinite(hue)) continue;
       for (const reservation of policy.reservations) {
         if (

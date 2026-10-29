@@ -1,6 +1,12 @@
 // @ts-check
 
-import { apcaContrast, hexToOklch, maximumSrgbChroma, oklchToHex } from './colorScience.mjs';
+import {
+  apcaContrast,
+  gamutRelativeRichness,
+  hexToOklch,
+  maximumSrgbChroma,
+  oklchToHex,
+} from './colorScience.mjs';
 
 /**
  * Syntax colors are derived, not authored. A recipe states an APCA contrast
@@ -18,7 +24,27 @@ import { apcaContrast, hexToOklch, maximumSrgbChroma, oklchToHex } from './color
  * }} SyntaxTargets
  * @typedef {import('./themeDefinition.mjs').SyntaxHierarchyTier} SyntaxHierarchyTier
  * @typedef {'chroma' | 'richness'} SaturationMeasure
+ * @typedef {import('./themeDefinition.mjs').ThemeAppearance} ThemeAppearance
  */
+
+/**
+ * Each saturation measure: how it reads a rendered color, the OKLCH chroma a
+ * saturation level asks for at one lightness and hue, and the largest level it
+ * admits (OKLCH chroma beyond 0.4 lies outside sRGB at every lightness and hue).
+ * @type {Readonly<Record<SaturationMeasure, {
+ *   of: (color: string) => number;
+ *   chromaAt: (level: number, lightness: number, hue: number) => number;
+ *   ceiling: number;
+ * }>>}
+ */
+export const SATURATION_MEASURES = Object.freeze({
+  chroma: { of: (color) => hexToOklch(color).C, chromaAt: (level) => level, ceiling: 0.4 },
+  richness: {
+    of: gamutRelativeRichness,
+    chromaAt: (level, lightness, hue) => level * maximumSrgbChroma(lightness, hue),
+    ceiling: 1,
+  },
+});
 
 /** Colored pigments stay this far inside sRGB so encoding never clips them. */
 const GAMUT_MARGIN = 0.97;
@@ -32,7 +58,7 @@ export const PLAIN_TARGET = 'plain';
 /**
  * @param {{
  *   canvas: string;
- *   appearance: 'dark' | 'light';
+ *   appearance: ThemeAppearance;
  *   hue: (pigment: string) => number | null;
  *   targets: SyntaxTargets;
  *   hierarchy: readonly SyntaxHierarchyTier[];
@@ -142,17 +168,15 @@ function chromaModel(pigment, { hue: hueOf, targets, coloredPigments, measure })
     const chroma = targets.chroma[pigment] ?? 0;
     return (lightness) => Math.min(chroma, gamut(lightness));
   }
-  const level = targets.saturation;
-  return measure === 'chroma'
-    ? (lightness) => Math.min(level, gamut(lightness))
-    : (lightness) => Math.min(level * maximumSrgbChroma(lightness, hue), gamut(lightness));
+  const { chromaAt } = SATURATION_MEASURES[measure];
+  return (lightness) => Math.min(chromaAt(targets.saturation, lightness, hue), gamut(lightness));
 }
 
 /**
  * Bisects lightness between the canvas and the far end of the text's
  * direction; APCA contrast rises monotonically along that path.
  * @param {{
- *   appearance: 'dark' | 'light';
+ *   appearance: ThemeAppearance;
  *   canvas: string;
  *   canvasLightness: number;
  *   chromaAt: (lightness: number) => number;

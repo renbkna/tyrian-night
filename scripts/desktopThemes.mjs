@@ -1043,7 +1043,7 @@ function buildCaelestiaColours(theme, palette) {
  * DMS derives app themes (GTK, Qt, terminals) from `primary` via matugen.
  *
  * @param {string} name
- * @param {'dark' | 'light'} mode
+ * @param {import('./themeDefinition.mjs').ThemeAppearance} mode
  * @param {Record<string, string>} colours Caelestia Material roles (hex without '#')
  * @param {DesktopPalette} palette
  * @returns {string}

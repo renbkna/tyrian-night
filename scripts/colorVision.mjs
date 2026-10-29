@@ -1,7 +1,7 @@
 // @ts-check
 
-import { opaqueHex, parseHexColor, toHexByte } from './colorUtils.mjs';
-import { linearToSrgbChannel, srgbToLinearChannel } from './colorScience.mjs';
+import { opaqueHex, toHexByte } from './colorUtils.mjs';
+import { hexToLinearRgb, linearToSrgbChannel } from './colorScience.mjs';
 
 /** @typedef {'protan' | 'deutan' | 'tritan'} ColorVisionMode */
 
@@ -38,14 +38,8 @@ export const COLOR_VISION_MODES = Object.freeze(
  * @returns {string}
  */
 export function simulateColorVision(color, mode, background) {
-  const matrix = MATRICES[mode];
-  if (!matrix) throw new Error(`Unsupported color-vision mode '${mode}'.`);
-
-  const parsed = parseHexColor(opaqueHex(color, background));
-  const linear = [parsed.red, parsed.green, parsed.blue].map((channel) =>
-    srgbToLinearChannel(channel / 255)
-  );
-  const simulated = matrix.map((row) =>
+  const linear = hexToLinearRgb(opaqueHex(color, background));
+  const simulated = MATRICES[mode].map((row) =>
     linearToSrgbChannel(
       clamp(row.reduce((total, coefficient, index) => total + coefficient * linear[index], 0))
     )

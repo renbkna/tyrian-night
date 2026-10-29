@@ -20,19 +20,12 @@ import {
 import { auditThemePigmentPolicy, readThemePigmentPolicy } from './themePigmentPolicy.mjs';
 import { auditThemeSafety, readThemeSafetyContract } from './themeSafety.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
-import { syntaxChromaCeilings } from './syntaxSolver.mjs';
+import { SATURATION_MEASURES, syntaxChromaCeilings } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
-/** Saturation measures named by family saturation bands. */
-const SATURATION_MEASURES = {
-  /** @param {string} color */
-  chroma: (color) => hexToOklch(color).C,
-  richness: gamutRelativeRichness,
-};
-
 /**
- * @typedef {'dark' | 'light'} ThemeAppearance
+ * @typedef {import('./themeDefinition.mjs').ThemeAppearance} ThemeAppearance
  * @typedef {{ slug: string; terminalDefault?: boolean; islandEffects: string }} ThemeCatalogEntry
  * @typedef {{ appearance: ThemeAppearance; isDefault: boolean }} ThemeClassification
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
@@ -60,7 +53,11 @@ const SATURATION_MEASURES = {
  *   Palettes that satisfy hard safety and pigment policy; the only input generators accept.
  * @typedef {ThemeSnapshot & { policy: 'inspection' }} ThemeInspectionRepository
  *   Structurally valid palettes whose policy violations are reported, not rejected.
- * @typedef {{ slug: string; safety: unknown[]; pigment: unknown[] }} ThemePolicyAudit
+ * @typedef {{
+ *   slug: string;
+ *   safety: ReturnType<typeof auditThemeSafety>;
+ *   pigment: ReturnType<typeof auditThemePigmentPolicy>;
+ * }} ThemePolicyAudit
  */
 
 /**
@@ -114,10 +111,10 @@ export function auditThemeSnapshot(snapshot) {
 }
 
 /**
- * @param {string} [root]
+ * @param {string} root
  * @returns {ReadonlyArray<ThemeSource>}
  */
-export function readThemeSources(root = repoRoot) {
+export function readThemeSources(root) {
   return loadThemeRepository(root).sources;
 }
 
@@ -329,11 +326,9 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
         );
       }
     }
-    const band = /** @type {SaturationBand} */ (
-      family.energyLine.variants[slug]?.syntaxSaturation ?? family.branches[slug]?.syntaxSaturation
-    );
+    const band = themeFamilyClassification(definition, slug).syntaxSaturation;
     for (const pigment of family.syntaxSaturation.pigments) {
-      const value = SATURATION_MEASURES[band.measure](themeColor(theme, pigment));
+      const value = SATURATION_MEASURES[band.measure].of(themeColor(theme, pigment));
       const pigmentChroma = chroma(pigment);
       const ceiling = chromaCeilings.get(pigment) ?? Number.POSITIVE_INFINITY;
       // Richness scales with chroma at fixed lightness and hue, so value / chroma converts.

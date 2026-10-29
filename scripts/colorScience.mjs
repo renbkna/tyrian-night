@@ -1,7 +1,9 @@
 // @ts-check
 
-import { opaqueHex, toHexByte } from './colorUtils.mjs';
+import { opaqueHex, parseHexColor, toHexByte } from './colorUtils.mjs';
 
+/** OKLCH chroma at or below which a color has no meaningful hue. */
+export const ACHROMATIC_CHROMA = 0.000004;
 const GAMUT_EPSILON = 1e-7;
 const DIAGNOSTIC_SIGNIFICANT_DIGITS = 9;
 
@@ -11,7 +13,6 @@ const DIAGNOSTIC_SIGNIFICANT_DIGITS = 9;
  * @typedef {{ background?: string; left: string; right: string }} ColorComparisonInput
  * @typedef {{
  *   contrastLeft?: number;
- *   contrastRight?: number;
  *   oklabDelta: number;
  * }} ColorComparison
  * @typedef {{
@@ -45,7 +46,6 @@ export function compareColors(input) {
 
   return {
     contrastLeft: left.contrast,
-    contrastRight: right.contrast,
     oklabDelta: oklabDelta(left.oklab, right.oklab),
   };
 }
@@ -80,16 +80,15 @@ export function apcaContrast(text, background) {
 
 /** APCA screen luminance with its soft black clamp. @param {string} color */
 function apcaLuminance(color) {
-  const [red, green, blue] = [1, 3, 5].map(
-    (offset) => (Number.parseInt(color.slice(offset, offset + 2), 16) / 255) ** 2.4
-  );
+  const { red: r, green: g, blue: b } = parseHexColor(color);
+  const [red, green, blue] = [r, g, b].map((channel) => (channel / 255) ** 2.4);
   const luminance = 0.2126729 * red + 0.7151522 * green + 0.072175 * blue;
   return luminance < 0.022 ? luminance + (0.022 - luminance) ** 1.414 : luminance;
 }
 
 /** @param {string} color @returns {Oklab} */
 export function hexToOklab(color) {
-  const [red, green, blue] = hexToLinearRgb(opaqueHex(color));
+  const [red, green, blue] = hexToLinearRgb(color);
   const long = 0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue;
   const medium = 0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue;
   const short = 0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue;
@@ -112,7 +111,7 @@ export function hexToOklch(color) {
   return {
     C: chroma,
     L: lab.L,
-    h: chroma <= 0.000004 ? Number.NaN : hue < 0 ? hue + 360 : hue,
+    h: chroma <= ACHROMATIC_CHROMA ? Number.NaN : hue < 0 ? hue + 360 : hue,
   };
 }
 
@@ -136,9 +135,10 @@ export function oklchToHex(color) {
  */
 export function gamutRelativeRichness(color) {
   const { C, L, h } = hexToOklch(color);
-  if (!Number.isFinite(h) || C <= 0.000004) return 0;
+  // An achromatic color has no hue, so `h` is NaN for it.
+  if (!Number.isFinite(h)) return 0;
   const maximum = maximumSrgbChroma(L, h);
-  return maximum <= 0.000004 ? 0 : Math.min(1, C / maximum);
+  return maximum <= ACHROMATIC_CHROMA ? 0 : Math.min(1, C / maximum);
 }
 
 /** @param {Oklab} left @param {Oklab} right */
@@ -148,7 +148,7 @@ export function oklabDelta(left, right) {
 
 /** @param {string} color */
 function relativeLuminance(color) {
-  const [red, green, blue] = hexToLinearRgb(opaqueHex(color));
+  const [red, green, blue] = hexToLinearRgb(color);
   return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
@@ -214,12 +214,13 @@ function oklchToLinearRgb(color) {
   ];
 }
 
-/** @param {string} color @returns {[number, number, number]} */
-function hexToLinearRgb(color) {
+/** Linear sRGB channels of an opaque hex color. @param {string} color @returns {[number, number, number]} */
+export function hexToLinearRgb(color) {
+  const { red, green, blue } = parseHexColor(opaqueHex(color));
   return [
-    srgbToLinearChannel(Number.parseInt(color.slice(1, 3), 16) / 255),
-    srgbToLinearChannel(Number.parseInt(color.slice(3, 5), 16) / 255),
-    srgbToLinearChannel(Number.parseInt(color.slice(5, 7), 16) / 255),
+    srgbToLinearChannel(red / 255),
+    srgbToLinearChannel(green / 255),
+    srgbToLinearChannel(blue / 255),
   ];
 }
 

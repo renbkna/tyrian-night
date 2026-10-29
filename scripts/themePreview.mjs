@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { CANVAS_ROLE, themeColor } from './themeDefinition.mjs';
+import { CANVAS_ROLE, themeColor, themeFamilyClassification } from './themeDefinition.mjs';
 import {
   loadThemeRepository,
   meanSemanticChroma,
@@ -25,19 +25,15 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
 
   return repository.sources.map((source) => {
     const theme = readSourceTheme(source, repository);
-    const energyVariant = family.energyLine.variants[source.slug];
-    const branch = family.branches[source.slug];
-    if (!energyVariant && !branch) {
-      throw new Error(`Theme '${source.slug}' has no preview classification.`);
-    }
+    const { position } = themeFamilyClassification(repository.definition, source.slug);
     const canvas = themeColor(theme, CANVAS_ROLE);
     const semanticChroma = meanSemanticChroma(theme, family.semanticPigments);
     const semanticContrast = meanSemanticContrast(theme, family.semanticPigments);
     const classification = source.isDefault
       ? 'canonical family center'
-      : energyVariant
+      : position === 'energy-line'
         ? 'energy-line variant'
-        : `${branch.kind} branch`;
+        : `${position} branch`;
 
     return {
       id: source.slug,

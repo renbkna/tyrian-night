@@ -1,11 +1,14 @@
 // @ts-check
 
 import path from 'node:path';
-import { oklchToHex } from './colorScience.mjs';
+import { ACHROMATIC_CHROMA, oklchToHex } from './colorScience.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
-import { PLAIN_TARGET, solveSyntaxPigments } from './syntaxSolver.mjs';
+import { PLAIN_TARGET, SATURATION_MEASURES, solveSyntaxPigments } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
+
+/** Ids of policy entries (safety constraints, pigment reservations) are kebab-case. */
+export const POLICY_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 /** The editor canvas: syntax is solved against it and contrast measured on it. */
 export const CANVAS_ROLE = 'ui:surface.canvas';
@@ -27,6 +30,8 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  *   bindings: Record<ThemeRoleNamespace, Record<string, ThemeColorBinding>>;
  * }} ThemeColorBindings
  * @typedef {{ aliases: Record<string, string>; derived: Record<string, string> }} ThemeColorBindingContractSource
+ */
+/**
  * A recipe authors every pigment except syntax and bracket colors, which the
  * syntax solver derives from `syntax` targets.
  * @typedef {{
@@ -34,20 +39,24 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  *   oklch: Record<string, readonly [number, number]>;
  *   syntax: import('./syntaxSolver.mjs').SyntaxTargets;
  * }} OklchThemeRecipe
- * @typedef {OklchThemeRecipe} ThemeRecipe
  */
+/** @typedef {OklchThemeRecipe} ThemeRecipe */
+/** @typedef {{ maximum: number; minimum: number }} NumericRange */
 /**
- * @typedef {{ maximum: number; minimum: number }} NumericRange
  * A theme's syntax saturation band. `richness` is the share of the sRGB chroma
  * available at each pigment's own lightness and hue, so every hue is equally
  * vivid for what it can reach; `chroma` is absolute OKLCH chroma, so every hue
  * is equally colorful (soft tints, where gamut room differs widely by hue).
  * @typedef {NumericRange & { measure: 'chroma' | 'richness' }} SaturationBand
- * @typedef {{ syntaxSaturation: SaturationBand }} EnergyVariantContract
+ */
+/** @typedef {{ syntaxSaturation: SaturationBand }} EnergyVariantContract */
+/**
  * Every colored syntax pigment of a maintained theme sits in the band's relative
  * width below its effective maximum: the band maximum, lowered to its tier's
  * colorfulness ceiling when that ceiling is smaller.
  * @typedef {{ pigments: string[] }} SyntaxSaturationContract
+ */
+/**
  * One syntax weight tier. Tiers run from most to least prominent, measured as
  * APCA lightness contrast (absolute Lc) against `ui:surface.canvas` so dark and
  * light appearances share one rule: the weakest pigment of a tier must exceed
@@ -62,14 +71,20 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  *   minimumStepOverNext?: number;
  *   maximumChromaShareOfLead?: number;
  * }} SyntaxHierarchyTier
+ */
+/**
  * Diagnostics interrupt code through saturation, not brightness: each pigment
  * must use at least `minimumRichness` of the sRGB chroma available at its own
  * lightness and hue. Their visibility floor lives in the safety contract.
  * @typedef {{ pigments: string[]; minimumRichness: number }} DiagnosticsContract
+ */
+/**
  * The editor canvas is the lit stage: no frame surface around it may have a
  * higher OKLCH lightness than the canvas in any maintained theme. Near-black
  * editors keep the frame flat with the stage; lighter ones frame it darker.
  * @typedef {{ frame: string[] }} EditorStageContract
+ */
+/**
  * @typedef {{
  *   hueProfile: string;
  *   kind: 'light-counterpart' | 'soft-focus';
@@ -98,7 +113,10 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  * @typedef {{ opacities: Record<string, string>; overrides: Partial<Record<ThemeAppearance, Record<string, string>>> }} ThemeOpacityContractSource
  * @typedef {Record<ThemeAppearance, Readonly<Record<string, string>>>} ThemeOpacityPolicy
  */
-/** @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean; syntaxSaturation: SaturationBand }} ThemeFamilyClassification */
+/**
+ * `position` is where the theme sits in the family: on the energy line or on a branch of that kind.
+ * @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean; position: 'energy-line' | ThemeBranchContract['kind']; syntaxSaturation: SaturationBand }} ThemeFamilyClassification
+ */
 /** @typedef {Record<ThemeRoleNamespace, string[]>} ThemeRoleContract */
 /**
  * @typedef {{
@@ -215,7 +233,7 @@ function validateSyntaxTargets(targets, classification, sourceName, familyContra
     owner,
     'syntax target fields'
   );
-  const ceiling = SATURATION_MEASURE_CEILINGS[classification.syntaxSaturation.measure];
+  const { ceiling } = SATURATION_MEASURES[classification.syntaxSaturation.measure];
   if (!(targets.saturation > 0 && targets.saturation <= ceiling)) {
     throw new Error(`${owner} saturation must be within 0 (exclusive) and ${ceiling}.`);
   }
@@ -246,7 +264,10 @@ function validateSyntaxTargets(targets, classification, sourceName, familyContra
     if (!(chroma >= 0 && chroma <= 0.4)) {
       throw new Error(`${owner} chroma '${pigment}' must be within 0 and 0.4.`);
     }
-    if (familyContract.pigmentHues[pigment]?.[classification.hueProfile] === null && chroma > 0) {
+    if (
+      familyContract.pigmentHues[pigment]?.[classification.hueProfile] === null &&
+      chroma > ACHROMATIC_CHROMA
+    ) {
       throw new Error(`${owner} chroma '${pigment}' has chroma without an owned hue.`);
     }
   }
@@ -262,9 +283,6 @@ function validateSyntaxTargets(targets, classification, sourceName, familyContra
 export function resolveThemeRecipe(recipe, sourceName, context) {
   const classification = themeFamilyClassification(context, sourceName);
   const opacities = context.opacityPolicy[classification.appearance];
-  if (!opacities) {
-    throw new Error(`Theme recipe '${sourceName}' has no opacity policy.`);
-  }
 
   const family = context.familyContract;
   /** @param {string} pigment */
@@ -301,8 +319,7 @@ export function resolveThemeRecipe(recipe, sourceName, context) {
   const resolveNamespace = (namespace) =>
     Object.fromEntries(
       Object.entries(context.colorBindings.bindings[namespace]).map(([role, binding]) => {
-        const pigment = typeof binding === 'string' ? binding : binding.pigment;
-        const base = resolvedPigments[pigment];
+        const base = resolvedPigments[bindingPigment(binding)];
         const opacity = typeof binding === 'string' ? 'FF' : opacities[binding.opacity];
         return [role, opacity === 'FF' ? base : `${base}${opacity}`];
       })
@@ -330,6 +347,7 @@ export function themeFamilyClassification(context, slug) {
       appearance: 'dark',
       hueProfile: family.energyLine.hueProfile,
       isDefault: slug === family.canonical,
+      position: 'energy-line',
       syntaxSaturation: family.energyLine.variants[slug].syntaxSaturation,
     };
   }
@@ -340,6 +358,7 @@ export function themeFamilyClassification(context, slug) {
     appearance: branch.kind === 'light-counterpart' ? 'light' : 'dark',
     hueProfile: branch.hueProfile,
     isDefault: slug === family.canonical,
+    position: branch.kind,
     syntaxSaturation: branch.syntaxSaturation,
   };
 }
@@ -413,6 +432,11 @@ export function isKnownThemeRole(qualifiedRole, requiredThemeRoles) {
   }
 }
 
+/** @param {ThemeColorBinding} binding */
+function bindingPigment(binding) {
+  return typeof binding === 'string' ? binding : binding.pigment;
+}
+
 /**
  * @param {ThemeColorBindings} bindings
  * @returns {string[]}
@@ -421,7 +445,7 @@ function requiredPigmentsForBindings(bindings) {
   const requiredPigments = new Set();
   for (const namespaceBindings of Object.values(bindings.bindings)) {
     for (const binding of Object.values(namespaceBindings)) {
-      requiredPigments.add(typeof binding === 'string' ? binding : binding.pigment);
+      requiredPigments.add(bindingPigment(binding));
     }
   }
   return [...requiredPigments].toSorted();
@@ -648,7 +672,7 @@ function validateOklchMap(values, requiredPigments, hueProfile, sourceName, fami
     if (lightness < 0 || lightness > 1 || chroma < 0 || chroma > 0.5) {
       throw new Error(`Theme recipe '${sourceName}' has invalid oklch value '${pigment}'.`);
     }
-    if (familyContract.pigmentHues[pigment]?.[hueProfile] === null && chroma > 0.000004) {
+    if (familyContract.pigmentHues[pigment]?.[hueProfile] === null && chroma > ACHROMATIC_CHROMA) {
       throw new Error(
         `Theme recipe '${sourceName}' pigment '${pigment}' has chroma without an owned hue.`
       );
@@ -684,32 +708,24 @@ function requireHueProfile(profile, hueProfiles, owner) {
 }
 
 /**
+ * A range within 0 and `ceiling`.
  * @param {NumericRange} range
  * @param {string} owner
- * @param {number} floor
  * @param {number} ceiling
  */
-function requireRange(range, owner, floor, ceiling) {
-  if (range.minimum < floor || range.maximum > ceiling || range.minimum > range.maximum) {
+function requireRange(range, owner, ceiling) {
+  if (range.minimum < 0 || range.maximum > ceiling || range.minimum > range.maximum) {
     throw new Error(`${owner} is invalid.`);
   }
 }
 
-/** OKLCH chroma beyond 0.4 lies outside sRGB at every lightness and hue. */
-const SATURATION_MEASURE_CEILINGS = { chroma: 0.4, richness: 1 };
-
 /** @param {SaturationBand} band @param {string} owner */
 function requireSaturationBand(band, owner) {
   if (!band) throw new Error(`${owner} must define a syntax saturation band.`);
-  if (!Object.hasOwn(SATURATION_MEASURE_CEILINGS, band.measure)) {
+  if (!Object.hasOwn(SATURATION_MEASURES, band.measure)) {
     throw new Error(`${owner} syntax saturation measure '${band.measure}' is unsupported.`);
   }
-  requireRange(
-    band,
-    `${owner} syntax saturation band`,
-    0,
-    SATURATION_MEASURE_CEILINGS[band.measure]
-  );
+  requireRange(band, `${owner} syntax saturation band`, SATURATION_MEASURES[band.measure].ceiling);
 }
 
 /** @param {readonly string[]} values @param {string} owner */
@@ -830,9 +846,8 @@ function validateThemeOpacityContract(contract, colorBindings) {
     .toSorted();
   const opacities = validateOpacityMap(
     contract.opacities,
-    requiredOpacities,
     'Theme opacity opacities',
-    true
+    requiredOpacities
   );
   const { overrides } = contract;
   const requiredSet = new Set(requiredOpacities);
@@ -841,9 +856,7 @@ function validateThemeOpacityContract(contract, colorBindings) {
   for (const appearance of /** @type {const} */ (['dark', 'light'])) {
     const appearanceOverrides = validateOpacityMap(
       overrides[appearance] ?? {},
-      requiredOpacities,
-      `Theme opacity ${appearance} overrides`,
-      false
+      `Theme opacity ${appearance} overrides`
     );
     const unknown = Object.keys(appearanceOverrides).filter((role) => !requiredSet.has(role));
     if (unknown.length > 0) {
@@ -858,16 +871,16 @@ function validateThemeOpacityContract(contract, colorBindings) {
 }
 
 /**
+ * Validates opacity values and, with `exactKeys`, that the map has exactly those keys.
  * @param {Record<string, string>} values
- * @param {readonly string[]} requiredKeys
  * @param {string} owner
- * @param {boolean} exact
+ * @param {readonly string[]} [exactKeys]
  * @returns {Record<string, string>}
  */
-function validateOpacityMap(values, requiredKeys, owner, exact) {
+function validateOpacityMap(values, owner, exactKeys) {
   const actual = Object.keys(values).toSorted();
-  const expected = [...new Set(requiredKeys)].toSorted();
-  if (exact && JSON.stringify(actual) !== JSON.stringify(expected)) {
+  const expected = [...new Set(exactKeys)].toSorted();
+  if (exactKeys && JSON.stringify(actual) !== JSON.stringify(expected)) {
     const actualSet = new Set(actual);
     const expectedSet = new Set(expected);
     const missing = expected.filter((role) => !actualSet.has(role));

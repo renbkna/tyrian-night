@@ -377,7 +377,7 @@ test('color audit loads an inspection snapshot when production admission rejects
     writeSourceData(themePath, recipe);
 
     const audit = spawnSync(
-      process.execPath,
+      'node',
       ['scripts/themeColorAudit.mjs', `--root=${root}`, '--theme=tyrian-nocturne'],
       { cwd: process.cwd(), encoding: 'utf8' }
     );
@@ -393,7 +393,7 @@ test('color audit loads an inspection snapshot when production admission rejects
 
 test('color audit rejects an empty option value instead of falling back', () => {
   for (const option of ['theme', 'root']) {
-    const audit = spawnSync(process.execPath, ['scripts/themeColorAudit.mjs', `--${option}=`], {
+    const audit = spawnSync('node', ['scripts/themeColorAudit.mjs', `--${option}=`], {
       cwd: process.cwd(),
       encoding: 'utf8',
     });
@@ -445,6 +445,27 @@ test('the energy line must step its saturation bands and canvases down in order'
     recipe.oklch['ui:surface.canvas'][0] = 0.11;
     writeSourceData(deepestPath, recipe);
     expect(() => loadThemeRepository(root)).toThrow('canvas lightness order is violated');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a branch cannot move a semantic pigment past its family hue limit', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-branch-hue-limit-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const familyPath = path.join(root, 'source/themeFamilyContract.cjs');
+    const family = readSourceData<any>(familyPath);
+    const [slug, branch] = Object.entries<any>(family.branches)[0]!;
+    const [pigment] = family.semanticPigments;
+    const hues = family.pigmentHues[pigment];
+    hues[branch.hueProfile] =
+      (hues[family.energyLine.hueProfile] + branch.maximumSemanticHueDistance + 1) % 360;
+    writeSourceData(familyPath, family);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      `Theme branch '${slug}' moves semantic pigment '${pigment}' outside its family hue limit.`
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

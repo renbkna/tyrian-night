@@ -31,11 +31,12 @@ export function parseHexColor(color) {
 
 /**
  * @param {string} color
- * @param {string} alpha
+ * @param {string} alpha two hex digits
  * @returns {string}
  */
 export function withHexAlpha(color, alpha) {
   const parsed = parseHexColor(color);
+  if (!/^[0-9a-fA-F]{2}$/u.test(alpha)) throw new Error(`Unsupported hex alpha '${alpha}'`);
 
   return `#${parsed.hex}${alpha.toUpperCase()}`;
 }
