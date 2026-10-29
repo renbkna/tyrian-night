@@ -1,7 +1,8 @@
 /*
  * Tyrian Abyss Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * scripts/desktopThemes.mjs generates the tokens: colors from the theme roles, sizes and radii from its own scale.
+ * scripts/desktopThemes.mjs generates the tokens: colors from the theme roles (overlay scrims and
+ * shadows are fixed translucent black), sizes and radii from its own scale.
  */
 
 :root {

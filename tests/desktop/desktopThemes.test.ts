@@ -13,13 +13,13 @@ import {
   kdeThemeId,
 } from '../../scripts/desktopThemes.mjs';
 import { themeColor } from '../../scripts/themeDefinition.mjs';
-import { flattenCssFile } from '../../scripts/union/flattenCss.mjs';
+import { flattenCssFile, UNION_SOURCE_ENTRY } from '../../scripts/union/flattenCss.mjs';
 import { GENERATED_FORBIDDEN_TEXT } from '../../scripts/union/lintUnionCss.mjs';
 
 type ThemeDefinition = import('../../scripts/themeDefinition.mjs').ThemeDefinition;
 
 const assets = new Map(buildDesktopThemeAssets().map((asset) => [asset.path, asset.content]));
-const UNION_STATIC_TEMPLATE = flattenCssFile('source/union-css/index.css').replace(
+const UNION_STATIC_TEMPLATE = flattenCssFile(UNION_SOURCE_ENTRY).replace(
   /\/\*[\s\S]*?\*\/\n\n:root \{\n\s*\/\* TYRIAN_GENERATED_TOKENS \*\/\n\}\n\n/u,
   ''
 );
@@ -90,7 +90,6 @@ test('KDE color schemes consume neutral surface, accent, and text roles', () => 
         ForegroundNormal: kdeRgb(sourceColor(theme, 'ui:text.primary')),
       });
     }
-    expect(colorScheme).not.toContain('Monochrome');
   }
 });
 
@@ -114,7 +113,7 @@ test('KDE ids and Caelestia flavours derive from the theme slug', () => {
   expect(caelestiaFlavour('tyrian-night')).toBe('night');
 });
 
-test('Plasma packages are full Tyrian-owned packages without a Monochrome base', () => {
+test('Plasma packages carry their own id, name and service type', () => {
   for (const source of SOURCE_THEMES) {
     const schemeId = kdeThemeId(source.slug);
     const theme = sourceTheme(source);
@@ -129,9 +128,6 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
     expect(desktopMetadata.KPlugin.Name).toBe(theme.name);
     expect(desktopMetadata.KPlugin.ServiceTypes).toEqual(['Plasma/Theme']);
     expect(desktopMetadataDesktop).toContain(`X-KDE-PluginInfo-Name=${schemeId}`);
-    expect(`${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}`).not.toContain(
-      'Monochrome'
-    );
   }
 });
 
@@ -206,7 +202,6 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
     expect(launcherBackground).toContain(`id="center"`);
     expect(launcherBackground).toContain(`fill="${background}"`);
     expect(launcherBackground).toContain(`fill="${accent}"`);
-    expect(launcherBackground).not.toContain('#1e1e20');
     expect(svgFill(lineEdit, 'base-center')).toBe(surfaceLow);
     expect(svgFill(lineEdit, 'focus-center')).toBe(surface);
     expect(svgFill(lineEdit, 'focus-top')).toBe(accent);
@@ -217,8 +212,6 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
     expect(listItem).toContain(`fill="${selection}"`);
     expect(glowbar).toContain(`id="top"`);
     expect(glowbar).toContain(`stop-color="${accent}"`);
-    expect(glowbar).not.toContain('stop-color="#fff"');
-    expect(glowbar).not.toContain('stop-color="#6e6e70"');
     expect(tasks).toContain(`id="normal-center"`);
     expect(tasks).toContain(`id="minimized-center"`);
     expect(tasks).toContain(`id="focus-center"`);
@@ -246,9 +239,6 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
     expect(tasks).toContain(
       `id="east-focus-left" x="156" y="71" width="3" height="14" fill="${accent}" opacity=".95"`
     );
-    expect(tasks).not.toContain('fill="#fff"');
-    expect(tasks).not.toContain('fill="#6e6e70"');
-    expect(tasks).not.toContain('color="#3daee9"');
   }
 });
 

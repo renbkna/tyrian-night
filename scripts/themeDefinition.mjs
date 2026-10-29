@@ -762,6 +762,16 @@ function validateThemeRoleContract(contract) {
       throw new Error(`Theme role contract has an invalid ${namespace} role.`);
     }
   }
+  // Terminal projections index the palette by TERMINAL_ANSI_ROLES (eight colors, then their
+  // bright forms), so it must name exactly the contract's ANSI roles.
+  requireSameMembers(
+    contract.terminal
+      .filter((role) => role.startsWith('ansi.'))
+      .map((role) => qualifyRole('terminal', role)),
+    [...TERMINAL_ANSI_ROLES],
+    'Theme role contract terminal ANSI roles',
+    'the sixteen terminal ANSI palette roles'
+  );
   return /** @type {ThemeRoleContract} */ (
     Object.fromEntries(
       THEME_ROLE_NAMESPACES.map((namespace) => [namespace, contract[namespace].toSorted()])

@@ -5,7 +5,8 @@
 The parts follow the shared [interaction contract](../../README.md#interaction-contract). Use the
 shape tokens by component scale: `--tyrian-radius-small` for indicators, `--tyrian-radius-medium`
 for controls and rows, `--tyrian-radius-large` for cards, dialogs and popups, and
-`--tyrian-pill-radius` for round indicators and switch tracks.
+`--tyrian-pill-radius` for fully rounded parts: round buttons and indicators, switch tracks and
+handles, chips, dials, slider fills and page indicators.
 
 `scripts/desktopThemes.mjs` injects Tyrian palette tokens into `/* TYRIAN_GENERATED_TOKENS */` for each theme and writes generated styles under `desktop/kde/union/css/styles/*/style.css`.
 

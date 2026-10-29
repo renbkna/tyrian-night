@@ -25,7 +25,8 @@
       "!apps/zed/themes/tyrian-night.json",
       "!desktop/**",
       "!terminal/**",
-      "!examples/theme-preview/diagnostic-error.ts"
+      "!examples/theme-preview/diagnostic-error.ts",
+      "!examples/theme-preview/generated/**"
     ]
   },
   "vcs": {

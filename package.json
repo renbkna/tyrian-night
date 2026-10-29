@@ -15,7 +15,6 @@
     "verify:vscode-portable": "bun run check:tracked-generated --product=vscode && bun run generate --untracked --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode && bun run --cwd apps/vscode bundle",
     "package:vscode": "bun run verify:vscode && bun run --cwd apps/vscode package:artifact",
     "generate": "node scripts/generate.mjs",
-    "check:generated": "node scripts/generate.mjs --check",
     "check:tracked-generated": "node scripts/generate.mjs --check --tracked",
     "color:audit": "node scripts/themeColorAudit.mjs",
     "check:union-css": "node scripts/union/lintUnionCss.mjs",
@@ -26,7 +25,7 @@
     "test": "bun run generate --untracked && bun run test:isolated ./tests",
     "test:isolated": "bun test --isolate",
     "lint": "oxlint -c .oxlintrc.json apps/vscode/src/ assets/ tests/ scripts/ source/",
-    "lint:fix": "oxlint -c .oxlintrc.json apps/vscode/src/ assets/ tests/ scripts/ source/ --fix",
+    "lint:fix": "bun run lint --fix",
     "format": "biome format . --write",
     "format:check": "biome format .",
     "package": "bun run package:vscode"

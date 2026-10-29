@@ -222,6 +222,22 @@ test('injected repository role membership is validated by that repository contex
   }
 });
 
+test('the role contract must name exactly the sixteen ANSI palette roles', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-ansi-contract-'));
+
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const contractPath = path.join(root, 'source/themeRoleContract.cjs');
+    const contract = readSourceData<{ terminal: string[] }>(contractPath);
+    contract.terminal.push('ansi.orange');
+    writeSourceData(contractPath, contract);
+
+    expect(() => loadThemeRepository(root)).toThrow('Theme role contract terminal ANSI roles');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('source recipes own pigments once and resolve family-derived alpha projections', () => {
   const repository = loadThemeRepository();
   const source = repository.sources.find(({ slug }) => slug === 'tyrian-nocturne');

@@ -107,7 +107,7 @@ bun run verify
 bun run package:vscode
 ```
 
-`color:audit` reports accessibility and brand-policy failures separately; `--diagnostics` adds contrast, OKLCH, richness and state distances without scoring them.
+`color:audit` reports accessibility and brand-policy failures separately; `--diagnostics` adds, without scoring them, each role's APCA and WCAG contrast, OKLCH and richness, each contrast pair's ratio, and the OKLab and simulated color-vision distances between state colors.
 
 CI packages the VS Code product and runs the shipped Island CLI on Linux, macOS and Windows; Linux also runs the full gate. The fish tests need `fish` on `PATH`.
 

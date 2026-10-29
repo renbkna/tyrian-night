@@ -1,4 +1,3 @@
-// biome-ignore format: generated production palette
 window.TYRIAN_PRODUCTION_FAMILY = Object.freeze([
   {
     "id": "tyrian-night",

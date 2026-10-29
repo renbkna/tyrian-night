@@ -1,7 +1,8 @@
 // @ts-check
 
 /**
- * @typedef {{ selector: string; selectors: string[]; body: string; line: number }} CssRule
+ * @typedef {{ selectors: string[]; body: string; line: number }} CssRule
+ *   `selectors` are normalized: single spaces, and ` > ` around child combinators.
  */
 
 /**
@@ -22,11 +23,7 @@ export function extractCssRules(css) {
     }
 
     rules.push({
-      selector,
-      selectors: selector
-        .split(',')
-        .map((selector) => selector.trim().replace(/\s+/gu, ' '))
-        .filter(Boolean),
+      selectors: selector.split(',').map(normalizeSelector).filter(Boolean),
       body: match[2],
       line: lineNumberAt(
         withoutComments,
@@ -36,6 +33,18 @@ export function extractCssRules(css) {
   }
 
   return rules;
+}
+
+/**
+ * One spelling per selector: single spaces, and ` > ` around child combinators.
+ * @param {string} selector
+ * @returns {string}
+ */
+export function normalizeSelector(selector) {
+  return selector
+    .replace(/\s*>\s*/gu, ' > ')
+    .replace(/\s+/gu, ' ')
+    .trim();
 }
 
 /**

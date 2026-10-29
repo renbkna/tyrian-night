@@ -6,17 +6,16 @@ import { expect, test } from 'bun:test';
 
 import { buildDesktopThemeAssets } from '../../scripts/desktopThemes.mjs';
 import { flattenCssFile } from '../../scripts/union/flattenCss.mjs';
-import {
-  lintUnionCss,
-  readLintedUnionSourceCss,
-  readUnionSourceCss,
-} from '../../scripts/union/lintUnionCss.mjs';
+import { lintUnionCss, readLintedUnionSourceCss } from '../../scripts/union/lintUnionCss.mjs';
 
-const sourceCss = readUnionSourceCss();
-
-test('Union CSS source satisfies the KDE 6.7 tech-preview lint contract', () => {
-  expect(lintUnionCss(sourceCss, { generated: true })).toEqual([]);
-});
+// The issues a sheet without any checked-state rules reports.
+const MISSING_CHECKED_TARGETS = [
+  'checkdelegate:checked > indicator',
+  'radiodelegate:checked > indicator',
+  'switchdelegate:checked > indicator',
+  'switchdelegate:checked > indicator > handle',
+  'menuitem:checked > indicator',
+].map((target) => `Missing checked-state target '${target}'`);
 
 test('Union CSS lint catches known selector regressions', () => {
   const brokenCss = `
@@ -35,11 +34,7 @@ menuitem:checked {
 
   expect(lintUnionCss(brokenCss).map((issue) => issue.message)).toEqual([
     'ProgressBar fill must target progressbar > track',
-    "Missing checked-state target 'checkdelegate:checked > indicator'",
-    "Missing checked-state target 'radiodelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator > handle'",
-    "Missing checked-state target 'menuitem:checked > indicator'",
+    ...MISSING_CHECKED_TARGETS,
     'Checked checkdelegate row styling must target indicator or handle',
     'Checked menuitem row styling must target indicator or handle',
   ]);
@@ -57,11 +52,7 @@ menuitem:checked > indicator { color: red; }
 `;
 
   expect(lintUnionCss(spoofedCss).map((issue) => issue.message)).toEqual([
-    "Missing checked-state target 'checkdelegate:checked > indicator'",
-    "Missing checked-state target 'radiodelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator > handle'",
-    "Missing checked-state target 'menuitem:checked > indicator'",
+    ...MISSING_CHECKED_TARGETS,
   ]);
 });
 
@@ -79,8 +70,8 @@ button {
       .filter((issue) => issue.message.startsWith('Union CSS'))
       .map(({ line, message }) => ({ line, message }))
   ).toEqual([
-    { line: 3, message: "Union CSS lengths should use px/custom properties, not '50%'" },
-    { line: 3, message: "Union CSS lengths should use px/custom properties, not '2em'" },
+    { line: 3, message: "Union CSS values should use px or custom properties, not '50%'" },
+    { line: 3, message: "Union CSS values should use px or custom properties, not '2em'" },
   ]);
 });
 
@@ -100,7 +91,7 @@ test('Union CSS generation lint reports the source file and line of each issue',
     );
 
     expect(() => readLintedUnionSourceCss(root)).toThrow(
-      "- source/union-css/parts/second.css:4: Union CSS lengths should use px/custom properties, not '50%'"
+      "- source/union-css/parts/second.css:4: Union CSS values should use px or custom properties, not '50%'"
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -124,11 +115,7 @@ button#primary {
 
   expect(lintUnionCss(brokenCss).map((issue) => issue.message)).toEqual([
     'Union CSS uses unsupported construct :first-child',
-    "Missing checked-state target 'checkdelegate:checked > indicator'",
-    "Missing checked-state target 'radiodelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator'",
-    "Missing checked-state target 'switchdelegate:checked > indicator > handle'",
-    "Missing checked-state target 'menuitem:checked > indicator'",
+    ...MISSING_CHECKED_TARGETS,
     "Union CSS property 'display' is unsupported",
     "Union CSS declaration uses unsupported layout value 'flex'",
     "Selector exceeds the budget of 3 combinators: 'applicationwindow page pane button toolbutton'",
@@ -144,7 +131,7 @@ test('Union CSS flattener rejects imports that resolve outside the source root',
     writeFile(root, 'source/outside/leak.css', 'leaked { color: red; }\n');
 
     expect(() => flattenCssFile(unionPath(root, 'index.css'))).toThrow(
-      'Union CSS imports must stay inside source/union-css'
+      'Union CSS imports must stay inside the entry directory'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -160,17 +147,31 @@ test('Union CSS flattener rejects symlinked imports that leave the source root',
     fs.symlinkSync(path.join(root, 'outside'), unionPath(root, 'linked'), 'dir');
 
     expect(() => flattenCssFile(unionPath(root, 'index.css'))).toThrow(
-      'Union CSS imports must stay inside source/union-css'
+      'Union CSS imports must stay inside the entry directory'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('desktop theme generation rejects invalid Union CSS before producing assets', () => {
-  const root = makeTempRepoFixture();
+test('Union CSS flattener admits a file whose name starts with two dots', () => {
+  const root = makeTempRoot();
 
   try {
+    writeUnionFile(root, 'index.css', '@import "./..x.css";\n');
+    writeUnionFile(root, '..x.css', 'label { color: red; }\n');
+
+    expect(flattenCssFile(unionPath(root, 'index.css'))).toContain('label { color: red; }');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('desktop theme generation rejects invalid Union CSS before producing assets', () => {
+  const root = makeTempRoot();
+
+  try {
+    copySourceInto(root);
     fs.appendFileSync(
       unionPath(root, 'parts/00-base.css'),
       '\nbutton:first-child {\n  color: red;\n}\n'
@@ -189,9 +190,10 @@ test('generation lint rejects text the flattened KDE styles must not contain', (
 });
 
 test('desktop theme generation rejects a Union token reference the generator does not define', () => {
-  const root = makeTempRepoFixture();
+  const root = makeTempRoot();
 
   try {
+    copySourceInto(root);
     fs.appendFileSync(
       unionPath(root, 'parts/00-base.css'),
       '\nbutton {\n  color: var(--tyrian-undefined-token);\n}\n'
@@ -209,10 +211,8 @@ function makeTempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-union-css-test-'));
 }
 
-function makeTempRepoFixture(): string {
-  const root = makeTempRoot();
+function copySourceInto(root: string): void {
   fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-  return root;
 }
 
 function unionPath(root: string, relativePath: string): string {

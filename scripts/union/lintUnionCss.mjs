@@ -2,11 +2,14 @@
 
 import path from 'node:path';
 
-import { blankCssComments, extractCssRules, selectorElementNames } from './extractSelectors.mjs';
-import { flattenCssFile, flattenCssLines } from './flattenCss.mjs';
+import {
+  blankCssComments,
+  extractCssRules,
+  normalizeSelector,
+  selectorElementNames,
+} from './extractSelectors.mjs';
+import { flattenCssLines, UNION_SOURCE_ENTRY } from './flattenCss.mjs';
 import { isDirectRun } from '../cli.mjs';
-
-const UNION_SOURCE_ENTRY = 'source/union-css/index.css';
 
 /** Text the generated KDE styles must not contain: they are flattened and self-contained. */
 export const GENERATED_FORBIDDEN_TEXT = Object.freeze([
@@ -35,14 +38,6 @@ const REQUIRED_CHECKED_TARGETS = [
 /**
  * @typedef {{ message: string; line?: number }} UnionCssIssue
  */
-
-/**
- * @param {string} repoRoot
- * @returns {string}
- */
-export function readUnionSourceCss(repoRoot = process.cwd()) {
-  return flattenCssFile(path.join(repoRoot, UNION_SOURCE_ENTRY));
-}
 
 /**
  * The Union source, flattened; throws when it fails the generation lint.
@@ -80,9 +75,7 @@ export function lintUnionCss(css, options = {}) {
   const issues = /** @type {UnionCssIssue[]} */ ([]);
   const rules = extractCssRules(css);
   const code = blankCssComments(css);
-  const selectors = new Set(
-    rules.flatMap((rule) => rule.selectors.map((selector) => normalizeSelector(selector)))
-  );
+  const selectors = new Set(rules.flatMap((rule) => rule.selectors));
 
   if (options.generated) {
     for (const forbidden of GENERATED_FORBIDDEN_TEXT) {
@@ -122,10 +115,7 @@ export function lintUnionCss(css, options = {}) {
  */
 function lintRule(rule, issues) {
   for (const selector of rule.selectors) {
-    const normalizedSelector = selector.replace(/\s*>\s*/gu, '>');
-    const combinatorCount =
-      (normalizedSelector.match(/>/gu) ?? []).length +
-      (normalizedSelector.match(/\s+/gu) ?? []).length;
+    const combinatorCount = selector.split(/ > | /u).length - 1;
 
     if (combinatorCount > 3) {
       issues.push({
@@ -193,26 +183,15 @@ function lintRule(rule, issues) {
     if (/\b\d+(?:\.\d+)?(?:(?:em|rem|vh|vw)\b|%)/u.test(value)) {
       issues.push({
         line: rule.line,
-        message: `Union CSS lengths should use px/custom properties, not '${value}'`,
+        message: `Union CSS values should use px or custom properties, not '${value}'`,
       });
     }
   }
 }
 
-/**
- * @param {string} selector
- * @returns {string}
- */
-function normalizeSelector(selector) {
-  return selector
-    .replace(/\s*>\s*/gu, ' > ')
-    .replace(/\s+/gu, ' ')
-    .trim();
-}
-
 if (isDirectRun(import.meta)) {
   try {
-    readLintedUnionSourceCss(process.cwd());
+    readLintedUnionSourceCss(path.resolve(import.meta.dirname, '../..'));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

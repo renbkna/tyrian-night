@@ -20,4 +20,5 @@ plasma-apply-desktoptheme TyrianNight
 To try Union, install `union`, put its `defaults` and the `breeze`, `breeze-mobile` and
 `breeze-rtl` styles from `/usr/share/union/css/` under `~/.local/share/union/css/`, add
 `union/css/styles/TyrianNight` next to them, and opt into Union in a test session.
-`bun run union:smoke` runs a local smoke test.
+`bun run union:smoke` opens the controls offscreen under Union for a few hundred milliseconds
+and exits; it needs `qml6` and Union installed and makes no assertions.

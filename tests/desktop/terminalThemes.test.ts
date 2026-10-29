@@ -315,6 +315,16 @@ test('Starship prompts select their own variant palette backed by neutral roles'
     ] as const) {
       expect(variantConfig).toContain(`${key} = "${themeColor(theme, role)}"`);
     }
+    const paletteStart = variantConfig.indexOf(`[palettes.${source.paletteName}]`);
+    const paletteKeys = new Set(
+      variantConfig.slice(paletteStart + 1).flatMap((line) => /^(\w+) = "#/u.exec(line)?.[1] ?? [])
+    );
+    const styleReferences = new Set(
+      variantConfig
+        .slice(0, paletteStart)
+        .flatMap((line) => [...line.matchAll(/\b(?:fg|bg):(\w+)/gu)].map(([, name]) => name))
+    );
+    expect([...styleReferences].filter((name) => !paletteKeys.has(name!))).toEqual([]);
   }
 });
 

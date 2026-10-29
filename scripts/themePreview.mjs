@@ -74,12 +74,11 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
 }
 
 /**
- * @param {string} [repoRoot]
+ * @param {string} repoRoot
  * @param {{ check?: boolean }} [options]
  */
-export function syncProductionFamilyPreview(repoRoot = defaultRepoRoot, options = {}) {
+export function syncProductionFamilyPreview(repoRoot, options = {}) {
   const content =
-    '// biome-ignore format: generated production palette\n' +
     'window.TYRIAN_PRODUCTION_FAMILY = Object.freeze(' +
     `${JSON.stringify(buildProductionFamilyPreview(repoRoot), null, 2)});\n`;
 

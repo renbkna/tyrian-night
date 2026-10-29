@@ -5,6 +5,10 @@ import path from 'node:path';
 import { isDirectRun } from '../cli.mjs';
 
 const LOCAL_IMPORT_RE = /^\s*@import\s+(?:"([^"]+)"|'([^']+)')\s*;\s*$/u;
+const repoRoot = path.resolve(import.meta.dirname, '../..');
+
+/** The Union source entry, relative to the repository root. */
+export const UNION_SOURCE_ENTRY = 'source/union-css/index.css';
 
 /**
  * @typedef {{ text: string; file: string; line: number }} FlattenedCssLine
@@ -22,14 +26,15 @@ export function flattenCssFile(entryPath) {
 }
 
 /**
- * The flattened source, line by line, with each line's origin.
+ * The flattened source, line by line, with each line's origin. Imports must
+ * stay inside the entry's directory.
  * @param {string} entryPath
  * @returns {FlattenedCssLine[]}
  */
 export function flattenCssLines(entryPath) {
   const resolvedEntryPath = path.resolve(entryPath);
 
-  return flattenCssPath(resolvedEntryPath, findUnionCssRoot(resolvedEntryPath), new Set());
+  return flattenCssPath(resolvedEntryPath, path.dirname(resolvedEntryPath), new Set());
 }
 
 /**
@@ -57,7 +62,7 @@ function flattenCssPath(filePath, rootPath, seen) {
     const importPath = match[1] ?? match[2];
 
     if (path.isAbsolute(importPath)) {
-      throw new Error(`Union CSS imports must stay inside source/union-css: ${importPath}`);
+      throw new Error(`Union CSS imports must stay inside the entry directory: ${importPath}`);
     }
 
     if (!importPath.endsWith('.css')) {
@@ -90,38 +95,17 @@ function trimTrailingWhitespace(lines) {
 }
 
 /**
- * @param {string} entryPath
- * @returns {string}
- */
-function findUnionCssRoot(entryPath) {
-  let directory = path.dirname(entryPath);
-
-  while (path.basename(directory) !== 'union-css') {
-    const parent = path.dirname(directory);
-
-    if (parent === directory) {
-      return path.dirname(entryPath);
-    }
-
-    directory = parent;
-  }
-
-  return directory;
-}
-
-/**
  * @param {string} candidatePath
  * @param {string} rootPath
  * @param {string} importPath
  * @returns {void}
  */
 function assertInsideUnionCssRoot(candidatePath, rootPath, importPath) {
-  if (!isInsidePath(candidatePath, rootPath)) {
-    throw new Error(`Union CSS imports must stay inside source/union-css: ${importPath}`);
-  }
-
-  if (!isInsidePath(fs.realpathSync.native(candidatePath), fs.realpathSync.native(rootPath))) {
-    throw new Error(`Union CSS imports must stay inside source/union-css: ${importPath}`);
+  if (
+    !isInsidePath(candidatePath, rootPath) ||
+    !isInsidePath(fs.realpathSync.native(candidatePath), fs.realpathSync.native(rootPath))
+  ) {
+    throw new Error(`Union CSS imports must stay inside the entry directory: ${importPath}`);
   }
 }
 
@@ -133,10 +117,14 @@ function assertInsideUnionCssRoot(candidatePath, rootPath, importPath) {
 function isInsidePath(candidatePath, rootPath) {
   const relativePath = path.relative(rootPath, candidatePath);
 
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+  return (
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath)
+  );
 }
 
 if (isDirectRun(import.meta)) {
-  const entryPath = process.argv[2] ?? 'source/union-css/index.css';
+  const entryPath = process.argv[2] ?? path.join(repoRoot, UNION_SOURCE_ENTRY);
   process.stdout.write(flattenCssFile(entryPath));
 }
