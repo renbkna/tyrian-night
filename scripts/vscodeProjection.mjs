@@ -141,16 +141,26 @@ function requireNames(names, owner) {
   }
 }
 
+/** Grammar and semantic tokens color text, so they take ui or syntax roles. */
+const GRAMMAR_ROLE_NAMESPACES = ['ui', 'syntax'];
+
 /**
- * Grammar and semantic tokens take syntax or ui roles.
  * @param {string} qualifiedRole
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext['requiredThemeRoles']} requiredThemeRoles
  */
 function requireGrammarRole(qualifiedRole, requiredThemeRoles) {
-  if (
-    !isKnownThemeRole(qualifiedRole, requiredThemeRoles) ||
-    !['ui', 'syntax'].includes(parseQualifiedRole(qualifiedRole).namespace)
-  ) {
+  if (!qualifiedRole.includes(':')) {
+    throw new Error(
+      `VS Code grammar projection references unqualified role '${qualifiedRole}'; write it as 'syntax:${qualifiedRole}' or 'ui:${qualifiedRole}'.`
+    );
+  }
+  if (!isKnownThemeRole(qualifiedRole, requiredThemeRoles)) {
     throw new Error(`VS Code grammar projection references unknown role '${qualifiedRole}'.`);
+  }
+  const { namespace } = parseQualifiedRole(qualifiedRole);
+  if (!GRAMMAR_ROLE_NAMESPACES.includes(namespace)) {
+    throw new Error(
+      `VS Code grammar projection references ${namespace} role '${qualifiedRole}'; grammar tokens take ui or syntax roles.`
+    );
   }
 }

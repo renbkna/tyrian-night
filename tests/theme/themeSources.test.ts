@@ -870,21 +870,21 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
         (projection) => {
           projection.semanticTokenColors.push({ selector: 'label', role: 'type' });
         },
-        "grammar projection references unknown role 'type'",
+        "grammar projection references unqualified role 'type'",
       ],
       [
         'unqualified grammar role',
         (projection) => {
           projection.tokenColors[0].role = 'type';
         },
-        "grammar projection references unknown role 'type'",
+        "grammar projection references unqualified role 'type'",
       ],
       [
         'grammar role outside syntax and ui',
         (projection) => {
           projection.tokenColors[0].role = 'terminal:ansi.red';
         },
-        "grammar projection references unknown role 'terminal:ansi.red'",
+        "grammar projection references terminal role 'terminal:ansi.red'",
       ],
     ];
 

@@ -559,6 +559,25 @@ test('a desired style on an unpatched root is classified as managed-only', async
   });
 });
 
+test('restore removes a stale sidecar from an unpatched root', async () => {
+  const appRoot = await createAppRoot('stale-sidecar');
+  await fs.writeFile(buildIslandPatchPaths(appRoot).islandCssPath, '.stale {}\n', 'utf8');
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'managed-only',
+    restorePlan: 'remove-managed-state',
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    changed: true,
+    active: false,
+  });
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'clean',
+    managed: false,
+  });
+  await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
+});
+
 test('restore strips active Island UI when backup evidence is broken', async () => {
   const appRoot = await createAppRoot('broken-backup');
   const cssSource = path.join(testRoot, 'theme.css');
