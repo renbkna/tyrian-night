@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 import { contrastRatio } from './colorScience.mjs';
-import { opaqueHex, parseHexColor } from './colorUtils.mjs';
+import { opaqueHex, opaqueHexDigits, parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { TERMINAL_ANSI_ROLES, themeColor as readThemeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
@@ -48,129 +48,6 @@ const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
  *   ansi: string[];
  * }} DesktopPalette
  */
-
-const CAELESTIA_COLOUR_ORDER = [
-  'background',
-  'onBackground',
-  'surface',
-  'surfaceDim',
-  'surfaceBright',
-  'surfaceContainerLowest',
-  'surfaceContainerLow',
-  'surfaceContainer',
-  'surfaceContainerHigh',
-  'surfaceContainerHighest',
-  'onSurface',
-  'surfaceVariant',
-  'onSurfaceVariant',
-  'inverseSurface',
-  'inverseOnSurface',
-  'outline',
-  'outlineVariant',
-  'shadow',
-  'scrim',
-  'surfaceTint',
-  'primary',
-  'primaryDim',
-  'onPrimary',
-  'primaryContainer',
-  'onPrimaryContainer',
-  'inversePrimary',
-  'primaryFixed',
-  'primaryFixedDim',
-  'onPrimaryFixed',
-  'onPrimaryFixedVariant',
-  'secondary',
-  'secondaryDim',
-  'onSecondary',
-  'secondaryContainer',
-  'onSecondaryContainer',
-  'secondaryFixed',
-  'secondaryFixedDim',
-  'onSecondaryFixed',
-  'onSecondaryFixedVariant',
-  'tertiary',
-  'tertiaryDim',
-  'onTertiary',
-  'tertiaryContainer',
-  'onTertiaryContainer',
-  'tertiaryFixed',
-  'tertiaryFixedDim',
-  'onTertiaryFixed',
-  'onTertiaryFixedVariant',
-  'error',
-  'errorDim',
-  'onError',
-  'errorContainer',
-  'onErrorContainer',
-  'primaryPaletteKeyColor',
-  'secondaryPaletteKeyColor',
-  'tertiaryPaletteKeyColor',
-  'neutralPaletteKeyColor',
-  'neutralVariantPaletteKeyColor',
-  'errorPaletteKeyColor',
-  'primary_paletteKeyColor',
-  'secondary_paletteKeyColor',
-  'tertiary_paletteKeyColor',
-  'neutral_paletteKeyColor',
-  'neutral_variant_paletteKeyColor',
-  'term0',
-  'term1',
-  'term2',
-  'term3',
-  'term4',
-  'term5',
-  'term6',
-  'term7',
-  'term8',
-  'term9',
-  'term10',
-  'term11',
-  'term12',
-  'term13',
-  'term14',
-  'term15',
-  'rosewater',
-  'flamingo',
-  'pink',
-  'mauve',
-  'red',
-  'maroon',
-  'peach',
-  'yellow',
-  'green',
-  'teal',
-  'sky',
-  'sapphire',
-  'blue',
-  'lavender',
-  'klink',
-  'klinkSelection',
-  'kvisited',
-  'kvisitedSelection',
-  'knegative',
-  'knegativeSelection',
-  'kneutral',
-  'kneutralSelection',
-  'kpositive',
-  'kpositiveSelection',
-  'text',
-  'subtext1',
-  'subtext0',
-  'overlay2',
-  'overlay1',
-  'overlay0',
-  'surface2',
-  'surface1',
-  'surface0',
-  'base',
-  'mantle',
-  'crust',
-  'success',
-  'onSuccess',
-  'successContainer',
-  'onSuccessContainer',
-];
 
 const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/kde/color-schemes' },
@@ -1135,7 +1012,7 @@ function buildCaelestiaColours(theme, palette) {
   };
 
   return Object.fromEntries(
-    CAELESTIA_COLOUR_ORDER.map((name) => [name, stripHash(colours[name]).toLowerCase()])
+    Object.entries(colours).map(([name, colour]) => [name, opaqueHexDigits(colour).toLowerCase()])
   );
 }
 
@@ -1151,7 +1028,7 @@ function buildCaelestiaColours(theme, palette) {
  */
 function buildDmsTheme(name, mode, colours, palette) {
   /** @param {string} hex */
-  const css = (hex) => `#${stripHash(hex).toLowerCase()}`;
+  const css = (hex) => `#${opaqueHexDigits(hex).toLowerCase()}`;
   const theme = {
     name,
     primary: css(colours.primary),
@@ -1183,7 +1060,9 @@ function buildDmsTheme(name, mode, colours, palette) {
  * @returns {string}
  */
 function buildCaelestiaSchemeText(colours) {
-  return `${CAELESTIA_COLOUR_ORDER.map((name) => `${name} ${colours[name]}`).join('\n')}\n`;
+  return `${Object.entries(colours)
+    .map(([name, colour]) => `${name} ${colour}`)
+    .join('\n')}\n`;
 }
 
 /**
@@ -1191,7 +1070,9 @@ function buildCaelestiaSchemeText(colours) {
  * @returns {string}
  */
 function buildCaelestiaHyprScheme(colours) {
-  return `${CAELESTIA_COLOUR_ORDER.map((name) => `$${name} = ${colours[name]}`).join('\n')}\n`;
+  return `${Object.entries(colours)
+    .map(([name, colour]) => `$${name} = ${colour}`)
+    .join('\n')}\n`;
 }
 
 /**
@@ -1202,9 +1083,9 @@ function buildCaelestiaHyprScheme(colours) {
  * @returns {string}
  */
 function buildCaelestiaHyprLuaScheme(colours) {
-  return `return {\n${CAELESTIA_COLOUR_ORDER.map(
-    (name) => `    ${name} = ${JSON.stringify(colours[name])},`
-  ).join('\n')}\n}\n`;
+  return `return {\n${Object.entries(colours)
+    .map(([name, colour]) => `    ${name} = ${JSON.stringify(colour)},`)
+    .join('\n')}\n}\n`;
 }
 
 /**
@@ -1261,14 +1142,6 @@ function rgbTriplet(color) {
   const { red, green, blue } = parseHexColor(color);
 
   return `${red},${green},${blue}`;
-}
-
-/**
- * @param {string} color
- * @returns {string}
- */
-function stripHash(color) {
-  return opaqueHex(color).slice(1);
 }
 
 /**

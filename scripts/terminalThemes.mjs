@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 
-import { opaqueHex } from './colorUtils.mjs';
+import { opaqueHex, opaqueHexDigits } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { themeColor as requireThemeColor, TERMINAL_ANSI_ROLES } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
@@ -150,19 +150,19 @@ function buildFootTheme(theme) {
   // TERMINAL_ANSI_ROLES lists the eight regular colors, then their bright forms.
   const ansiColors = TERMINAL_ANSI_ROLES.map(
     (role, index) =>
-      `${index < 8 ? 'regular' : 'bright'}${index % 8}=${footColor(opaqueRoleColor(theme, role))}`
+      `${index < 8 ? 'regular' : 'bright'}${index % 8}=${opaqueHexDigits(opaqueRoleColor(theme, role))}`
   );
 
   return [
     theme.appearance === 'light' ? '[colors-light]' : '[colors-dark]',
-    `foreground=${footColor(foreground)}`,
-    `background=${footColor(background)}`,
+    `foreground=${opaqueHexDigits(foreground)}`,
+    `background=${opaqueHexDigits(background)}`,
     'alpha=0.82',
     'blur=yes',
     ...ansiColors,
-    `cursor=${footColor(background)} ${footColor(opaqueRoleColor(theme, 'terminal:cursor'))}`,
-    `selection-foreground=${footColor(foreground)}`,
-    `selection-background=${footColor(opaqueRoleColor(theme, 'terminal:selection'))}`,
+    `cursor=${opaqueHexDigits(background)} ${opaqueHexDigits(opaqueRoleColor(theme, 'terminal:cursor'))}`,
+    `selection-foreground=${opaqueHexDigits(foreground)}`,
+    `selection-background=${opaqueHexDigits(opaqueRoleColor(theme, 'terminal:selection'))}`,
     '',
   ].join('\n');
 }
@@ -174,8 +174,8 @@ function buildFootTheme(theme) {
 function buildFootCsd(theme) {
   return [
     '[csd]',
-    `color=ff${footColor(opaqueRoleColor(theme, 'terminal:background'))}`,
-    `button-color=ff${footColor(opaqueRoleColor(theme, 'terminal:foreground'))}`,
+    `color=ff${opaqueHexDigits(opaqueRoleColor(theme, 'terminal:background'))}`,
+    `button-color=ff${opaqueHexDigits(opaqueRoleColor(theme, 'terminal:foreground'))}`,
     '',
   ].join('\n');
 }
@@ -552,12 +552,4 @@ function opaqueRoleColor(theme, qualifiedRole) {
  */
 function fishRoleColor(theme, qualifiedRole) {
   return opaqueRoleColor(theme, qualifiedRole).slice(1);
-}
-
-/**
- * @param {string} color
- * @returns {string}
- */
-function footColor(color) {
-  return opaqueHex(color).slice(1);
 }

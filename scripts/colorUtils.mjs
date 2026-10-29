@@ -41,6 +41,15 @@ export function withHexAlpha(color, alpha) {
 }
 
 /**
+ * The six hex digits of an opaque color, without '#', for formats that omit it.
+ * @param {string} color
+ * @returns {string}
+ */
+export function opaqueHexDigits(color) {
+  return opaqueHex(color).slice(1);
+}
+
+/**
  * @param {string} color
  * @param {string} [background]
  * @returns {string}

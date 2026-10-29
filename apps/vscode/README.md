@@ -23,7 +23,7 @@ The themes color a curated set of documented VS Code colors (control states, sel
 1. Open the Extensions panel and install **Tyrian Night**.
 2. Run **Preferences: Color Theme** and select a Tyrian theme.
 
-[`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) is the full setup the themes were tuned in (typography, workbench layout, terminal and per-language editor settings); it is not applied automatically. It sets semantic highlighting to `configuredByTheme`, which follows the theme without forcing it on others.
+[`settings.example.json`](https://github.com/renbkna/tyrian-night/blob/HEAD/apps/vscode/settings.example.json) is a complete example configuration (typography, workbench layout, terminal, per-language and extension settings); it is not applied automatically. It sets semantic highlighting to `configuredByTheme`, which follows the theme without forcing it on others.
 
 ## Island UI
 
