@@ -3,15 +3,23 @@
 import path from 'node:path';
 
 import { hexToOklch, hueInsideRange } from './colorScience.mjs';
-import { loadThemeDefinitionContext } from './themeDefinition.mjs';
+import {
+  isKnownThemeRole,
+  loadThemeDefinitionContext,
+  THEME_ROLE_NAMESPACES,
+} from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
-/** @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation */
+/**
+ * A hue range only the listed pigments may occupy; a role is judged by the
+ * pigment it is bound to, so aliases and alpha derivations follow their pigment.
+ * @typedef {{ allowedPigments: string[]; id: string; maximum: number; minimum: number }} PigmentReservation
+ */
 /** @typedef {{ reservations: PigmentReservation[] }} ThemePigmentPolicy */
 
 /**
  * Reads the type-checked pigment policy and validates what types cannot:
- * identifier uniqueness, hue bounds, and role references into the role contract.
+ * identifier uniqueness, hue bounds, and pigment references into the role contract.
  *
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
  * @returns {ThemePigmentPolicy}
@@ -19,11 +27,6 @@ import { loadSourceModule } from './sourceModule.mjs';
 export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()) {
   const policy = /** @type {ThemePigmentPolicy} */ (
     loadSourceModule(path.join(definition.root, 'source/themePigmentPolicy.cjs'))
-  );
-  const knownRoles = new Set(
-    Object.entries(definition.requiredThemeRoles).flatMap(([namespace, roles]) =>
-      roles.map((role) => `${namespace}:${role}`)
-    )
   );
   const ids = new Set();
   invariant(policy.reservations.length > 0, 'reservations must not be empty');
@@ -41,17 +44,17 @@ export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()
       );
     }
     invariant(
-      reservation.allowedRoles.length > 0,
-      `reservation ${reservation.id} allowedRoles must not be empty`
+      reservation.allowedPigments.length > 0,
+      `reservation ${reservation.id} allowedPigments must not be empty`
     );
     invariant(
-      new Set(reservation.allowedRoles).size === reservation.allowedRoles.length,
-      `reservation ${reservation.id} allowedRoles contains duplicates`
+      new Set(reservation.allowedPigments).size === reservation.allowedPigments.length,
+      `reservation ${reservation.id} allowedPigments contains duplicates`
     );
-    for (const role of reservation.allowedRoles) {
+    for (const pigment of reservation.allowedPigments) {
       invariant(
-        knownRoles.has(role),
-        `reservation ${reservation.id} references unknown role ${role}`
+        isKnownThemeRole(pigment, definition.requiredThemeRoles),
+        `reservation ${reservation.id} references unknown pigment ${pigment}`
       );
     }
   }
@@ -61,26 +64,27 @@ export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
  * @param {ThemePigmentPolicy} [policy]
+ * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
  */
-export function auditThemePigmentPolicy(theme, policy = readThemePigmentPolicy()) {
+export function auditThemePigmentPolicy(
+  theme,
+  policy = readThemePigmentPolicy(),
+  definition = loadThemeDefinitionContext()
+) {
   const violations = [];
-  for (const namespace of /** @type {const} */ ([
-    'brackets',
-    'ui',
-    'syntax',
-    'terminal',
-    'vscode',
-  ])) {
+  for (const namespace of THEME_ROLE_NAMESPACES) {
     for (const [name, color] of Object.entries(theme[namespace])) {
       const role = `${namespace}:${name}`;
+      const binding = definition.colorBindings.bindings[namespace][name];
+      const pigment = typeof binding === 'object' ? binding.pigment : (binding ?? role);
       const hue = hexToOklch(color.slice(0, 7)).h;
       if (!Number.isFinite(hue)) continue;
       for (const reservation of policy.reservations) {
         if (
           hueInsideRange(hue, reservation.minimum, reservation.maximum) &&
-          !reservation.allowedRoles.includes(role)
+          !reservation.allowedPigments.includes(pigment)
         ) {
-          violations.push({ hue, reservation: reservation.id, role });
+          violations.push({ hue, pigment, reservation: reservation.id, role });
         }
       }
     }

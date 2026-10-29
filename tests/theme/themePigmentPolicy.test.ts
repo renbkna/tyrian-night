@@ -28,15 +28,19 @@ describe('theme pigment policy authority', () => {
     ]);
   });
 
-  test('reservation roles are the only allowed hue occupants across every catalog theme', () => {
+  test('reservation pigments are the only allowed hue occupants across every catalog theme', () => {
     const reservation = policy.reservations.find(({ id }) => id === 'green-cyan-reserved')!;
-    const withoutAllowedRoles = structuredClone(policy);
-    withoutAllowedRoles.reservations[0].allowedRoles = [];
-    const observedGreenRoles = new Set(
+    const withoutAllowedPigments = structuredClone(policy);
+    withoutAllowedPigments.reservations[0].allowedPigments = [];
+    const observedGreenPigments = new Set(
       SOURCE_THEMES.flatMap((source) =>
-        auditThemePigmentPolicy(sourceTheme(source), withoutAllowedRoles).map(({ role }) => role)
+        auditThemePigmentPolicy(sourceTheme(source), withoutAllowedPigments).map(
+          ({ pigment }) => pigment
+        )
       )
     );
-    expect([...observedGreenRoles].toSorted()).toEqual([...reservation.allowedRoles].toSorted());
+    expect([...observedGreenPigments].toSorted()).toEqual(
+      [...reservation.allowedPigments].toSorted()
+    );
   });
 });

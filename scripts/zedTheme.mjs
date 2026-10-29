@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { contrastRatio } from './colorScience.mjs';
-import { isTransparentHex, opaqueHex, withHexAlpha } from './colorUtils.mjs';
+import { opaqueHex, withHexAlpha } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { themeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
@@ -54,7 +54,7 @@ export function syncZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
     repoRoot,
     {
       check: options.check,
-      ownership: [{ directory: 'apps/zed/themes' }],
+      ownership: [{ directory: 'apps/zed/themes' }, { file: 'apps/zed/LICENSE' }],
     }
   );
 }
@@ -73,7 +73,6 @@ export function buildZedTheme(theme, bracketRoles) {
   const terminal = (role) => themeColor(theme, `terminal:${role}`);
   const dimAnsi = buildDimAnsi(theme);
   const syntax = buildSyntax(theme);
-  const subtleWashAlpha = theme.appearance === 'light' ? '18' : '20';
   const editorBackground = ui('surface.canvas');
   const accents = bracketRoles.map((role) => themeColor(theme, `brackets:${role}`));
 
@@ -97,14 +96,14 @@ export function buildZedTheme(theme, bracketRoles) {
       'created.background': ui('status.successBackground'),
       'created.border': ui('status.success'),
       deleted: ui('status.removed'),
-      'deleted.background': withHexAlpha(ui('status.removed'), subtleWashAlpha),
+      'deleted.background': ui('status.removedBackground'),
       'deleted.border': ui('status.removed'),
       'drop_target.background': ui('selection.primary'),
       'editor.active_line.background': ui('editor.activeLine'),
       'editor.active_line_number': ui('editor.lineNumber.active'),
       'editor.active_wrap_guide': ui('editor.indentGuide.active'),
       'editor.background': editorBackground,
-      'editor.document_highlight.bracket_background': zedBracketMatchBackground(theme),
+      'editor.document_highlight.bracket_background': ui('editor.bracket.matchBackground'),
       'editor.document_highlight.read_background': ui('editor.reference.read'),
       'editor.document_highlight.write_background': ui('editor.reference.write'),
       'editor.foreground': ui('text.primary'),
@@ -134,7 +133,7 @@ export function buildZedTheme(theme, bracketRoles) {
       'hidden.background': ui('surface.chrome'),
       'hidden.border': ui('border.tab'),
       hint: ui('editor.hint'),
-      'hint.background': withHexAlpha(ui('editor.hint'), subtleWashAlpha),
+      'hint.background': ui('editor.hintBackground'),
       'hint.border': ui('editor.hint'),
       icon: ui('text.chrome'),
       'icon.accent': ui('accent.primary'),
@@ -236,7 +235,7 @@ export function buildZedTheme(theme, bracketRoles) {
       'version_control.deleted': ui('status.removed'),
       'version_control.modified': ui('status.modified'),
       'version_control.word_added': ui('status.successBackground'),
-      'version_control.word_deleted': withHexAlpha(ui('status.removed'), subtleWashAlpha),
+      'version_control.word_deleted': ui('status.removedBackground'),
     },
   };
 }
@@ -411,21 +410,4 @@ function dimTerminalColor(color, background, targetContrast) {
   }
 
   return closestDimmed;
-}
-
-/**
- * @param {ThemeDefinition} theme
- * @returns {string}
- */
-function zedBracketMatchBackground(theme) {
-  const background = themeColor(theme, 'ui:editor.bracket.matchBackground');
-
-  if (!isTransparentHex(background)) {
-    return background;
-  }
-
-  const border = themeColor(theme, 'ui:editor.bracket.matchBorder');
-  const alpha = theme.appearance === 'light' ? '1F' : '35';
-
-  return withHexAlpha(border, alpha);
 }

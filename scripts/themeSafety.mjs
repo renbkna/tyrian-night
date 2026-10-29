@@ -12,14 +12,14 @@ import {
 } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { COLOR_VISION_MODES, simulateColorVision } from './colorVision.mjs';
-import { loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
+import { isKnownThemeRole, loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
 /** @typedef {Record<string, any>} JsonObject */
 /** @typedef {'apca' | 'wcag'} SafetyContrastMetric */
 /** @typedef {{ id: string; metric: SafetyContrastMetric; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
-/** @typedef {{ id: string; pairing: 'adjacent' | 'adjacent-cycle' | 'all'; roles: string[] }} SafetyStateComparison */
+/** @typedef {{ id: string; pairing: 'adjacent' | 'all'; roles: string[] }} SafetyStateComparison */
 /** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
 /** Valid floor range per metric: WCAG 2 ratio, APCA Lc. */
@@ -210,17 +210,12 @@ export function reportThemeColorDiagnostics(
   };
 }
 
-/** @param {string[]} roles @param {string} pairing @returns {Array<[string, string]>} */
+/** @param {string[]} roles @param {SafetyStateComparison['pairing']} pairing @returns {Array<[string, string]>} */
 function channelPairs(roles, pairing) {
   if (pairing === 'adjacent') {
     return roles
       .slice(0, -1)
       .map((role, index) => /** @type {[string, string]} */ ([role, roles[index + 1]]));
-  }
-  if (pairing === 'adjacent-cycle') {
-    return roles.map(
-      (role, index) => /** @type {[string, string]} */ ([role, roles[(index + 1) % roles.length]])
-    );
   }
   /** @type {Array<[string, string]>} */
   const pairs = [];
@@ -253,12 +248,8 @@ function requireRoles(owner, roles, minimumCount, definition) {
 
 /** @param {string} role @param {import('./themeDefinition.mjs').ThemeDefinitionContext} definition @param {string} owner */
 function requireThemeRole(role, definition, owner) {
-  const separator = role.indexOf(':');
-  const namespace = separator > 0 ? role.slice(0, separator) : '';
-  const name = separator > 0 ? role.slice(separator + 1) : '';
-  const roles = /** @type {Record<string, readonly string[]>} */ (definition.requiredThemeRoles);
   invariant(
-    separator > 0 && Object.hasOwn(roles, namespace) && roles[namespace]?.includes(name),
+    isKnownThemeRole(role, definition.requiredThemeRoles),
     `${owner} references unknown role ${role}`
   );
 }

@@ -4,6 +4,7 @@ const themeOpacityContract = {
     'ui:search.match.active': '70',
     'ui:search.match.passive': '3D',
     'ui:editor.highlight': '1F',
+    'ui:editor.hintBackground': '20',
     'ui:editor.activeLine': '14',
     'ui:selection.primary': '5C',
     'ui:editor.reference.read': '1A',
@@ -15,6 +16,7 @@ const themeOpacityContract = {
     'ui:status.infoBackground': '24',
     'ui:status.warningBackground': '24',
     'ui:status.modifiedBackground': '1C',
+    'ui:status.removedBackground': '20',
     'ui:status.successBackground': '1C',
     'ui:scrollbar.background': '50',
     'ui:scrollbar.hover.background': '7A',
@@ -51,6 +53,8 @@ const themeOpacityContract = {
   overrides: {
     light: {
       'ui:border.tab': '00',
+      'ui:editor.hintBackground': '18',
+      'ui:status.removedBackground': '18',
     },
   },
 };

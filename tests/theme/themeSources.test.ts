@@ -272,6 +272,24 @@ test('color bindings contain only aliases and alpha-derived exceptions', () => {
   }
 });
 
+test('a color binding cannot target a role that is bound itself', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-color-binding-chain-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const bindingsPath = path.join(root, 'source/themeColorBindings.cjs');
+    const bindings = readSourceData<any>(bindingsPath);
+    const [boundRole] = Object.keys(bindings.aliases);
+    bindings.aliases['syntax:function'] = boundRole;
+    writeSourceData(bindingsPath, bindings);
+
+    expect(() => loadThemeRepository(root)).toThrow(
+      `targets '${boundRole}', which is bound itself`
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('theme recipe validation rejects incomplete or out-of-gamut color authority', () => {
   const source = loadThemeRepository().sources.find(({ slug }) => slug === 'tyrian-night');
   expect(source).toBeDefined();
@@ -365,6 +383,17 @@ test('color audit loads an inspection snapshot when production admission rejects
   }
 });
 
+test('color audit rejects an empty theme selection instead of auditing every theme', () => {
+  const audit = spawnSync(process.execPath, ['scripts/themeColorAudit.mjs', '--theme='], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+
+  expect(audit.status).not.toBe(0);
+  expect(audit.stdout).toBe('');
+  expect(audit.stderr).toContain('Color audit --theme must not be empty.');
+});
+
 test('production snapshots reject every duplicate bracket depth, including non-adjacent depths', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-bracket-gate-'));
   try {
@@ -410,7 +439,9 @@ test('production snapshots reject pigment-reservation violations while inspectio
     const inspection = loadThemeInspectionRepository(root);
     const source = inspection.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const policy = readThemePigmentPolicy(inspection.definition);
-    expect(auditThemePigmentPolicy(inspection.themes.get(source.slug)!, policy)).toContainEqual(
+    expect(
+      auditThemePigmentPolicy(inspection.themes.get(source.slug)!, policy, inspection.definition)
+    ).toContainEqual(
       expect.objectContaining({
         reservation: 'green-cyan-reserved',
         role: 'syntax:comment',
@@ -747,7 +778,7 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
       [
         'semantic selector owner',
         (projection) => {
-          projection.semanticTokenColors.push({ selector: 'parameter', role: 'type' });
+          projection.semanticTokenColors.push({ selector: 'parameter', role: 'syntax:type' });
         },
         "semantic token selector 'parameter' has multiple owners",
       ],
@@ -761,9 +792,16 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
       [
         'semantic rule role',
         (projection) => {
-          projection.semanticTokenColors.push({ selector: 'label', role: 'keyword' });
+          projection.semanticTokenColors.push({ selector: 'label', role: 'syntax:keyword' });
         },
-        "grammar projection references unknown role 'keyword'",
+        "grammar projection references unknown role 'syntax:keyword'",
+      ],
+      [
+        'unqualified semantic rule role',
+        (projection) => {
+          projection.semanticTokenColors.push({ selector: 'label', role: 'type' });
+        },
+        "grammar projection references unknown role 'type'",
       ],
     ];
 

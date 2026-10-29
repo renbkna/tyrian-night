@@ -2,7 +2,12 @@
 
 import path from 'node:path';
 
-import { loadThemeDefinitionContext } from './themeDefinition.mjs';
+import {
+  isKnownThemeRole,
+  loadThemeDefinitionContext,
+  parseQualifiedRole,
+  THEME_ROLE_NAMESPACES,
+} from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -44,13 +49,7 @@ export function loadVscodeProjection(definition = loadThemeDefinitionContext(rep
 
   /** @type {Map<string, string>} */
   const consumerKeys = new Map();
-  for (const namespace of /** @type {const} */ ([
-    'brackets',
-    'ui',
-    'syntax',
-    'terminal',
-    'vscode',
-  ])) {
+  for (const namespace of THEME_ROLE_NAMESPACES) {
     const allowedRoles = new Set(requiredThemeRoles[namespace]);
     for (const [role, keys] of Object.entries(projection[namespace])) {
       if (!allowedRoles.has(role)) {
@@ -142,18 +141,14 @@ function requireNames(names, owner) {
 }
 
 /**
+ * Grammar and semantic tokens take syntax or ui roles.
  * @param {string} qualifiedRole
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext['requiredThemeRoles']} requiredThemeRoles
  */
 function requireGrammarRole(qualifiedRole, requiredThemeRoles) {
-  const separator = qualifiedRole.indexOf(':');
-  const namespace = separator === -1 ? 'syntax' : qualifiedRole.slice(0, separator);
-  const role = separator === -1 ? qualifiedRole : qualifiedRole.slice(separator + 1);
-
   if (
-    !role ||
-    (namespace !== 'ui' && namespace !== 'syntax') ||
-    !requiredThemeRoles[namespace].includes(role)
+    !isKnownThemeRole(qualifiedRole, requiredThemeRoles) ||
+    !['ui', 'syntax'].includes(parseQualifiedRole(qualifiedRole).namespace)
   ) {
     throw new Error(`VS Code grammar projection references unknown role '${qualifiedRole}'.`);
   }

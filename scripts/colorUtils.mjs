@@ -31,14 +31,6 @@ export function parseHexColor(color) {
 
 /**
  * @param {string} color
- * @returns {boolean}
- */
-export function isTransparentHex(color) {
-  return parseHexColor(color).alpha === 0;
-}
-
-/**
- * @param {string} color
  * @param {string} alpha
  * @returns {string}
  */

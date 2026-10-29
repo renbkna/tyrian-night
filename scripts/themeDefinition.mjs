@@ -7,23 +7,21 @@ import { PLAIN_TARGET, solveSyntaxPigments } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
+/** Theme role namespaces; the role contract has exactly these keys. */
+export const THEME_ROLE_NAMESPACES = Object.freeze(
+  /** @type {const} */ (['brackets', 'ui', 'syntax', 'terminal', 'vscode'])
+);
+
+/** @typedef {(typeof THEME_ROLE_NAMESPACES)[number]} ThemeRoleNamespace */
 /** @typedef {'dark' | 'light'} ThemeAppearance */
 /**
- * @typedef {{
- *   appearance: ThemeAppearance;
- *   brackets: Record<string, string>;
- *   name: string;
- *   syntax: Record<string, string>;
- *   terminal: Record<string, string>;
- *   ui: Record<string, string>;
- *   vscode: Record<string, string>;
- * }} ThemeDefinition
+ * @typedef {{ appearance: ThemeAppearance; name: string } & Record<ThemeRoleNamespace, Record<string, string>>} ThemeDefinition
  */
 /**
  * @typedef {{ pigment: string; opacity: string }} DerivedThemeColorBinding
  * @typedef {string | DerivedThemeColorBinding} ThemeColorBinding
  * @typedef {{
- *   bindings: Record<'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode', Record<string, ThemeColorBinding>>;
+ *   bindings: Record<ThemeRoleNamespace, Record<string, ThemeColorBinding>>;
  * }} ThemeColorBindings
  * @typedef {{ aliases: Record<string, string>; derived: Record<string, string> }} ThemeColorBindingContractSource
  * A recipe authors every pigment except syntax and bracket colors, which the
@@ -98,14 +96,14 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * @typedef {Record<ThemeAppearance, Readonly<Record<string, string>>>} ThemeOpacityPolicy
  */
 /** @typedef {{ appearance: ThemeAppearance; hueProfile: string; isDefault: boolean; syntaxSaturation: SaturationBand }} ThemeFamilyClassification */
-/** @typedef {{ brackets: string[]; ui: string[]; syntax: string[]; terminal: string[]; vscode: string[] }} ThemeRoleContract */
+/** @typedef {Record<ThemeRoleNamespace, string[]>} ThemeRoleContract */
 /**
  * @typedef {{
  *   colorBindings: Readonly<ThemeColorBindings>;
  *   familyContract: Readonly<ThemeFamilyContract>;
  *   opacityPolicy: Readonly<ThemeOpacityPolicy>;
  *   root: string;
- *   requiredThemeRoles: Readonly<{ brackets: readonly string[]; ui: readonly string[]; syntax: readonly string[]; terminal: readonly string[]; vscode: readonly string[] }>;
+ *   requiredThemeRoles: Readonly<Record<ThemeRoleNamespace, readonly string[]>>;
  * }} ThemeDefinitionContext
  */
 /** Canonical ANSI palette order shared by terminal-compatible projections. */
@@ -296,7 +294,7 @@ export function resolveThemeRecipe(recipe, sourceName, context) {
     );
   }
 
-  /** @param {'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode'} namespace */
+  /** @param {ThemeRoleNamespace} namespace */
   const resolveNamespace = (namespace) =>
     Object.fromEntries(
       Object.entries(context.colorBindings.bindings[namespace]).map(([role, binding]) => {
@@ -307,15 +305,13 @@ export function resolveThemeRecipe(recipe, sourceName, context) {
       })
     );
 
-  return {
+  return /** @type {ThemeDefinition} */ ({
     appearance: classification.appearance,
-    brackets: resolveNamespace('brackets'),
     name: recipe.name,
-    syntax: resolveNamespace('syntax'),
-    terminal: resolveNamespace('terminal'),
-    ui: resolveNamespace('ui'),
-    vscode: resolveNamespace('vscode'),
-  };
+    ...Object.fromEntries(
+      THEME_ROLE_NAMESPACES.map((namespace) => [namespace, resolveNamespace(namespace)])
+    ),
+  });
 }
 
 /**
@@ -351,22 +347,45 @@ export function themeFamilyClassification(context, slug) {
  * @param {string} qualifiedRole
  */
 export function themeColor(theme, qualifiedRole) {
+  const { namespace, role } = parseQualifiedRole(qualifiedRole);
+  const color = theme[namespace][role];
+  if (color === undefined) {
+    throw new Error(`Theme '${theme.name}' does not define ${namespace} role '${role}'.`);
+  }
+  return color;
+}
+
+/**
+ * Splits `namespace:role`; the namespace must be a theme role namespace.
+ * @param {string} qualifiedRole
+ * @returns {{ namespace: ThemeRoleNamespace; role: string }}
+ */
+export function parseQualifiedRole(qualifiedRole) {
   const separator = qualifiedRole.indexOf(':');
   const namespace = qualifiedRole.slice(0, separator);
   const role = qualifiedRole.slice(separator + 1);
   if (
     separator <= 0 ||
     !role ||
-    !['brackets', 'ui', 'syntax', 'terminal', 'vscode'].includes(namespace)
+    !(/** @type {readonly string[]} */ (THEME_ROLE_NAMESPACES).includes(namespace))
   ) {
     throw new Error(`Invalid theme role '${qualifiedRole}'.`);
   }
-  const color =
-    theme[/** @type {'brackets' | 'ui' | 'syntax' | 'terminal' | 'vscode'} */ (namespace)][role];
-  if (color === undefined) {
-    throw new Error(`Theme '${theme.name}' does not define ${namespace} role '${role}'.`);
+  return { namespace: /** @type {ThemeRoleNamespace} */ (namespace), role };
+}
+
+/**
+ * Whether `qualifiedRole` names a role of the role contract.
+ * @param {string} qualifiedRole
+ * @param {ThemeDefinitionContext['requiredThemeRoles']} requiredThemeRoles
+ */
+export function isKnownThemeRole(qualifiedRole, requiredThemeRoles) {
+  try {
+    const { namespace, role } = parseQualifiedRole(qualifiedRole);
+    return requiredThemeRoles[namespace].includes(role);
+  } catch {
+    return false;
   }
-  return color;
 }
 
 /**
@@ -678,19 +697,24 @@ function requireSameMembers(actual, expected, owner, expectedLabel) {
 
 /** @param {ThemeRoleContract} contract @returns {ThemeRoleContract} */
 function validateThemeRoleContract(contract) {
-  for (const [namespace, roles] of Object.entries(contract)) {
+  requireSameMembers(
+    Object.keys(contract),
+    [...THEME_ROLE_NAMESPACES],
+    'Theme role contract namespaces',
+    'the theme role namespaces'
+  );
+  for (const namespace of THEME_ROLE_NAMESPACES) {
+    const roles = contract[namespace];
     requireUnique(roles, `Theme role contract ${namespace} roles`);
     if (roles.some((role) => role.length === 0 || role.trim() !== role)) {
       throw new Error(`Theme role contract has an invalid ${namespace} role.`);
     }
   }
-  return {
-    brackets: contract.brackets.toSorted(),
-    ui: contract.ui.toSorted(),
-    syntax: contract.syntax.toSorted(),
-    terminal: contract.terminal.toSorted(),
-    vscode: contract.vscode.toSorted(),
-  };
+  return /** @type {ThemeRoleContract} */ (
+    Object.fromEntries(
+      THEME_ROLE_NAMESPACES.map((namespace) => [namespace, contract[namespace].toSorted()])
+    )
+  );
 }
 
 /**
@@ -699,9 +723,8 @@ function validateThemeRoleContract(contract) {
  * @returns {ThemeColorBindings}
  */
 function validateThemeColorBindingContract(contract, requiredThemeRoles) {
-  const namespaces = /** @type {const} */ (['brackets', 'ui', 'syntax', 'terminal', 'vscode']);
   const knownRoles = new Set(
-    namespaces.flatMap((namespace) =>
+    THEME_ROLE_NAMESPACES.flatMap((namespace) =>
       requiredThemeRoles[namespace].map((role) => `${namespace}:${role}`)
     )
   );
@@ -723,10 +746,21 @@ function validateThemeColorBindingContract(contract, requiredThemeRoles) {
     }
     configuredRoles.add(qualifiedRole);
   }
+  // Bindings resolve one hop, so a target must own its pigment.
+  for (const [qualifiedRole, pigment] of [
+    ...Object.entries(aliasPigments),
+    ...Object.entries(derivedPigments),
+  ]) {
+    if (pigment !== qualifiedRole && configuredRoles.has(pigment)) {
+      throw new Error(
+        `Theme color binding '${qualifiedRole}' targets '${pigment}', which is bound itself; target its pigment directly.`
+      );
+    }
+  }
 
   /** @type {ThemeColorBindings['bindings']} */
   const bindings = /** @type {any} */ ({});
-  for (const namespace of namespaces) {
+  for (const namespace of THEME_ROLE_NAMESPACES) {
     bindings[namespace] = Object.fromEntries(
       requiredThemeRoles[namespace].map((role) => {
         const qualifiedRole = `${namespace}:${role}`;

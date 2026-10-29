@@ -5,7 +5,7 @@ import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
-import { themeColor } from './themeDefinition.mjs';
+import { THEME_ROLE_NAMESPACES, themeColor } from './themeDefinition.mjs';
 import { loadVscodeProjection } from './vscodeProjection.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -17,13 +17,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 export function buildVscodeTheme(theme, projection) {
   /** @type {Record<string, string>} */
   const colors = {};
-  for (const namespace of /** @type {const} */ ([
-    'brackets',
-    'ui',
-    'syntax',
-    'terminal',
-    'vscode',
-  ])) {
+  for (const namespace of THEME_ROLE_NAMESPACES) {
     projectColors(colors, projection[namespace], (role) =>
       themeColor(theme, `${namespace}:${role}`)
     );
@@ -33,7 +27,7 @@ export function buildVscodeTheme(theme, projection) {
   const tokenColors = projection.tokenColors.map((token) => ({
     scope: token.scope,
     settings: {
-      foreground: grammarColor(theme, token.role),
+      foreground: themeColor(theme, token.role),
       ...(token.fontStyle ? { fontStyle: token.fontStyle } : {}),
     },
   }));
@@ -41,7 +35,7 @@ export function buildVscodeTheme(theme, projection) {
   const semanticTokenColors = Object.fromEntries(
     projection.semanticTokenColors.map(({ selector, role, ...style }) => [
       selector,
-      { ...(role ? { foreground: grammarColor(theme, role) } : {}), ...style },
+      { ...(role ? { foreground: themeColor(theme, role) } : {}), ...style },
     ])
   );
 
@@ -53,12 +47,6 @@ export function buildVscodeTheme(theme, projection) {
     colors,
     tokenColors,
   };
-}
-
-/** @param {import('./themeDefinition.mjs').ThemeDefinition} theme @param {string | undefined} role */
-function grammarColor(theme, role) {
-  if (!role) throw new Error('VS Code grammar projection has no role.');
-  return themeColor(theme, role.startsWith('ui:') ? role : `syntax:${role}`);
 }
 
 /**

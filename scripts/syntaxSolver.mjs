@@ -85,22 +85,40 @@ export function solveSyntaxPigments(input) {
   for (const pigment of lead.pigments) {
     solved[pigment] = solve(pigment, tierTarget(targets, lead.tier, owner), Infinity);
   }
-  const leadChroma = Math.max(
-    ...lead.pigments.map((pigment) => renderedChroma(pigment, solved, input))
+  const ceilings = syntaxChromaCeilings(hierarchy, (pigment) =>
+    renderedChroma(pigment, solved, input)
   );
-  for (const { tier, pigments, maximumChromaShareOfLead } of lowerTiers) {
-    const ceiling =
-      maximumChromaShareOfLead === undefined ? Infinity : maximumChromaShareOfLead * leadChroma;
+  for (const { tier, pigments } of lowerTiers) {
     for (const pigment of pigments) {
       solved[pigment] = solve(
         pigment,
         tierTarget(targets, tier, owner),
-        coloredPigments.has(pigment) ? ceiling : Infinity
+        coloredPigments.has(pigment) ? (ceilings.get(pigment) ?? Infinity) : Infinity
       );
     }
   }
   solved[plainPigment] = solve(plainPigment, tierTarget(targets, PLAIN_TARGET, owner), Infinity);
   return solved;
+}
+
+/**
+ * The colorfulness ceiling of each pigment in a capped tier: its tier's share
+ * of the most colorful lead pigment's rendered OKLCH chroma.
+ * @param {readonly import('./themeDefinition.mjs').SyntaxHierarchyTier[]} hierarchy
+ * @param {(pigment: string) => number} leadChromaOf rendered chroma of a lead pigment
+ * @returns {Map<string, number>}
+ */
+export function syntaxChromaCeilings(hierarchy, leadChromaOf) {
+  const [lead, ...lowerTiers] = hierarchy;
+  if (!lead) return new Map();
+  const leadChroma = Math.max(...lead.pigments.map(leadChromaOf));
+  return new Map(
+    lowerTiers.flatMap(({ pigments, maximumChromaShareOfLead }) =>
+      maximumChromaShareOfLead === undefined
+        ? []
+        : pigments.map((pigment) => [pigment, maximumChromaShareOfLead * leadChroma])
+    )
+  );
 }
 
 /**

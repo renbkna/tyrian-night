@@ -797,38 +797,38 @@ const vscodeColors = {
   // the `declaration` modifier may carry bold, and rust-analyzer types whose
   // superType fallback would land in the wrong role are mapped explicitly.
   semanticTokenColors: [
-    { selector: 'class', role: 'type', bold: false },
-    { selector: 'interface', role: 'type', bold: false },
-    { selector: 'enum', role: 'type', bold: false },
-    { selector: 'struct', role: 'type', bold: false },
-    { selector: 'type', role: 'type', bold: false },
-    { selector: 'typeAlias', role: 'type', bold: false },
-    { selector: 'union', role: 'type', bold: false },
-    { selector: 'class.declaration', role: 'type', bold: true },
-    { selector: 'interface.declaration', role: 'type', bold: true },
-    { selector: 'enum.declaration', role: 'type', bold: true },
-    { selector: 'struct.declaration', role: 'type', bold: true },
-    { selector: 'type.declaration', role: 'type', bold: true },
-    { selector: 'typeAlias.declaration', role: 'type', bold: true },
-    { selector: 'union.declaration', role: 'type', bold: true },
-    { selector: 'function', role: 'function', bold: false },
-    { selector: 'method', role: 'function', bold: false },
-    { selector: 'function.declaration', role: 'function', bold: true },
-    { selector: 'method.declaration', role: 'function', bold: true },
-    { selector: 'parameter', role: 'data' },
-    { selector: 'escapeSequence', role: 'data' },
-    { selector: 'const', role: 'data' },
-    { selector: 'static', role: 'data' },
-    { selector: 'variable.constant', role: 'data' },
-    { selector: 'selfKeyword', role: 'data', italic: true },
-    { selector: 'selfTypeKeyword', role: 'type' },
+    { selector: 'class', role: 'syntax:type', bold: false },
+    { selector: 'interface', role: 'syntax:type', bold: false },
+    { selector: 'enum', role: 'syntax:type', bold: false },
+    { selector: 'struct', role: 'syntax:type', bold: false },
+    { selector: 'type', role: 'syntax:type', bold: false },
+    { selector: 'typeAlias', role: 'syntax:type', bold: false },
+    { selector: 'union', role: 'syntax:type', bold: false },
+    { selector: 'class.declaration', role: 'syntax:type', bold: true },
+    { selector: 'interface.declaration', role: 'syntax:type', bold: true },
+    { selector: 'enum.declaration', role: 'syntax:type', bold: true },
+    { selector: 'struct.declaration', role: 'syntax:type', bold: true },
+    { selector: 'type.declaration', role: 'syntax:type', bold: true },
+    { selector: 'typeAlias.declaration', role: 'syntax:type', bold: true },
+    { selector: 'union.declaration', role: 'syntax:type', bold: true },
+    { selector: 'function', role: 'syntax:function', bold: false },
+    { selector: 'method', role: 'syntax:function', bold: false },
+    { selector: 'function.declaration', role: 'syntax:function', bold: true },
+    { selector: 'method.declaration', role: 'syntax:function', bold: true },
+    { selector: 'parameter', role: 'syntax:data' },
+    { selector: 'escapeSequence', role: 'syntax:data' },
+    { selector: 'const', role: 'syntax:data' },
+    { selector: 'static', role: 'syntax:data' },
+    { selector: 'variable.constant', role: 'syntax:data' },
+    { selector: 'selfKeyword', role: 'syntax:data', italic: true },
+    { selector: 'selfTypeKeyword', role: 'syntax:type' },
     { selector: '*.mutable', underline: true },
     { selector: '*.deprecated', strikethrough: true },
   ],
   tokenColors: [
     {
       scope: ['comment', 'punctuation.definition.comment'],
-      role: 'comment',
+      role: 'syntax:comment',
       fontStyle: 'italic',
     },
     {
@@ -837,12 +837,12 @@ const vscodeColors = {
         'comment.line.documentation',
         'string.quoted.docstring',
       ],
-      role: 'documentation',
+      role: 'syntax:documentation',
       fontStyle: 'italic',
     },
     {
       scope: ['keyword.control', 'keyword.operator.expression.of'],
-      role: 'control',
+      role: 'syntax:control',
     },
     {
       scope: [
@@ -875,11 +875,11 @@ const vscodeColors = {
         'entity.name.tag.css',
         'meta.import',
       ],
-      role: 'declaration',
+      role: 'syntax:declaration',
     },
     {
       scope: ['meta.type.annotation', 'meta.annotation', 'entity.name.type.annotation'],
-      role: 'type',
+      role: 'syntax:type',
       fontStyle: 'italic',
     },
     {
@@ -899,7 +899,7 @@ const vscodeColors = {
         'storage.type.string.go',
         'storage.type.uintptr.go',
       ],
-      role: 'type',
+      role: 'syntax:type',
     },
     {
       scope: [
@@ -915,7 +915,7 @@ const vscodeColors = {
         'entity.name.enum',
         'entity.name.interface',
       ],
-      role: 'type',
+      role: 'syntax:type',
       fontStyle: 'bold',
     },
     {
@@ -926,7 +926,7 @@ const vscodeColors = {
         'entity.name.method',
         'variable.function',
       ],
-      role: 'function',
+      role: 'syntax:function',
     },
     {
       scope: [
@@ -935,7 +935,7 @@ const vscodeColors = {
         'meta.function.definition entity.name.function',
         'meta.function.python entity.name.function',
       ],
-      role: 'function',
+      role: 'syntax:function',
       fontStyle: 'bold',
     },
     {
@@ -948,11 +948,11 @@ const vscodeColors = {
         'string.regexp constant.character.escape',
         'storage.type.format.python',
       ],
-      role: 'data',
+      role: 'syntax:data',
     },
     {
       scope: ['variable.language'],
-      role: 'data',
+      role: 'syntax:data',
       fontStyle: 'italic',
     },
     {
@@ -963,7 +963,7 @@ const vscodeColors = {
         'punctuation.definition.string',
         'storage.type.string.python',
       ],
-      role: 'string',
+      role: 'syntax:string',
     },
     {
       scope: [
@@ -977,7 +977,7 @@ const vscodeColors = {
         'string.regexp punctuation.definition.string',
         'string.regexp keyword.other',
       ],
-      role: 'literal',
+      role: 'syntax:literal',
     },
     {
       scope: [
@@ -987,7 +987,7 @@ const vscodeColors = {
         'entity.name.constant',
         'support.constant',
       ],
-      role: 'data',
+      role: 'syntax:data',
     },
     {
       scope: [
@@ -1001,7 +1001,7 @@ const vscodeColors = {
         'support.type.property-name.json',
         'entity.name.tag.yaml',
       ],
-      role: 'variable',
+      role: 'syntax:variable',
     },
     {
       scope: [
@@ -1009,7 +1009,7 @@ const vscodeColors = {
         'entity.other.attribute-name.class.css',
         'entity.other.attribute-name.id.css',
       ],
-      role: 'variable',
+      role: 'syntax:variable',
     },
     {
       scope: [
@@ -1022,38 +1022,38 @@ const vscodeColors = {
         'keyword.operator',
         'storage.type.function.arrow',
       ],
-      role: 'punctuation',
+      role: 'syntax:punctuation',
     },
     {
       scope: ['entity.name.function.decorator', 'meta.decorator', 'punctuation.decorator'],
-      role: 'type',
+      role: 'syntax:type',
     },
     {
       scope: ['markup.heading', 'entity.name.section'],
-      role: 'control',
+      role: 'syntax:control',
       fontStyle: 'bold',
     },
     {
       scope: ['markup.bold'],
-      role: 'variable',
+      role: 'syntax:variable',
       fontStyle: 'bold',
     },
     {
       scope: ['markup.italic'],
-      role: 'emphasis',
+      role: 'syntax:emphasis',
       fontStyle: 'italic',
     },
     {
       scope: ['markup.inline.raw'],
-      role: 'function',
+      role: 'syntax:function',
     },
     {
       scope: ['markup.underline.link', 'string.other.link'],
-      role: 'file',
+      role: 'syntax:file',
     },
     {
       scope: ['markup.quote'],
-      role: 'string',
+      role: 'syntax:string',
       fontStyle: 'italic',
     },
     {
@@ -1079,7 +1079,7 @@ const vscodeColors = {
     },
     {
       scope: ['invalid.deprecated'],
-      role: 'data',
+      role: 'syntax:data',
       fontStyle: 'strikethrough',
     },
   ],

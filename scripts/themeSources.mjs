@@ -19,6 +19,7 @@ import {
 import { auditThemePigmentPolicy, readThemePigmentPolicy } from './themePigmentPolicy.mjs';
 import { auditThemeSafety, readThemeSafetyContract } from './themeSafety.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
+import { syntaxChromaCeilings } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -110,7 +111,7 @@ export function auditThemeSnapshot(snapshot) {
     return {
       slug,
       safety: auditThemeSafety(theme, safetyContract),
-      pigment: auditThemePigmentPolicy(theme, pigmentPolicy),
+      pigment: auditThemePigmentPolicy(theme, pigmentPolicy, snapshot.definition),
     };
   });
 }
@@ -306,16 +307,9 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
       pigments.map((pigment) => apcaContrast(themeColor(theme, pigment), canvas));
     /** @param {string} pigment */
     const chroma = (pigment) => hexToOklch(themeColor(theme, pigment)).C;
-    const leadChroma = Math.max(...hierarchy[0].pigments.map(chroma));
     // The syntax solver keeps every capped pigment under its ceiling; the band
     // floor below is measured relative to that ceiling.
-    /** @type {Map<string, number>} */
-    const chromaCeilings = new Map();
-    for (const { pigments, maximumChromaShareOfLead } of hierarchy) {
-      if (maximumChromaShareOfLead === undefined) continue;
-      for (const pigment of pigments)
-        chromaCeilings.set(pigment, maximumChromaShareOfLead * leadChroma);
-    }
+    const chromaCeilings = syntaxChromaCeilings(hierarchy, chroma);
     for (const [index, upper] of hierarchy.slice(0, -1).entries()) {
       const lower = hierarchy[index + 1];
       requireMetricRange(

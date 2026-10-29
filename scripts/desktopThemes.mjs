@@ -34,6 +34,9 @@ const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
  *   negative: string;
  *   neutral: string;
  *   positive: string;
+ *   negativeBackground: string;
+ *   neutralBackground: string;
+ *   positiveBackground: string;
  *   info: string;
  *   parameter: string;
  *   brightAccent: string;
@@ -312,6 +315,10 @@ function buildDesktopPalette(theme) {
     negative: desktopColor(theme, 'ui:status.error'),
     neutral: desktopColor(theme, 'ui:status.warning'),
     positive: desktopColor(theme, 'ui:status.success'),
+    // Translucent tints for CSS, which composites them over the real surface.
+    negativeBackground: readThemeColor(theme, 'ui:status.errorBackground'),
+    neutralBackground: readThemeColor(theme, 'ui:status.warningBackground'),
+    positiveBackground: readThemeColor(theme, 'ui:status.successBackground'),
     info: desktopColor(theme, 'ui:status.info'),
     parameter: desktopColor(theme, 'syntax:data'),
     brightAccent: desktopColor(theme, 'terminal:ansi.brightMagenta'),
@@ -551,22 +558,19 @@ function buildUnionCssTokens(palette) {
     ['--tyrian-surface-low', palette.surfaceLow],
     ['--tyrian-surface', palette.surface],
     ['--tyrian-surface-high', palette.surfaceHigh],
-    ['--tyrian-surface-highest', palette.surfaceHighest],
     ['--tyrian-border', palette.border],
     ['--tyrian-muted', palette.muted],
     ['--tyrian-accent', palette.accent],
-    ['--tyrian-accent-hover', palette.accentHover],
     ['--tyrian-selection', palette.selection],
     ['--tyrian-selection-text', palette.foreground],
     ['--tyrian-positive', palette.positive],
     ['--tyrian-neutral', palette.neutral],
     ['--tyrian-negative', palette.negative],
-    ['--tyrian-positive-bg', palette.positive.toLowerCase() + '22'],
-    ['--tyrian-neutral-bg', palette.neutral.toLowerCase() + '22'],
-    ['--tyrian-negative-bg', palette.negative.toLowerCase() + '22'],
+    ['--tyrian-positive-bg', palette.positiveBackground],
+    ['--tyrian-neutral-bg', palette.neutralBackground],
+    ['--tyrian-negative-bg', palette.negativeBackground],
     ['--tyrian-disabled-fg', palette.muted],
     ['--tyrian-disabled-bg', palette.surfaceLow],
-    ['--tyrian-hover', palette.selection.toLowerCase() + 'aa'],
     ['--tyrian-window-bg', 'var(--tyrian-background)'],
     ['--tyrian-panel-bg', 'var(--tyrian-surface-low)'],
     ['--tyrian-panel-raised-bg', 'var(--tyrian-surface)'],
@@ -599,7 +603,6 @@ function buildUnionCssTokens(palette) {
     ['--tyrian-icon-small', '16px'],
     ['--tyrian-icon-small-medium', '22px'],
     ['--tyrian-icon-medium', '32px'],
-    ['--tyrian-icon-large', '48px'],
     ['--tyrian-small-element', '16px'],
     ['--tyrian-medium-element', '24px'],
     ['--tyrian-large-element', '32px'],

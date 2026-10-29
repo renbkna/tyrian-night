@@ -1,26 +1,31 @@
 // @ts-check
 
+import { parseArgs } from 'node:util';
+
 import { auditThemeSnapshot, loadThemeInspectionRepository } from './themeSources.mjs';
 import { readThemeSafetyContract, reportThemeColorDiagnostics } from './themeSafety.mjs';
 
-const args = process.argv.slice(2);
-const unsupported = args.find(
-  (entry) =>
-    entry !== '--diagnostics' && !entry.startsWith('--root=') && !entry.startsWith('--theme=')
-);
-if (unsupported) throw new Error(`Unknown color audit option '${unsupported}'.`);
-const requestedTheme = args.find((entry) => entry.startsWith('--theme='))?.slice('--theme='.length);
-const requestedRoot = args.find((entry) => entry.startsWith('--root='))?.slice('--root='.length);
-if (requestedRoot !== undefined && requestedRoot.length === 0) {
-  throw new Error('Color audit --root must be a non-empty path.');
+const { values } = parseArgs({
+  options: {
+    diagnostics: { type: 'boolean', default: false },
+    root: { type: 'string' },
+    theme: { type: 'string' },
+  },
+  strict: true,
+});
+const { diagnostics: showDiagnostics, root: requestedRoot, theme: requestedTheme } = values;
+for (const [name, value] of Object.entries({ root: requestedRoot, theme: requestedTheme })) {
+  if (value !== undefined && value.length === 0) {
+    throw new Error(`Color audit --${name} must not be empty.`);
+  }
 }
-const showDiagnostics = args.includes('--diagnostics');
 const repository = loadThemeInspectionRepository(requestedRoot);
 const contract = readThemeSafetyContract(repository.definition);
 const audits = new Map(auditThemeSnapshot(repository).map((audit) => [audit.slug, audit]));
-const sources = requestedTheme
-  ? repository.sources.filter(({ slug }) => slug === requestedTheme)
-  : repository.sources;
+const sources =
+  requestedTheme !== undefined
+    ? repository.sources.filter(({ slug }) => slug === requestedTheme)
+    : repository.sources;
 
 if (sources.length === 0) throw new Error(`Unknown source theme '${requestedTheme}'.`);
 let failed = false;
