@@ -5,7 +5,9 @@ import path from 'node:path';
 
 /**
  * @typedef {{ path: string; content: string | Uint8Array }} GeneratedAsset
- * @typedef {{ directory: string; match?: RegExp }} GeneratedOwnership
+ * A generator owns whole files, or the files of a directory that `match` accepts
+ * (relative to the directory; every file when omitted).
+ * @typedef {{ directory: string; match?: RegExp } | { file: string }} GeneratedOwnership
  */
 
 /**
@@ -28,7 +30,8 @@ export function readOwnedGeneratedFile(repoRoot, filePath) {
 }
 
 /**
- * Synchronizes generated files and enforces exact ownership inside declared output areas.
+ * Synchronizes generated files and enforces exact ownership: every asset lies
+ * inside the declared ownership, and owned files that are not assets are stale.
  *
  * @param {GeneratedAsset[]} assets
  * @param {string} repoRoot
@@ -50,6 +53,14 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
     expected.set(relativePath, asset.content);
   }
 
+  for (const filePath of expected.keys()) {
+    if (!ownership.some((rule) => ownsPath(rule, filePath))) {
+      throw new Error(
+        `Generated asset '${filePath}' is outside its generator's declared ownership`
+      );
+    }
+  }
+
   // Reject a statically invalid generation before deleting stale outputs or
   // publishing any member of the new set. The write-side check remains below
   // so a later path replacement still cannot redirect an individual write.
@@ -68,7 +79,7 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
     }
 
     for (const rule of ownership) {
-      if (!rule.match) {
+      if ('directory' in rule && !rule.match) {
         removeEmptyDirectories(path.join(repoRoot, requireRelativePath(rule.directory)));
       }
     }
@@ -118,6 +129,12 @@ function listOwnedFiles(repoRoot, ownership) {
   const files = new Set();
 
   for (const rule of ownership) {
+    if ('file' in rule) {
+      const file = requireRelativePath(rule.file);
+      assertNoGeneratedPathSymlink(repoRoot, file);
+      if (fs.existsSync(path.join(repoRoot, file))) files.add(file);
+      continue;
+    }
     const directory = requireRelativePath(rule.directory);
     const absoluteDirectory = path.join(repoRoot, directory);
     assertNoGeneratedPathSymlink(repoRoot, directory);
@@ -213,6 +230,20 @@ function removeEmptyDirectories(directory) {
   if (fs.readdirSync(directory).length === 0) {
     fs.rmdirSync(directory);
   }
+}
+
+/**
+ * @param {GeneratedOwnership} rule
+ * @param {string} filePath normalized repository-relative path
+ * @returns {boolean}
+ */
+function ownsPath(rule, filePath) {
+  if ('file' in rule) return requireRelativePath(rule.file) === filePath;
+  const prefix = `${requireRelativePath(rule.directory)}/`;
+  return (
+    filePath.startsWith(prefix) &&
+    (!rule.match || matches(rule.match, filePath.slice(prefix.length)))
+  );
 }
 
 /**

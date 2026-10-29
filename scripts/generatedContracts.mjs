@@ -4,13 +4,17 @@ import path from 'node:path';
 
 import { readOwnedGeneratedFile, syncGeneratedAssets } from './generatedAssets.mjs';
 import { getDefaultThemeSource, readThemeSources } from './themeSources.mjs';
+import { VSCODE_PACKAGE_COPIED_FILES } from './vscodePackageAssets.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 const themeCatalogOutputPath = 'apps/vscode/src/generated/themeCatalog.ts';
 const vscodePackagePath = 'apps/vscode/package.json';
-const GENERATED_CONTRACT_OWNERSHIP = [{ directory: 'apps/vscode/src/generated' }];
-const PACKAGE_RUNTIME_PREFIX_FILES = ['LICENSE', 'README.md'];
-const PACKAGE_RUNTIME_SUFFIX_FILES = ['assets/icon.png', 'out/extension.js', 'out/islandCli.js'];
+const GENERATED_CONTRACT_OWNERSHIP = [
+  { directory: 'apps/vscode/src/generated' },
+  { file: vscodePackagePath },
+];
+/** The bundle outputs of `apps/vscode` `bundle`, which writes one file per entry point. */
+const PACKAGE_BUNDLE_FILES = ['out/extension.js', 'out/islandCli.js'];
 
 /**
  * @typedef {{ label: string; path: string; uiTheme: string }} VscodeThemeContribution
@@ -94,9 +98,10 @@ function buildPackageThemeContractAsset(sourceThemes, root) {
     );
   const expectedContributions = vscodeThemeContributions(sourceThemes);
   const expectedFiles = [
-    ...PACKAGE_RUNTIME_PREFIX_FILES,
+    'README.md',
+    ...Object.keys(VSCODE_PACKAGE_COPIED_FILES),
+    ...PACKAGE_BUNDLE_FILES,
     ...sourceThemes.map(({ islandCssFile }) => `island/${islandCssFile}`),
-    ...PACKAGE_RUNTIME_SUFFIX_FILES,
     ...sourceThemes.map(({ slug }) => `themes/${slug}.json`),
   ];
 

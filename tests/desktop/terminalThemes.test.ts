@@ -220,20 +220,23 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
         themeColor(theme, 'terminal:cursor')
       )}`
     );
-    expect(footTheme).toContain(`[csd]`);
-    expect(footTheme).toContain(`color=ff${footHex(themeColor(theme, 'terminal:background'))}`);
-    expect(footTheme).toContain(
-      `button-color=ff${footHex(themeColor(theme, 'terminal:foreground'))}`
-    );
+    // [csd] is global in foot; in a theme file the last included variant would win.
+    expect(footTheme).not.toContain('[csd]');
     expect(footText).not.toContain('#');
+    expect(requiredAsset(`terminal/foot/csd/${source.slug}.ini`).split('\n')).toEqual([
+      '[csd]',
+      `color=ff${footHex(themeColor(theme, 'terminal:background'))}`,
+      `button-color=ff${footHex(themeColor(theme, 'terminal:foreground'))}`,
+      '',
+    ]);
   }
 });
 
-test('Ghostty and Foot outputs are theme files only, never user configs', () => {
+test('Ghostty and Foot outputs are include files only, never user configs', () => {
   const terminalConfigOutputs = [...assets.keys()].filter(
     (assetPath) =>
       /^terminal\/(?:ghostty|foot)\//u.test(assetPath) &&
-      !/^terminal\/(?:ghostty|foot)\/themes\//u.test(assetPath)
+      !/^terminal\/(?:ghostty\/themes|foot\/themes|foot\/csd)\//u.test(assetPath)
   );
   expect(terminalConfigOutputs).toEqual([]);
 });

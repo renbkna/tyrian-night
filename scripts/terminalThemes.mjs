@@ -12,6 +12,8 @@ const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 export const FASTFETCH_LOGO_ASSET_PATH = 'assets/tyrian-fetch.webp';
 const GHOSTTY_THEMES_DIRECTORY = 'terminal/ghostty/themes';
 const FOOT_THEMES_DIRECTORY = 'terminal/foot/themes';
+// foot's [csd] section is global, not per color theme, so title-bar colors are a separate include.
+const FOOT_CSD_DIRECTORY = 'terminal/foot/csd';
 const FISH_THEMES_DIRECTORY = 'terminal/fish/themes';
 // Each variant's startup snippet derives the checkout root from this directory's depth.
 const FISH_STARTUP_DIRECTORY = 'terminal/fish/conf.d';
@@ -21,25 +23,34 @@ const FISH_GREETING_ASSET_PATH = 'terminal/fish/functions/fish_greeting.fish';
 const FASTFETCH_CONFIG_DIRECTORY = 'terminal/fastfetch';
 const STARSHIP_CONFIG_DIRECTORY = 'terminal/starship';
 
+/** Starship language modules in prompt order, with their symbols. */
+const STARSHIP_LANGUAGE_SYMBOLS = Object.freeze({
+  c: '',
+  rust: '',
+  golang: '',
+  nodejs: '',
+  bun: '',
+  python: '',
+  java: '',
+});
+
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {import('./themeSources.mjs').ThemeSource} ThemeSource
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
 
-// The variant files share their directories with user files. Every slug starts with `tyrian-`,
-// so the generator reserves `tyrian-*.<ext>` there and leaves other names alone.
+// The theme directories are fully generated. The others share their directory with user
+// files; every slug starts with `tyrian-`, so the generator reserves `tyrian-*.<ext>` there.
 const TERMINAL_GENERATED_OWNERSHIP = [
   { directory: GHOSTTY_THEMES_DIRECTORY },
   { directory: FOOT_THEMES_DIRECTORY },
+  { directory: FOOT_CSD_DIRECTORY },
   { directory: FISH_THEMES_DIRECTORY },
   { directory: FISH_STARTUP_DIRECTORY, match: /^tyrian-[^/]+\.fish$/u },
   { directory: FASTFETCH_CONFIG_DIRECTORY, match: /^tyrian-[^/]+\.jsonc$/u },
   { directory: STARSHIP_CONFIG_DIRECTORY, match: /^tyrian-[^/]+\.toml$/u },
-  {
-    directory: path.posix.dirname(FISH_GREETING_ASSET_PATH),
-    match: new RegExp(`^${RegExp.escape(path.posix.basename(FISH_GREETING_ASSET_PATH))}$`, 'u'),
-  },
+  { file: FISH_GREETING_ASSET_PATH },
 ];
 
 /**
@@ -62,6 +73,10 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
       {
         path: `${FOOT_THEMES_DIRECTORY}/${source.slug}.ini`,
         content: buildFootTheme(theme),
+      },
+      {
+        path: `${FOOT_CSD_DIRECTORY}/${source.slug}.ini`,
+        content: buildFootCsd(theme),
       },
       {
         path: `${FISH_THEMES_DIRECTORY}/${source.slug}.fish`,
@@ -132,7 +147,11 @@ function buildFootTheme(theme) {
   const background = opaqueRoleColor(theme, 'terminal:background');
   const foreground = opaqueRoleColor(theme, 'terminal:foreground');
 
-  const ansiColors = TERMINAL_ANSI_ROLES.map((role) => footColor(opaqueRoleColor(theme, role)));
+  // TERMINAL_ANSI_ROLES lists the eight regular colors, then their bright forms.
+  const ansiColors = TERMINAL_ANSI_ROLES.map(
+    (role, index) =>
+      `${index < 8 ? 'regular' : 'bright'}${index % 8}=${footColor(opaqueRoleColor(theme, role))}`
+  );
 
   return [
     theme.appearance === 'light' ? '[colors-light]' : '[colors-dark]',
@@ -140,29 +159,23 @@ function buildFootTheme(theme) {
     `background=${footColor(background)}`,
     'alpha=0.82',
     'blur=yes',
-    `regular0=${ansiColors[0]}`,
-    `regular1=${ansiColors[1]}`,
-    `regular2=${ansiColors[2]}`,
-    `regular3=${ansiColors[3]}`,
-    `regular4=${ansiColors[4]}`,
-    `regular5=${ansiColors[5]}`,
-    `regular6=${ansiColors[6]}`,
-    `regular7=${ansiColors[7]}`,
-    `bright0=${ansiColors[8]}`,
-    `bright1=${ansiColors[9]}`,
-    `bright2=${ansiColors[10]}`,
-    `bright3=${ansiColors[11]}`,
-    `bright4=${ansiColors[12]}`,
-    `bright5=${ansiColors[13]}`,
-    `bright6=${ansiColors[14]}`,
-    `bright7=${ansiColors[15]}`,
+    ...ansiColors,
     `cursor=${footColor(background)} ${footColor(opaqueRoleColor(theme, 'terminal:cursor'))}`,
     `selection-foreground=${footColor(foreground)}`,
     `selection-background=${footColor(opaqueRoleColor(theme, 'terminal:selection'))}`,
     '',
+  ].join('\n');
+}
+
+/**
+ * @param {ThemeDefinition} theme
+ * @returns {string}
+ */
+function buildFootCsd(theme) {
+  return [
     '[csd]',
-    `color=ff${footColor(background)}`,
-    `button-color=ff${footColor(foreground)}`,
+    `color=ff${footColor(opaqueRoleColor(theme, 'terminal:background'))}`,
+    `button-color=ff${footColor(opaqueRoleColor(theme, 'terminal:foreground'))}`,
     '',
   ].join('\n');
 }
@@ -416,13 +429,7 @@ function buildStarshipConfig(source, theme) {
     '$directory\\',
     '$git_branch\\',
     '$git_status\\',
-    '$c\\',
-    '$rust\\',
-    '$golang\\',
-    '$nodejs\\',
-    '$bun\\',
-    '$python\\',
-    '$java\\',
+    ...Object.keys(STARSHIP_LANGUAGE_SYMBOLS).map((module) => `$${module}\\`),
     '$docker_context\\',
     '$cmd_duration\\',
     '$time\\',
@@ -457,9 +464,13 @@ function buildStarshipConfig(source, theme) {
     'Music = "󰝚 "',
     'Pictures = " "',
     '',
-    ...['c', 'rust', 'golang', 'nodejs', 'bun', 'python', 'java'].flatMap((module) =>
-      buildLanguageModule(module)
-    ),
+    ...Object.entries(STARSHIP_LANGUAGE_SYMBOLS).flatMap(([module, symbol]) => [
+      `[${module}]`,
+      `symbol = "${symbol}"`,
+      'style = "bg:surface fg:language"',
+      'format = "[  $symbol $version]($style)"',
+      '',
+    ]),
     '[docker_context]',
     'symbol = ""',
     'style = "bg:surface fg:container"',
@@ -494,31 +505,6 @@ function buildStarshipConfig(source, theme) {
     '',
     ...buildStarshipPalette(source.paletteName, theme),
   ].join('\n');
-}
-
-/**
- * @param {string} module
- * @returns {string[]}
- */
-function buildLanguageModule(module) {
-  /** @type {Record<string, string>} */
-  const symbols = {
-    bun: '',
-    c: '',
-    golang: '',
-    java: '',
-    nodejs: '',
-    python: '',
-    rust: '',
-  };
-
-  return [
-    `[${module}]`,
-    `symbol = "${symbols[module] ?? ''}"`,
-    'style = "bg:surface fg:language"',
-    'format = "[  $symbol $version]($style)"',
-    '',
-  ];
 }
 
 /**

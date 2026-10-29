@@ -45,6 +45,36 @@ test('generated asset sync owns an exact file set without deleting mixed-directo
   }
 });
 
+test('generated asset sync rejects an asset outside its declared ownership before writing', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-ownership-'));
+
+  try {
+    const ownership = [
+      { directory: 'mixed', match: /^[^/]+\.generated\.css$/u },
+      { file: 'LICENSE' },
+    ];
+    const owned = [
+      { path: 'mixed/current.generated.css', content: 'generated\n' },
+      { path: 'LICENSE', content: 'license\n' },
+    ];
+
+    for (const stray of ['mixed/base.css', 'elsewhere/file.txt']) {
+      expect(() =>
+        syncGeneratedAssets([...owned, { path: stray, content: 'x' }], repoRoot, { ownership })
+      ).toThrow(`Generated asset '${stray}' is outside its generator's declared ownership`);
+    }
+    expect(fs.readdirSync(repoRoot)).toEqual([]);
+
+    syncGeneratedAssets(owned, repoRoot, { ownership });
+    expect(syncGeneratedAssets(owned, repoRoot, { check: true, ownership })).toEqual([]);
+    expect(syncGeneratedAssets(owned.slice(0, 1), repoRoot, { check: true, ownership })).toEqual([
+      'LICENSE',
+    ]);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('generated asset sync admits every expected path before publishing any file', () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-symlink-'));
   const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-outside-'));
