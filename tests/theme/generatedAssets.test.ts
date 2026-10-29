@@ -49,8 +49,9 @@ test('generated asset sync rejects an asset outside its declared ownership befor
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-ownership-'));
 
   try {
+    // The trailing slash names the same directory.
     const ownership = [
-      { directory: 'mixed', match: /^[^/]+\.generated\.css$/u },
+      { directory: 'mixed/', match: /^[^/]+\.generated\.css$/u },
       { file: 'LICENSE' },
     ];
     const owned = [
@@ -58,7 +59,7 @@ test('generated asset sync rejects an asset outside its declared ownership befor
       { path: 'LICENSE', content: 'license\n' },
     ];
 
-    for (const stray of ['mixed/base.css', 'elsewhere/file.txt']) {
+    for (const stray of ['mixed/base.css', 'elsewhere/file.txt', 'LICENSE.md']) {
       expect(() =>
         syncGeneratedAssets([...owned, { path: stray, content: 'x' }], repoRoot, { ownership })
       ).toThrow(`Generated asset '${stray}' is outside its generator's declared ownership`);
