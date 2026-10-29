@@ -15,6 +15,7 @@ import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
  */
 
 const OUTPUT_PATH = 'apps/zed/themes/tyrian-night.json';
+const ZED_LICENSE_PATH = 'apps/zed/LICENSE';
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
@@ -49,12 +50,12 @@ export function syncZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
         path: OUTPUT_PATH,
         content: `${JSON.stringify(buildZedThemeFamily(repoRoot), null, 2)}\n`,
       },
-      { path: 'apps/zed/LICENSE', content: fs.readFileSync(path.join(repoRoot, 'LICENSE')) },
+      { path: ZED_LICENSE_PATH, content: fs.readFileSync(path.join(repoRoot, 'LICENSE')) },
     ],
     repoRoot,
     {
       check: options.check,
-      ownership: [{ directory: 'apps/zed/themes' }, { file: 'apps/zed/LICENSE' }],
+      ownership: [{ directory: path.posix.dirname(OUTPUT_PATH) }, { file: ZED_LICENSE_PATH }],
     }
   );
 }

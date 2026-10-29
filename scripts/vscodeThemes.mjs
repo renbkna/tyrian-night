@@ -5,7 +5,7 @@ import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
-import { THEME_ROLE_NAMESPACES, themeColor } from './themeDefinition.mjs';
+import { qualifyRole, THEME_ROLE_NAMESPACES, themeColor } from './themeDefinition.mjs';
 import { loadVscodeProjection } from './vscodeProjection.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -19,7 +19,7 @@ export function buildVscodeTheme(theme, projection) {
   const colors = {};
   for (const namespace of THEME_ROLE_NAMESPACES) {
     projectColors(colors, projection[namespace], (role) =>
-      themeColor(theme, `${namespace}:${role}`)
+      themeColor(theme, qualifyRole(namespace, role))
     );
   }
   enforceContrastContract(colors, projection.contrastPairs, theme.name);

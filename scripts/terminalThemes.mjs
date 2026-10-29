@@ -551,5 +551,5 @@ function opaqueRoleColor(theme, qualifiedRole) {
  * @returns {string}
  */
 function fishRoleColor(theme, qualifiedRole) {
-  return opaqueRoleColor(theme, qualifiedRole).slice(1);
+  return opaqueHexDigits(opaqueRoleColor(theme, qualifiedRole));
 }

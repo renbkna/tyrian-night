@@ -40,17 +40,20 @@ export type IslandPatchPaths = {
   backupProductJsonPath: string;
 };
 
-export type IslandManifest = {
-  desiredCssFile: string;
-  themeVersion: string;
-  installedAt: string;
-  appRoot: string;
-  upstreamWorkbenchChecksum: string;
-  upstreamProductChecksum: string;
-  cssChecksum: string;
-  patchedWorkbenchChecksum: string;
-  patchedProductChecksum: string;
-};
+/** The manifest receipt: exactly these fields, every one a string. */
+const ISLAND_MANIFEST_FIELDS = [
+  'desiredCssFile',
+  'themeVersion',
+  'installedAt',
+  'appRoot',
+  'upstreamWorkbenchChecksum',
+  'upstreamProductChecksum',
+  'cssChecksum',
+  'patchedWorkbenchChecksum',
+  'patchedProductChecksum',
+] as const;
+
+export type IslandManifest = Record<(typeof ISLAND_MANIFEST_FIELDS)[number], string>;
 
 export function buildIslandPatchPaths(appRoot: string): IslandPatchPaths {
   const workbenchDirPath = path.join(appRoot, WORKBENCH_DIR_RELATIVE_PATH);
@@ -66,14 +69,25 @@ export function buildIslandPatchPaths(appRoot: string): IslandPatchPaths {
   };
 }
 
-/** Every file Tyrian adds beside the workbench; Restore removes exactly these. */
+export type IslandSidecar = 'workbenchBackup' | 'productBackup' | 'stylesheet' | 'manifest';
+
+/**
+ * Every file Tyrian adds beside the workbench, in the order Apply writes them;
+ * Restore removes exactly these.
+ */
+export function islandSidecarPathMap(
+  paths: IslandPatchPaths
+): Readonly<Record<IslandSidecar, string>> {
+  return {
+    workbenchBackup: paths.backupHtmlPath,
+    productBackup: paths.backupProductJsonPath,
+    stylesheet: paths.islandCssPath,
+    manifest: paths.manifestPath,
+  };
+}
+
 export function islandSidecarPaths(paths: IslandPatchPaths): string[] {
-  return [
-    paths.islandCssPath,
-    paths.manifestPath,
-    paths.backupHtmlPath,
-    paths.backupProductJsonPath,
-  ];
+  return Object.values(islandSidecarPathMap(paths));
 }
 
 export function buildManagedRootsDirectoryPath(registryHome = os.homedir()): string {
@@ -100,34 +114,14 @@ export function isIslandCssAssetName(name: string): boolean {
   return /^[a-z0-9][a-z0-9-]*\.css$/u.test(name);
 }
 
-const ISLAND_MANIFEST_FIELDS = [
-  'appRoot',
-  'cssChecksum',
-  'desiredCssFile',
-  'installedAt',
-  'patchedProductChecksum',
-  'patchedWorkbenchChecksum',
-  'themeVersion',
-  'upstreamProductChecksum',
-  'upstreamWorkbenchChecksum',
-].join(',');
-
-export function isIslandManifestShape(
-  manifest: Partial<IslandManifest>
-): manifest is IslandManifest {
+export function isIslandManifestShape(manifest: unknown): manifest is IslandManifest {
+  if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) return false;
+  const keys = Object.keys(manifest);
   return (
-    typeof manifest === 'object' &&
-    manifest !== null &&
-    Object.keys(manifest).toSorted().join(',') === ISLAND_MANIFEST_FIELDS &&
-    typeof manifest.desiredCssFile === 'string' &&
-    isIslandCssAssetName(manifest.desiredCssFile) &&
-    typeof manifest.themeVersion === 'string' &&
-    typeof manifest.installedAt === 'string' &&
-    typeof manifest.appRoot === 'string' &&
-    typeof manifest.upstreamWorkbenchChecksum === 'string' &&
-    typeof manifest.upstreamProductChecksum === 'string' &&
-    typeof manifest.cssChecksum === 'string' &&
-    typeof manifest.patchedWorkbenchChecksum === 'string' &&
-    typeof manifest.patchedProductChecksum === 'string'
+    keys.length === ISLAND_MANIFEST_FIELDS.length &&
+    ISLAND_MANIFEST_FIELDS.every(
+      (field) => typeof (manifest as Record<string, unknown>)[field] === 'string'
+    ) &&
+    isIslandCssAssetName((manifest as IslandManifest).desiredCssFile)
   );
 }

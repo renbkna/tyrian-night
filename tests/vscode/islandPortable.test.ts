@@ -34,6 +34,20 @@ afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('every file the extension manifest names exists after the bundle', () => {
+  const packageRoot = path.resolve('apps/vscode');
+  const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as {
+    main: string;
+    icon: string;
+    files: string[];
+  };
+  const named = [manifest.main, manifest.icon, ...manifest.files];
+
+  expect(named.filter((file) => !fs.existsSync(path.join(packageRoot, file)))).toEqual([]);
+  expect(manifest.files).toContain(path.posix.normalize(manifest.main));
+  expect(manifest.files).toContain(manifest.icon);
+});
+
 test('the bundled CLI applies and restores Island UI', async () => {
   const home = makeHome('round-trip');
   const appRoot = makeAppRoot('round-trip');

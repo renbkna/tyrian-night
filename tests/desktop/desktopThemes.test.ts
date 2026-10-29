@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { contrastRatio } from '../../scripts/colorScience.mjs';
-import { opaqueHex, parseHexColor } from '../../scripts/colorUtils.mjs';
+import { opaqueHex, opaqueHexDigits, parseHexColor } from '../../scripts/colorUtils.mjs';
 import {
   buildDesktopThemeAssets,
   caelestiaFlavour,
@@ -14,6 +14,7 @@ import {
 } from '../../scripts/desktopThemes.mjs';
 import { themeColor } from '../../scripts/themeDefinition.mjs';
 import { flattenCssFile } from '../../scripts/union/flattenCss.mjs';
+import { GENERATED_FORBIDDEN_TEXT } from '../../scripts/union/lintUnionCss.mjs';
 
 type ThemeDefinition = import('../../scripts/themeDefinition.mjs').ThemeDefinition;
 
@@ -36,12 +37,13 @@ const UNION_TOKEN_CONTRACT = [
   '--tyrian-scrollbar-size:',
 ];
 const UNION_FORBIDDEN_CONTRACT = [
-  '@import',
-  '../breeze',
-  'custom-color("kcolorscheme"',
-  'kcolorscheme',
-  'Breeze',
+  ...GENERATED_FORBIDDEN_TEXT,
+  // Tokens removed from the generator must not come back.
   '--tyrian-corner-radius:',
+  '--tyrian-hover:',
+  '--tyrian-surface-highest:',
+  '--tyrian-accent-hover:',
+  '--tyrian-icon-large:',
 ];
 
 test('desktop theme assets match the neutral theme definitions', () => {
@@ -281,14 +283,16 @@ test('Caelestia schemes consume neutral Material and terminal roles', () => {
     const hypr = requiredAsset(`desktop/caelestia/hypr/${source.slug}.conf`);
     const hyprLua = requiredAsset(`desktop/caelestia/hypr/${source.slug}.lua`);
     const state = JSON.parse(requiredAsset(`desktop/caelestia/state/${source.slug}.scheme.json`));
-    const background = hexNoHash(sourceColor(theme, 'ui:surface.canvas'));
-    const primary = hexNoHash(sourceColor(theme, 'ui:accent.primary'));
-    const foreground = hexNoHash(sourceColor(theme, 'ui:text.primary'));
+    const background = opaqueHexDigits(sourceColor(theme, 'ui:surface.canvas')).toLowerCase();
+    const primary = opaqueHexDigits(sourceColor(theme, 'ui:accent.primary')).toLowerCase();
+    const foreground = opaqueHexDigits(sourceColor(theme, 'ui:text.primary')).toLowerCase();
 
     expect(scheme).toContain(`background ${background}`);
     expect(scheme).toContain(`onBackground ${foreground}`);
     expect(scheme).toContain(`primary ${primary}`);
-    expect(scheme).toContain(`term5 ${hexNoHash(sourceColor(theme, 'terminal:ansi.magenta'))}`);
+    expect(scheme).toContain(
+      `term5 ${opaqueHexDigits(sourceColor(theme, 'terminal:ansi.magenta')).toLowerCase()}`
+    );
     expect(scheme).not.toContain('#');
     expect(hypr).toContain(`$background = ${background}`);
     expect(hypr).toContain(`$primary = ${primary}`);
@@ -340,10 +344,6 @@ function kdeRgb(color: string): string {
   const { red, green, blue } = parseHexColor(opaqueHex(color));
 
   return `${red},${green},${blue}`;
-}
-
-function hexNoHash(color: string): string {
-  return opaqueHex(color).slice(1).toLowerCase();
 }
 
 function sourceColor(theme: ThemeDefinition, qualifiedRole: string): string {

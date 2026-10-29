@@ -6,6 +6,7 @@ import { hexToOklch, hueInsideRange } from './colorScience.mjs';
 import {
   isKnownThemeRole,
   loadThemeDefinitionContext,
+  qualifyRole,
   THEME_ROLE_NAMESPACES,
 } from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
@@ -70,7 +71,7 @@ export function auditThemePigmentPolicy(theme, policy) {
   const violations = [];
   for (const namespace of THEME_ROLE_NAMESPACES) {
     for (const [name, color] of Object.entries(theme[namespace])) {
-      const role = `${namespace}:${name}`;
+      const role = qualifyRole(namespace, name);
       const hue = hexToOklch(color.slice(0, 7)).h;
       if (!Number.isFinite(hue)) continue;
       for (const reservation of policy.reservations) {

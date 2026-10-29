@@ -359,6 +359,28 @@ export function themeColor(theme, qualifiedRole) {
 }
 
 /**
+ * Joins a namespace and a role name into the `namespace:role` form.
+ * @param {ThemeRoleNamespace} namespace
+ * @param {string} role
+ */
+export function qualifyRole(namespace, role) {
+  return `${namespace}:${role}`;
+}
+
+/**
+ * Whether `qualifiedRole` is in one of `namespaces`; false for a malformed name.
+ * @param {string} qualifiedRole
+ * @param {readonly ThemeRoleNamespace[]} namespaces
+ */
+function isRoleInNamespace(qualifiedRole, namespaces) {
+  try {
+    return namespaces.includes(parseQualifiedRole(qualifiedRole).namespace);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Splits `namespace:role`; the namespace must be a theme role namespace.
  * @param {string} qualifiedRole
  * @returns {{ namespace: ThemeRoleNamespace; role: string }}
@@ -450,7 +472,7 @@ function validateThemeFamilyContract(contract, requiredPigments) {
       throw new Error(`Theme family syntax hierarchy tier '${tier}' must not be empty.`);
     }
     for (const pigment of pigments) {
-      if (!/^(?:syntax|brackets):/u.test(pigment) || !requiredPigmentSet.has(pigment)) {
+      if (!isRoleInNamespace(pigment, ['syntax', 'brackets']) || !requiredPigmentSet.has(pigment)) {
         throw new Error(
           `Theme family syntax hierarchy pigment '${pigment}' is not a recipe-owned syntax or bracket pigment.`
         );
@@ -482,7 +504,7 @@ function validateThemeFamilyContract(contract, requiredPigments) {
 
   const tierPigments = new Set(syntaxHierarchy.flatMap(({ pigments }) => pigments));
   if (
-    !contract.plainSyntaxPigment.startsWith('syntax:') ||
+    !isRoleInNamespace(contract.plainSyntaxPigment, ['syntax']) ||
     !requiredPigmentSet.has(contract.plainSyntaxPigment) ||
     tierPigments.has(contract.plainSyntaxPigment)
   ) {
@@ -513,7 +535,7 @@ function validateThemeFamilyContract(contract, requiredPigments) {
 
   requireUnique(editorStage.frame, 'Theme family editor stage frame');
   for (const pigment of editorStage.frame) {
-    if (!pigment.startsWith('ui:') || !requiredPigmentSet.has(pigment)) {
+    if (!isRoleInNamespace(pigment, ['ui']) || !requiredPigmentSet.has(pigment)) {
       throw new Error(
         `Theme family editor stage surface '${pigment}' is not a recipe-owned UI pigment.`
       );
@@ -739,7 +761,7 @@ function validateThemeRoleContract(contract) {
 function validateThemeColorBindingContract(contract, requiredThemeRoles) {
   const knownRoles = new Set(
     THEME_ROLE_NAMESPACES.flatMap((namespace) =>
-      requiredThemeRoles[namespace].map((role) => `${namespace}:${role}`)
+      requiredThemeRoles[namespace].map((role) => qualifyRole(namespace, role))
     )
   );
   const { aliases: aliasPigments, derived: derivedPigments } = contract;
@@ -779,7 +801,7 @@ function validateThemeColorBindingContract(contract, requiredThemeRoles) {
   for (const namespace of THEME_ROLE_NAMESPACES) {
     bindings[namespace] = Object.fromEntries(
       requiredThemeRoles[namespace].map((role) => {
-        const qualifiedRole = `${namespace}:${role}`;
+        const qualifiedRole = qualifyRole(namespace, role);
         const pigment =
           aliasPigments[qualifiedRole] ?? derivedPigments[qualifiedRole] ?? qualifiedRole;
         return [

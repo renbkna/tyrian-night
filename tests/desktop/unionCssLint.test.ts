@@ -48,11 +48,11 @@ menuitem:checked {
 test('Union CSS lint requires actual selector rules, not comment text', () => {
   const spoofedCss = `
 /*
-checkdelegate:checked > indicator
-radiodelegate:checked > indicator
-switchdelegate:checked > indicator
-switchdelegate:checked > indicator > handle
-menuitem:checked > indicator
+checkdelegate:checked > indicator { color: red; }
+radiodelegate:checked > indicator { color: red; }
+switchdelegate:checked > indicator { color: red; }
+switchdelegate:checked > indicator > handle { color: red; }
+menuitem:checked > indicator { color: red; }
 */
 `;
 
@@ -182,39 +182,36 @@ test('desktop theme generation rejects invalid Union CSS before producing assets
   }
 });
 
+test('generation lint rejects text the flattened KDE styles must not contain', () => {
+  expect(
+    lintUnionCss('/* see Breeze */\nbutton {\n  color: red;\n}\n', { generated: true })
+  ).toContainEqual({ message: "Generated Union CSS contains 'Breeze'" });
+});
+
+test('desktop theme generation rejects a Union token reference the generator does not define', () => {
+  const root = makeTempRepoFixture();
+
+  try {
+    fs.appendFileSync(
+      unionPath(root, 'parts/00-base.css'),
+      '\nbutton {\n  color: var(--tyrian-undefined-token);\n}\n'
+    );
+
+    expect(() => buildDesktopThemeAssets(root)).toThrow(
+      'Union CSS template references undefined tokens: --tyrian-undefined-token.'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function makeTempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-union-css-test-'));
 }
 
 function makeTempRepoFixture(): string {
   const root = makeTempRoot();
-
-  fs.mkdirSync(path.join(root, 'source'), { recursive: true });
-  fs.copyFileSync('source/themeRoleContract.cjs', path.join(root, 'source/themeRoleContract.cjs'));
-  fs.copyFileSync(
-    'source/themeColorBindings.cjs',
-    path.join(root, 'source/themeColorBindings.cjs')
-  );
-  fs.copyFileSync(
-    'source/themeOpacityContract.cjs',
-    path.join(root, 'source/themeOpacityContract.cjs')
-  );
-  fs.copyFileSync(
-    'source/themeFamilyContract.cjs',
-    path.join(root, 'source/themeFamilyContract.cjs')
-  );
-  fs.copyFileSync(
-    'source/themeSafetyContract.cjs',
-    path.join(root, 'source/themeSafetyContract.cjs')
-  );
-  fs.copyFileSync(
-    'source/themePigmentPolicy.cjs',
-    path.join(root, 'source/themePigmentPolicy.cjs')
-  );
-  fs.copyFileSync('source/themeCatalog.cjs', path.join(root, 'source/themeCatalog.cjs'));
-  fs.cpSync('source/themes', path.join(root, 'source/themes'), { recursive: true });
-  fs.cpSync('source/union-css', path.join(root, 'source/union-css'), { recursive: true });
-
+  fs.cpSync('source', path.join(root, 'source'), { recursive: true });
   return root;
 }
 

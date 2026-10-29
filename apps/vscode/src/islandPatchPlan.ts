@@ -2,6 +2,8 @@ import {
   ISLAND_CSS_FILE_NAME,
   type IslandPatchPaths,
   buildIslandPatchPaths,
+  type IslandSidecar,
+  islandSidecarPathMap,
   islandSidecarPaths,
   TYRIAN_MARKER_START,
   TYRIAN_MARKER_END,
@@ -84,13 +86,7 @@ export async function inspectIslandRoot(
   const productLayout = readProductLayout(currentProductJson);
   const productWorkbenchChecksum =
     productLayout.kind === 'supported' ? productLayout.checksum : undefined;
-  const sidecars = new Map(
-    await Promise.all(
-      islandSidecarPaths(paths).map(
-        async (filePath) => [filePath, await readTextFileIfExists(filePath)] as const
-      )
-    )
-  );
+  const sidecars = await readSidecars(paths);
   const cssContent = sidecars.get(paths.islandCssPath);
   const manifestContent = sidecars.get(paths.manifestPath);
   const backupHtml = sidecars.get(paths.backupHtmlPath);
@@ -280,22 +276,12 @@ export async function buildIslandApplyPlan(options: {
   verify: () => Promise<void>;
 }> {
   const paths = buildIslandPatchPaths(options.appRoot);
-  const [
-    currentHtml,
-    currentProductJson,
-    cssSource,
-    currentBackupHtml,
-    currentBackupProductJson,
-    currentIslandCss,
-    currentManifest,
-  ] = await Promise.all([
+  const sidecarPaths = islandSidecarPathMap(paths);
+  const [currentHtml, currentProductJson, cssSource, currentSidecars] = await Promise.all([
     fs.readFile(paths.workbenchHtmlPath, 'utf8'),
     fs.readFile(paths.productJsonPath, 'utf8'),
     fs.readFile(options.cssSourcePath, 'utf8'),
-    readTextFileIfExists(paths.backupHtmlPath),
-    readTextFileIfExists(paths.backupProductJsonPath),
-    readTextFileIfExists(paths.islandCssPath),
-    readTextFileIfExists(paths.manifestPath),
+    readSidecars(paths),
   ]);
   const desiredCssFile = path.basename(options.cssSourcePath);
 
@@ -305,7 +291,7 @@ export async function buildIslandApplyPlan(options: {
       `Unsupported Tyrian Island CSS asset name '${desiredCssFile}'.`
     );
   }
-  const existingManifest = parseManifest(currentManifest);
+  const existingManifest = parseManifest(currentSidecars.get(sidecarPaths.manifest));
 
   const baseHtml = stripTyrianBlock(currentHtml);
   const baseProductJson = setWorkbenchChecksum(currentProductJson, baseHtml);
@@ -323,15 +309,18 @@ export async function buildIslandApplyPlan(options: {
     patchedWorkbenchChecksum: sha256Base64(patchedHtml),
     patchedProductChecksum: sha256Base64(patchedProductJson),
   });
+  const sidecarContent: Record<IslandSidecar, string> = {
+    workbenchBackup: baseHtml,
+    productBackup: baseProductJson,
+    stylesheet: cssSource,
+    manifest,
+  };
   const mutations: FileMutation[] = [
-    { filePath: paths.backupHtmlPath, content: baseHtml, expectedContent: currentBackupHtml },
-    {
-      filePath: paths.backupProductJsonPath,
-      content: baseProductJson,
-      expectedContent: currentBackupProductJson,
-    },
-    { filePath: paths.islandCssPath, content: cssSource, expectedContent: currentIslandCss },
-    { filePath: paths.manifestPath, content: manifest, expectedContent: currentManifest },
+    ...(Object.keys(sidecarPaths) as IslandSidecar[]).map((sidecar) => ({
+      filePath: sidecarPaths[sidecar],
+      content: sidecarContent[sidecar],
+      expectedContent: currentSidecars.get(sidecarPaths[sidecar]),
+    })),
     { filePath: paths.workbenchHtmlPath, content: patchedHtml, expectedContent: currentHtml },
     {
       filePath: paths.productJsonPath,
@@ -371,6 +360,17 @@ export async function verifyIslandClassification(
       `Tyrian Night verification failed: expected a ${expected} installation, found ${status.classification}. ${status.issues.join(' ')}`
     );
   }
+}
+
+/** Each sidecar path with its content, `undefined` when absent. */
+async function readSidecars(paths: IslandPatchPaths): Promise<Map<string, string | undefined>> {
+  return new Map(
+    await Promise.all(
+      islandSidecarPaths(paths).map(
+        async (filePath) => [filePath, await readTextFileIfExists(filePath)] as const
+      )
+    )
+  );
 }
 
 async function readLayoutFile(filePath: string): Promise<string> {
@@ -570,7 +570,7 @@ function parseManifest(content: string | undefined): IslandManifest | undefined 
   }
 
   try {
-    const parsed = JSON.parse(content) as Partial<IslandManifest>;
+    const parsed: unknown = JSON.parse(content);
     return isIslandManifestShape(parsed) ? parsed : undefined;
   } catch {
     return undefined;

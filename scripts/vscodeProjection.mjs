@@ -6,6 +6,7 @@ import {
   isKnownThemeRole,
   loadThemeDefinitionContext,
   parseQualifiedRole,
+  qualifyRole,
   THEME_ROLE_NAMESPACES,
 } from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
@@ -55,15 +56,15 @@ export function loadVscodeProjection(definition = loadThemeDefinitionContext(rep
       if (!allowedRoles.has(role)) {
         throw new Error(`VS Code projection references unknown ${namespace} role '${role}'.`);
       }
-      requireNames(keys, `VS Code projection ${namespace}:${role}`);
+      requireNames(keys, `VS Code projection ${qualifyRole(namespace, role)}`);
       for (const key of keys) {
         const previousOwner = consumerKeys.get(key);
         if (previousOwner) {
           throw new Error(
-            `VS Code color '${key}' has multiple owners: ${previousOwner} and ${namespace}:${role}.`
+            `VS Code color '${key}' has multiple owners: ${previousOwner} and ${qualifyRole(namespace, role)}.`
           );
         }
-        consumerKeys.set(key, `${namespace}:${role}`);
+        consumerKeys.set(key, qualifyRole(namespace, role));
       }
     }
   }

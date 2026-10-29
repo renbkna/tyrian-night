@@ -8,13 +8,13 @@ import { isDirectRun } from '../cli.mjs';
 
 const UNION_SOURCE_ENTRY = 'source/union-css/index.css';
 
-const GENERATED_FORBIDDEN_TEXT = [
+/** Text the generated KDE styles must not contain: they are flattened and self-contained. */
+export const GENERATED_FORBIDDEN_TEXT = Object.freeze([
   '@import',
   '../breeze',
-  'custom-color("kcolorscheme"',
   'kcolorscheme',
   'Breeze',
-];
+]);
 
 const UNSUPPORTED_TEXT = [
   { pattern: /@media\b/u, label: '@media' },

@@ -409,14 +409,25 @@ function buildUnionCssStyle(cssTemplate, schemeName, palette) {
       throw new Error(`Union CSS template lacks its '${placeholder.trim()}' placeholder.`);
     }
   }
+  const tokens = buildUnionCssTokens(palette);
+  const defined = new Set(tokens.map(([name]) => name));
+  const unresolved = [
+    ...new Set([...cssTemplate.matchAll(/var\((--tyrian-[a-z0-9-]+)\)/gu)].map(([, name]) => name)),
+  ].filter((name) => !defined.has(name));
+  if (unresolved.length > 0) {
+    throw new Error(`Union CSS template references undefined tokens: ${unresolved.join(', ')}.`);
+  }
   return cssTemplate
     .replaceAll(UNION_SCHEME_NAME_PLACEHOLDER, schemeName)
-    .replaceAll(UNION_TOKENS_PLACEHOLDER, buildUnionCssTokens(palette));
+    .replaceAll(
+      UNION_TOKENS_PLACEHOLDER,
+      tokens.map(([name, value]) => `  ${name}: ${value.toLowerCase()};`).join('\n')
+    );
 }
 
 /**
  * @param {DesktopPalette} palette
- * @returns {string}
+ * @returns {Array<[string, string]>}
  */
 function buildUnionCssTokens(palette) {
   return [
@@ -476,9 +487,7 @@ function buildUnionCssTokens(palette) {
     ['--tyrian-scrollbar-size', '20px'],
     ['--tyrian-menu-width', '150px'],
     ['--tyrian-field-width', '200px'],
-  ]
-    .map(([name, value]) => '  ' + name + ': ' + value.toLowerCase() + ';')
-    .join('\n');
+  ];
 }
 
 /**

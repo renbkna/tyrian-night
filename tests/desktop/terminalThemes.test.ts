@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { opaqueHex } from '../../scripts/colorUtils.mjs';
+import { opaqueHex, opaqueHexDigits } from '../../scripts/colorUtils.mjs';
 import {
   FASTFETCH_LOGO_ASSET_PATH,
   buildTerminalThemeAssets,
@@ -84,7 +84,9 @@ test('each linked fish startup file finds its checkout and wires its own variant
       expect(fish.exitCode).toBe(0);
       // Only fish reads these, so a child shell without the link must not inherit them.
       expect(exportedCount).toBe('0');
-      expect(commandColor).toBe(fishHex(themeColor(sourceTheme(source), 'syntax:function')));
+      expect(commandColor).toBe(
+        opaqueHexDigits(themeColor(sourceTheme(source), 'syntax:function'))
+      );
       expect(starshipConfig).toBe(`${resolvedCheckout}/terminal/starship/${slug}.toml`);
       expect(fastfetchArgs).toEqual([
         '--config',
@@ -202,21 +204,25 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
       theme.appearance === 'light' ? '[colors-dark]' : '[colors-light]'
     );
     expect(footTheme).not.toContain(`[colors]`);
-    expect(footTheme).toContain(`background=${footHex(themeColor(theme, 'terminal:background'))}`);
-    expect(footTheme).toContain(`foreground=${footHex(themeColor(theme, 'terminal:foreground'))}`);
+    expect(footTheme).toContain(
+      `background=${opaqueHexDigits(themeColor(theme, 'terminal:background'))}`
+    );
+    expect(footTheme).toContain(
+      `foreground=${opaqueHexDigits(themeColor(theme, 'terminal:foreground'))}`
+    );
     expect(footTheme).toContain('alpha=0.82');
     expect(footTheme).toContain('blur=yes');
     TERMINAL_ANSI_ROLES.forEach((role, slot) => {
       const key = slot < 8 ? `regular${slot}` : `bright${slot - 8}`;
-      expect(footTheme).toContain(`${key}=${footHex(themeColor(theme, role))}`);
+      expect(footTheme).toContain(`${key}=${opaqueHexDigits(themeColor(theme, role))}`);
     });
     expect(footTheme).toContain(
-      `selection-background=${footHex(
+      `selection-background=${opaqueHexDigits(
         opaqueHex(themeColor(theme, 'terminal:selection'), themeColor(theme, 'terminal:background'))
       )}`
     );
     expect(footTheme).toContain(
-      `cursor=${footHex(themeColor(theme, 'terminal:background'))} ${footHex(
+      `cursor=${opaqueHexDigits(themeColor(theme, 'terminal:background'))} ${opaqueHexDigits(
         themeColor(theme, 'terminal:cursor')
       )}`
     );
@@ -225,8 +231,8 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
     expect(footText).not.toContain('#');
     expect(requiredAsset(`terminal/foot/csd/${source.slug}.ini`).split('\n')).toEqual([
       '[csd]',
-      `color=ff${footHex(themeColor(theme, 'terminal:background'))}`,
-      `button-color=ff${footHex(themeColor(theme, 'terminal:foreground'))}`,
+      `color=ff${opaqueHexDigits(themeColor(theme, 'terminal:background'))}`,
+      `button-color=ff${opaqueHexDigits(themeColor(theme, 'terminal:foreground'))}`,
       '',
     ]);
   }
@@ -262,13 +268,13 @@ test('fish themes derive shell syntax colors as session-scoped variables', () =>
     const fishTheme = requiredAsset(`terminal/fish/themes/${source.slug}.fish`);
 
     expect(fishTheme).toContain(
-      `set -g fish_color_command ${fishHex(themeColor(theme, 'syntax:function'))}`
+      `set -g fish_color_command ${opaqueHexDigits(themeColor(theme, 'syntax:function'))}`
     );
     expect(fishTheme).toContain(
-      `set -g fish_color_param ${fishHex(themeColor(theme, 'syntax:data'))}`
+      `set -g fish_color_param ${opaqueHexDigits(themeColor(theme, 'syntax:data'))}`
     );
     expect(fishTheme).toContain(
-      `set -g fish_color_error ${fishHex(themeColor(theme, 'ui:status.error'))} --bold`
+      `set -g fish_color_error ${opaqueHexDigits(themeColor(theme, 'ui:status.error'))} --bold`
     );
     expect(fishTheme).not.toContain('set -U ');
     expect(fishTheme).not.toMatch(/#[0-9A-Fa-f]{6}/u);
@@ -376,20 +382,4 @@ function requiredAsset(assetPath: string): string {
   }
 
   return content;
-}
-
-function fishHex(color: string | undefined): string {
-  if (!color) {
-    throw new Error('Missing fish color');
-  }
-
-  return opaqueHex(color).slice(1);
-}
-
-function footHex(color: string | undefined): string {
-  if (!color) {
-    throw new Error('Missing Foot color');
-  }
-
-  return opaqueHex(color).slice(1);
 }
