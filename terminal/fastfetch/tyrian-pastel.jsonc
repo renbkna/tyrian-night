@@ -1,0 +1,135 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/master/doc/json_schema.json",
+  "logo": {
+    "type": "chafa",
+    "width": 50,
+    "height": 26,
+    "preserveAspectRatio": true,
+    "padding": {
+      "top": 1,
+      "left": 0,
+      "right": 4
+    },
+    "printRemaining": true,
+    "cache": true,
+    "position": "left",
+    "chafa": {
+      "fgOnly": false,
+      "symbols": "braille",
+      "canvasMode": "truecolor"
+    }
+  },
+  "display": {
+    "separator": "  ",
+    "color": {
+      "keys": "#C4A1E3",
+      "title": "#DDD6E5",
+      "output": "#DDD6E5",
+      "separator": "#9A90A2"
+    },
+    "brightColor": true,
+    "key": {
+      "type": "icon",
+      "width": 12
+    },
+    "bar": {
+      "char": {
+        "elapsed": "━",
+        "total": "─"
+      },
+      "border": {
+        "left": "",
+        "right": ""
+      },
+      "color": {
+        "elapsed": "#C4A1E3",
+        "total": "#635172"
+      },
+      "width": 12
+    },
+    "percent": {
+      "type": [
+        "bar",
+        "num"
+      ],
+      "color": {
+        "green": "#93C29B",
+        "yellow": "#DDB780",
+        "red": "#EB97A5"
+      }
+    }
+  },
+  "modules": [
+    {
+      "type": "title",
+      "key": " "
+    },
+    {
+      "type": "separator",
+      "string": "─",
+      "outputColor": "#C4A1E3"
+    },
+    {
+      "type": "os",
+      "keyIcon": "󰣇"
+    },
+    {
+      "type": "kernel",
+      "keyIcon": ""
+    },
+    {
+      "type": "uptime",
+      "keyIcon": ""
+    },
+    {
+      "type": "packages",
+      "keyIcon": "󰏖"
+    },
+    {
+      "type": "shell",
+      "keyIcon": ""
+    },
+    {
+      "type": "de",
+      "keyIcon": ""
+    },
+    {
+      "type": "wm",
+      "keyIcon": ""
+    },
+    {
+      "type": "terminal",
+      "keyIcon": ""
+    },
+    {
+      "type": "cpu",
+      "keyIcon": ""
+    },
+    {
+      "type": "gpu",
+      "keyIcon": "󰢮"
+    },
+    {
+      "type": "memory",
+      "keyIcon": ""
+    },
+    {
+      "type": "disk",
+      "keyIcon": "",
+      "folders": "/",
+      "showReadOnly": true
+    },
+    {
+      "type": "colors",
+      "key": " ",
+      "symbol": "block",
+      "block": {
+        "width": 3,
+        "range": [
+          0,
+          15
+        ]
+      }
+    }
+  ]
+}

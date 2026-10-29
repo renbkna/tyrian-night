@@ -1,0 +1,25 @@
+{
+  "dark": {
+    "name": "Tyrian Nocturne",
+    "primary": "#ae55d9",
+    "primaryText": "#000000",
+    "primaryContainer": "#311941",
+    "secondary": "#6b99d5",
+    "surface": "#03020a",
+    "surfaceText": "#d0c8da",
+    "surfaceVariant": "#372248",
+    "surfaceVariantText": "#b8b0c8",
+    "surfaceTint": "#ae55d9",
+    "background": "#03020a",
+    "backgroundText": "#d0c8da",
+    "outline": "#7d7589",
+    "surfaceContainer": "#1d1434",
+    "surfaceContainerHigh": "#20112d",
+    "surfaceContainerHighest": "#311941",
+    "error": "#fc8c92",
+    "warning": "#eaa222",
+    "info": "#6b99d5",
+    "success": "#649b68",
+    "matugen_type": "scheme-fidelity"
+  }
+}

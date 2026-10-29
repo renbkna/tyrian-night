@@ -7,14 +7,12 @@
     "node": ">=26.13.0"
   },
   "workspaces": [
-    "apps/desktop",
     "apps/vscode"
   ],
   "scripts": {
     "verify": "bun run check:tracked-generated && bun run generate && bun run check && bun run lint && bun run test:isolated ./tests && bun run format:check && bun run check:union-css",
-    "verify:vscode": "bun run generate --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode ./tests/island && bun run --cwd apps/vscode bundle",
-    "verify:vscode-portable": "bun run generate --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode && bun run --cwd apps/vscode bundle",
-    "verify:desktop": "bun run generate --product=desktop && bun run check && bun run test:isolated ./tests/theme ./tests/desktop && bun run check:union-css",
+    "verify:vscode": "bun run check:tracked-generated --product=vscode && bun run generate --untracked --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode ./tests/island && bun run --cwd apps/vscode bundle",
+    "verify:vscode-portable": "bun run check:tracked-generated --product=vscode && bun run generate --untracked --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode && bun run --cwd apps/vscode bundle",
     "package:vscode": "bun run verify:vscode && bun run --cwd apps/vscode package:artifact",
     "generate": "node scripts/generate.mjs",
     "check:generated": "node scripts/generate.mjs --check",
@@ -22,18 +20,13 @@
     "color:audit": "node scripts/themeColorAudit.mjs",
     "check:union-css": "node scripts/union/lintUnionCss.mjs",
     "union:smoke": "QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=org.kde.union UNION_STYLE_NAME=TyrianNight qml6 tests/desktop/UnionSmoke.qml",
-    "desktop:plasma:preview": "node apps/desktop/src/installLiveTyrian.mjs --target=plasma",
-    "desktop:plasma:apply": "node apps/desktop/src/installLiveTyrian.mjs --target=plasma --apply",
-    "desktop:caelestia:preview": "node apps/desktop/src/installLiveTyrian.mjs --target=caelestia",
-    "desktop:caelestia:apply": "node apps/desktop/src/installLiveTyrian.mjs --target=caelestia --apply",
-    "desktop:recover": "node apps/desktop/src/installLiveTyrian.mjs --recover",
     "build": "bun run generate && bun run --cwd apps/vscode bundle",
     "watch": "bun run --cwd apps/vscode watch",
     "check": "tsc --noEmit && tsc --project tests/tsconfig.json",
     "test": "bun run generate --untracked && bun run test:isolated ./tests",
     "test:isolated": "bun test --isolate",
-    "lint": "oxlint -c .oxlintrc.json apps/vscode/src/ apps/desktop/src/ assets/ tests/ scripts/ source/",
-    "lint:fix": "oxlint -c .oxlintrc.json apps/vscode/src/ apps/desktop/src/ assets/ tests/ scripts/ source/ --fix",
+    "lint": "oxlint -c .oxlintrc.json apps/vscode/src/ assets/ tests/ scripts/ source/",
+    "lint:fix": "oxlint -c .oxlintrc.json apps/vscode/src/ assets/ tests/ scripts/ source/ --fix",
     "format": "biome format . --write",
     "format:check": "biome format .",
     "package": "bun run package:vscode"

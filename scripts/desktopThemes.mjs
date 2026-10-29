@@ -1,6 +1,5 @@
 // @ts-check
 
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { contrastRatio } from './colorScience.mjs';
@@ -12,25 +11,10 @@ import { flattenCssFile } from './union/flattenCss.mjs';
 import { lintUnionCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
-// Stable package identity for the PascalCase result of a valid
-// `tyrian-<segment>...` source slug. Installers use this to decode persisted
-// ownership after a source family has been retired from the current catalog.
-const DESKTOP_THEME_ID = /^Tyrian(?:[A-Z0-9][a-z0-9]*)+$/u;
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {{ path: string; content: string }} GeneratedAsset
- * @typedef {{
- *   themeId: string;
- *   kdeColorScheme: string;
- *   plasmaDesktopTheme: string;
- *   plasmaLookAndFeel: string;
- *   caelestiaSchemeState: string;
- *   caelestiaSequences: string;
- *   caelestiaHyprLegacy: string;
- *   caelestiaHyprLua: string;
- *   dmsTheme: string;
- * }} DesktopThemeAssetPaths
  * @typedef {{
  *   background: string;
  *   foreground: string;
@@ -189,7 +173,6 @@ const CAELESTIA_COLOUR_ORDER = [
 const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/kde/color-schemes' },
   { directory: 'desktop/kde/plasma/desktoptheme' },
-  { directory: 'desktop/kde/plasma/look-and-feel' },
   { directory: 'desktop/kde/union/css/styles' },
   { directory: 'desktop/caelestia/schemes/tyrian' },
   { directory: 'desktop/caelestia/hypr' },
@@ -198,46 +181,57 @@ const DESKTOP_GENERATED_OWNERSHIP = [
 ];
 
 /**
+ * The id KDE names a theme's colour scheme, Plasma theme and Union style by, as users type it
+ * into `plasma-apply-colorscheme`: `tyrian-night` becomes `TyrianNight`.
+ *
+ * @param {string} slug
+ * @returns {string}
+ */
+export function kdeThemeId(slug) {
+  return slug
+    .split('-')
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join('');
+}
+
+/**
+ * Caelestia's scheme registry names a variant by its slug without the family prefix.
+ *
+ * @param {string} slug
+ * @returns {string}
+ */
+export function caelestiaFlavour(slug) {
+  return slug.replace(/^tyrian-/, '');
+}
+
+/**
  * @param {string} [repoRoot]
  * @returns {GeneratedAsset[]}
  */
 export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
-  const packageVersion = readPackageVersion(repoRoot);
   const repository = loadThemeRepository(repoRoot);
   const unionCssTemplate = readUnionCssTemplate(repoRoot);
 
   return repository.sources.flatMap((source) => {
     const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repository));
     const palette = buildDesktopPalette(theme);
-    const desktopAssets = desktopThemeAssetPaths(source.slug);
-    const kdeFileName = desktopAssets.themeId;
-    const flavour = source.slug.replace(/^tyrian-/, '');
+    const kdeFileName = kdeThemeId(source.slug);
+    const plasmaDesktopTheme = `desktop/kde/plasma/desktoptheme/${kdeFileName}`;
+    const flavour = caelestiaFlavour(source.slug);
     const mode = source.appearance === 'light' ? 'light' : 'dark';
     const caelestiaColours = buildCaelestiaColours(theme, palette);
 
     return [
       {
-        path: desktopAssets.kdeColorScheme,
+        path: `desktop/kde/color-schemes/${kdeFileName}.colors`,
         content: buildKdeColorScheme(kdeFileName, theme.name, palette, { includeEffects: true }),
       },
       {
-        path: `${desktopAssets.plasmaDesktopTheme}/colors`,
+        path: `${plasmaDesktopTheme}/colors`,
         content: buildKdeColorScheme(kdeFileName, theme.name, palette, { includeEffects: false }),
       },
-      ...buildPlasmaDesktopThemePackageAssets(
-        desktopAssets.plasmaDesktopTheme,
-        kdeFileName,
-        theme.name,
-        packageVersion
-      ),
-      ...buildPlasmaWidgetSkinAssets(desktopAssets.plasmaDesktopTheme, palette),
-      ...buildPlasmaLookAndFeelPackageAssets(
-        desktopAssets.plasmaLookAndFeel,
-        kdeFileName,
-        theme.name,
-        packageVersion,
-        theme.appearance
-      ),
+      ...buildPlasmaDesktopThemePackageAssets(plasmaDesktopTheme, kdeFileName, theme.name),
+      ...buildPlasmaWidgetSkinAssets(plasmaDesktopTheme, palette),
       {
         path: `desktop/kde/union/css/styles/${kdeFileName}/style.css`,
         content: buildUnionCssStyle(unionCssTemplate, theme.name, palette),
@@ -247,19 +241,19 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildCaelestiaSchemeText(caelestiaColours),
       },
       {
-        path: desktopAssets.caelestiaHyprLegacy,
+        path: `desktop/caelestia/hypr/${source.slug}.conf`,
         content: buildCaelestiaHyprScheme(caelestiaColours),
       },
       {
-        path: desktopAssets.caelestiaHyprLua,
+        path: `desktop/caelestia/hypr/${source.slug}.lua`,
         content: buildCaelestiaHyprLuaScheme(caelestiaColours),
       },
       {
-        path: desktopAssets.caelestiaSequences,
+        path: `desktop/caelestia/state/${source.slug}.sequences.txt`,
         content: buildCaelestiaSequences(caelestiaColours),
       },
       {
-        path: desktopAssets.caelestiaSchemeState,
+        path: `desktop/caelestia/state/${source.slug}.scheme.json`,
         content: `${JSON.stringify(
           {
             name: 'tyrian',
@@ -273,27 +267,11 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         )}\n`,
       },
       {
-        path: desktopAssets.dmsTheme,
+        path: `desktop/dms/themes/${source.slug}.json`,
         content: buildDmsTheme(theme.name, mode, caelestiaColours, palette),
       },
     ];
   });
-}
-
-/**
- * @param {string} repoRoot
- * @returns {string}
- */
-function readPackageVersion(repoRoot) {
-  const packageJson = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, 'apps/desktop/package.json'), 'utf8')
-  );
-
-  if (typeof packageJson.version !== 'string') {
-    throw new Error('Missing apps/desktop/package.json version');
-  }
-
-  return packageJson.version;
 }
 
 /**
@@ -491,10 +469,9 @@ function buildPlasmaWidgetSkinAssets(themeRoot, palette) {
  * @param {string} themeRoot
  * @param {string} schemeId
  * @param {string} schemeName
- * @param {string} packageVersion
  * @returns {GeneratedAsset[]}
  */
-function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName, packageVersion) {
+function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName) {
   return [
     {
       path: `${themeRoot}/metadata.json`,
@@ -508,7 +485,6 @@ function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName, p
           License: 'Apache-2.0',
           Name: schemeName,
           ServiceTypes: ['Plasma/Theme'],
-          Version: packageVersion,
           Website: 'https://github.com/renbkna/tyrian-night',
         },
         'X-Plasma-API': '5.0',
@@ -522,92 +498,12 @@ function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName, p
         `Comment=${schemeName} Plasma desktop theme`,
         `X-KDE-PluginInfo-Name=${schemeId}`,
         'X-KDE-PluginInfo-Author=renbkna',
-        `X-KDE-PluginInfo-Version=${packageVersion}`,
         'X-KDE-PluginInfo-License=Apache-2.0',
         'X-KDE-ServiceTypes=Plasma/Theme',
         '',
       ].join('\n'),
     },
   ];
-}
-
-/**
- * @param {string} packageRoot
- * @param {string} schemeId
- * @param {string} schemeName
- * @param {string} packageVersion
- * @param {'dark' | 'light'} appearance
- * @returns {GeneratedAsset[]}
- */
-function buildPlasmaLookAndFeelPackageAssets(
-  packageRoot,
-  schemeId,
-  schemeName,
-  packageVersion,
-  appearance
-) {
-  return [
-    {
-      path: `${packageRoot}/metadata.json`,
-      content: `${formatJson({
-        KPackageStructure: 'Plasma/LookAndFeel',
-        KPlugin: {
-          Authors: [{ Name: 'renbkna' }],
-          Category: '',
-          Description: `${schemeName} look-and-feel using Tyrian-owned theme defaults.`,
-          EnabledByDefault: true,
-          Id: schemeId,
-          License: 'Apache-2.0',
-          Name: schemeName,
-          Version: packageVersion,
-          Website: 'https://github.com/renbkna/tyrian-night',
-        },
-      })}\n`,
-    },
-    {
-      path: `${packageRoot}/contents/defaults`,
-      content: buildLookAndFeelDefaults(schemeId, appearance),
-    },
-  ];
-}
-
-/**
- * @param {string} schemeId
- * @param {'dark' | 'light'} appearance
- * @returns {string}
- */
-function buildLookAndFeelDefaults(schemeId, appearance) {
-  return [
-    '[kdeglobals][KDE]',
-    'widgetStyle=Breeze',
-    '',
-    '[kdeglobals][General]',
-    `ColorScheme=${schemeId}`,
-    '',
-    '[kdeglobals][MainToolbarIcons]',
-    'Size=16',
-    '',
-    '[kdeglobals][ToolbarIcons]',
-    'Size=16',
-    '',
-    '[kdeglobals][Toolbar style]',
-    'ToolButtonStyle=NoText',
-    'ToolButtonStyleOtherToolbars=NoText',
-    '',
-    '[kdeglobals][Icons]',
-    `Theme=${appearance === 'light' ? 'Papirus' : 'Papirus-Dark'}`,
-    '',
-    '[plasmarc][Theme]',
-    `name=${schemeId}`,
-    '',
-    '[kwinrc][org.kde.kdecoration2]',
-    'library=org.kde.breeze',
-    'theme=Breeze',
-    '',
-    '[kcminputrc][Mouse]',
-    'cursorTheme=Bibata-Modern-Classic',
-    '',
-  ].join('\n');
 }
 
 /**
@@ -1409,40 +1305,6 @@ function contrastText(color) {
   }
 
   return text;
-}
-
-/**
- * @param {string} slug
- * @returns {DesktopThemeAssetPaths}
- */
-export function desktopThemeAssetPaths(slug) {
-  const themeId = slug
-    .split('-')
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join('');
-
-  return {
-    themeId,
-    kdeColorScheme: `desktop/kde/color-schemes/${themeId}.colors`,
-    plasmaDesktopTheme: `desktop/kde/plasma/desktoptheme/${themeId}`,
-    plasmaLookAndFeel: `desktop/kde/plasma/look-and-feel/${themeId}`,
-    caelestiaSchemeState: `desktop/caelestia/state/${slug}.scheme.json`,
-    caelestiaSequences: `desktop/caelestia/state/${slug}.sequences.txt`,
-    caelestiaHyprLegacy: `desktop/caelestia/hypr/${slug}.conf`,
-    caelestiaHyprLua: `desktop/caelestia/hypr/${slug}.lua`,
-    dmsTheme: `desktop/dms/themes/${slug}.json`,
-  };
-}
-
-/**
- * Whether a value is a Tyrian desktop package identifier produced by the
- * source-slug naming contract.
- *
- * @param {string} value
- * @returns {boolean}
- */
-export function isDesktopThemeId(value) {
-  return DESKTOP_THEME_ID.test(value);
 }
 
 /**

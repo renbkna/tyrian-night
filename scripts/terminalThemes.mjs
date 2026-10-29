@@ -4,30 +4,42 @@ import path from 'node:path';
 
 import { opaqueHex } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { FASTFETCH_IMAGE_CONFIG_PATH } from '../apps/desktop/src/installPaths.mjs';
 import { themeColor as requireThemeColor, TERMINAL_ANSI_ROLES } from './themeDefinition.mjs';
-import {
-  getTerminalDefaultThemeSource,
-  loadThemeRepository,
-  readSourceTheme,
-} from './themeSources.mjs';
+import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
+// The fish greeting passes this checkout-relative logo to fastfetch, so the image is read in place.
+export const FASTFETCH_LOGO_ASSET_PATH = 'assets/tyrian-fetch.webp';
+const GHOSTTY_THEMES_DIRECTORY = 'terminal/ghostty/themes';
+const FOOT_THEMES_DIRECTORY = 'terminal/foot/themes';
+const FISH_THEMES_DIRECTORY = 'terminal/fish/themes';
+// Each variant's startup snippet derives the checkout root from this directory's depth.
+const FISH_STARTUP_DIRECTORY = 'terminal/fish/conf.d';
+// Users link the chosen variant under this one name, so switching replaces the link.
+const FISH_STARTUP_LINK_NAME = 'tyrian-night.fish';
+const FISH_GREETING_ASSET_PATH = 'terminal/fish/functions/fish_greeting.fish';
+const FASTFETCH_CONFIG_DIRECTORY = 'terminal/fastfetch';
+const STARSHIP_CONFIG_DIRECTORY = 'terminal/starship';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
+ * @typedef {import('./themeSources.mjs').ThemeSource} ThemeSource
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
 
+// The variant files share their directories with user files. Every slug starts with `tyrian-`,
+// so the generator reserves `tyrian-*.<ext>` there and leaves other names alone.
 const TERMINAL_GENERATED_OWNERSHIP = [
-  { directory: 'terminal/ghostty/themes' },
-  { directory: 'terminal/fish/themes' },
-  { directory: 'terminal/fish/functions', match: /^fish_greeting\.fish$/u },
-  { directory: 'terminal/fish/conf.d', match: /^tyrian-night\.fish$/u },
-  { directory: 'terminal/foot/themes' },
-  { directory: 'terminal/fastfetch', match: /^tyrian-night\.jsonc$/u },
-  { directory: 'terminal/fish', match: /^config\.example\.fish$/u },
-  { directory: 'terminal/starship', match: /^tyrian-night\.toml$/u },
+  { directory: GHOSTTY_THEMES_DIRECTORY },
+  { directory: FOOT_THEMES_DIRECTORY },
+  { directory: FISH_THEMES_DIRECTORY },
+  { directory: FISH_STARTUP_DIRECTORY, match: /^tyrian-[^/]+\.fish$/u },
+  { directory: FASTFETCH_CONFIG_DIRECTORY, match: /^tyrian-[^/]+\.jsonc$/u },
+  { directory: STARSHIP_CONFIG_DIRECTORY, match: /^tyrian-[^/]+\.toml$/u },
+  {
+    directory: path.posix.dirname(FISH_GREETING_ASSET_PATH),
+    match: new RegExp(`^${RegExp.escape(path.posix.basename(FISH_GREETING_ASSET_PATH))}$`, 'u'),
+  },
 ];
 
 /**
@@ -40,42 +52,37 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
     source,
     theme: /** @type {ThemeDefinition} */ (readSourceTheme(source, repository)),
   }));
-  const defaultDarkTheme = terminalSourceTheme(sourceThemes, 'dark').theme;
 
   return [
     ...sourceThemes.flatMap(({ source, theme }) => [
       {
-        path: `terminal/ghostty/themes/${source.slug}`,
+        path: `${GHOSTTY_THEMES_DIRECTORY}/${source.slug}`,
         content: buildGhosttyTheme(theme),
       },
       {
-        path: `terminal/foot/themes/${source.slug}.ini`,
+        path: `${FOOT_THEMES_DIRECTORY}/${source.slug}.ini`,
         content: buildFootTheme(theme),
       },
       {
-        path: `terminal/fish/themes/${source.slug}.fish`,
+        path: `${FISH_THEMES_DIRECTORY}/${source.slug}.fish`,
         content: buildFishTheme(theme),
+      },
+      {
+        path: `${FISH_STARTUP_DIRECTORY}/${source.slug}.fish`,
+        content: buildFishStartupConfig(source),
+      },
+      {
+        path: `${FASTFETCH_CONFIG_DIRECTORY}/${source.slug}.jsonc`,
+        content: buildFastfetchConfig(theme),
+      },
+      {
+        path: `${STARSHIP_CONFIG_DIRECTORY}/${source.slug}.toml`,
+        content: buildStarshipConfig(source, theme),
       },
     ]),
     {
-      path: 'terminal/fish/config.example.fish',
-      content: buildFishConfig({ repository }),
-    },
-    {
-      path: 'terminal/fish/conf.d/tyrian-night.fish',
-      content: buildFishStartupConfig({ repository }),
-    },
-    {
-      path: 'terminal/fish/functions/fish_greeting.fish',
+      path: FISH_GREETING_ASSET_PATH,
       content: buildFishGreetingFunction(),
-    },
-    {
-      path: 'terminal/fastfetch/tyrian-night.jsonc',
-      content: buildFastfetchConfig(defaultDarkTheme),
-    },
-    {
-      path: 'terminal/starship/tyrian-night.toml',
-      content: buildStarshipConfig(sourceThemes),
     },
   ];
 }
@@ -213,34 +220,26 @@ function buildFishTheme(theme) {
 }
 
 /**
- * @param {{ repository: import('./themeSources.mjs').ThemeRepository }} options
+ * A variant's startup snippet owns TYRIAN_NIGHT_ROOT and TYRIAN_NIGHT_THEME: it resolves its
+ * own path, so a copy-free symlink from fish's conf.d into the checkout finds the checkout
+ * wherever it lives, and the snippet that FISH_STARTUP_LINK_NAME points at selects the
+ * variant. Only fish reads those two, so they stay unexported; Starship reads STARSHIP_CONFIG.
+ *
+ * @param {ThemeSource} source
  * @returns {string}
  */
-function buildFishConfig({ repository }) {
-  return [
-    'if status is-interactive',
-    ...buildFishStartupConfig({ repository })
-      .trimEnd()
-      .split('\n')
-      .map((line) => `    ${line}`),
-    '',
-    '    starship init fish | source',
-    'end',
-    '',
-  ].join('\n');
-}
-
-/**
- * @param {{ repository: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} options
- * @returns {string}
- */
-export function buildFishStartupConfig({ repository, tyrianRoot = '/path/to/tyrian-night' }) {
-  const defaultDarkSource = getTerminalDefaultThemeSource('dark', repository.sources);
+function buildFishStartupConfig(source) {
+  const toRoot = `${FISH_STARTUP_DIRECTORY}/${source.slug}.fish`
+    .split('/')
+    .map(() => ' | path dirname')
+    .join('');
 
   return [
-    `set -gx TYRIAN_NIGHT_ROOT "${fishEscape(tyrianRoot)}"`,
-    `source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/${defaultDarkSource.slug}.fish`,
-    'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml',
+    `# Resolves symlinks, then climbs from <root>/${FISH_STARTUP_DIRECTORY}/${source.slug}.fish to <root>.`,
+    `set -g TYRIAN_NIGHT_ROOT (path resolve (status current-filename)${toRoot})`,
+    `set -g TYRIAN_NIGHT_THEME ${source.slug}`,
+    `source $TYRIAN_NIGHT_ROOT/${FISH_THEMES_DIRECTORY}/$TYRIAN_NIGHT_THEME.fish`,
+    `set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/${STARSHIP_CONFIG_DIRECTORY}/$TYRIAN_NIGHT_THEME.toml`,
     '',
   ].join('\n');
 }
@@ -251,18 +250,11 @@ export function buildFishStartupConfig({ repository, tyrianRoot = '/path/to/tyri
 function buildFishGreetingFunction() {
   return [
     'function fish_greeting',
-    '    set -l tyrian_night_root $TYRIAN_NIGHT_ROOT',
-    '',
-    '    if test -z "$tyrian_night_root"',
-    '        set -l greeting_path (status current-filename)',
-    '        if test -n "$greeting_path"',
-    '            set tyrian_night_root (realpath (dirname $greeting_path)/../../..)',
-    '        end',
+    '    if not set -q TYRIAN_NIGHT_ROOT TYRIAN_NIGHT_THEME',
+    `        echo "fish_greeting: link a ${FISH_STARTUP_DIRECTORY}/tyrian-*.fish as ~/.config/fish/conf.d/${FISH_STARTUP_LINK_NAME}" >&2`,
+    '        return 1',
     '    end',
-    '',
-    '    if test -n "$tyrian_night_root"',
-    '        fastfetch --config $tyrian_night_root/terminal/fastfetch/tyrian-night.jsonc',
-    '    end',
+    `    fastfetch --config $TYRIAN_NIGHT_ROOT/${FASTFETCH_CONFIG_DIRECTORY}/$TYRIAN_NIGHT_THEME.jsonc --logo $TYRIAN_NIGHT_ROOT/${FASTFETCH_LOGO_ASSET_PATH}`,
     'end',
     '',
   ].join('\n');
@@ -277,7 +269,6 @@ function buildFastfetchConfig(theme) {
     $schema: 'https://github.com/fastfetch-cli/fastfetch/raw/master/doc/json_schema.json',
     logo: {
       type: 'chafa',
-      source: FASTFETCH_IMAGE_CONFIG_PATH,
       width: 50,
       height: 26,
       preserveAspectRatio: true,
@@ -319,7 +310,7 @@ function buildFastfetchConfig(theme) {
         },
         color: {
           elapsed: opaqueRoleColor(theme, 'terminal:ansi.magenta'),
-          total: opaqueRoleColor(theme, 'ui:border.tab'),
+          total: opaqueRoleColor(theme, 'ui:border.default'),
         },
         width: 12,
       },
@@ -408,14 +399,15 @@ function buildFastfetchConfig(theme) {
 }
 
 /**
- * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }>} sourceThemes
+ * @param {ThemeSource} source
+ * @param {ThemeDefinition} theme
  * @returns {string}
  */
-function buildStarshipConfig(sourceThemes) {
+function buildStarshipConfig(source, theme) {
   return [
     '"$schema" = "https://starship.rs/config-schema.json"',
     '',
-    `palette = "${terminalSourceTheme(sourceThemes, 'dark').source.paletteName}"`,
+    `palette = "${source.paletteName}"`,
     '',
     'format = """',
     '[](fg:surface)\\',
@@ -500,27 +492,8 @@ function buildStarshipConfig(sourceThemes) {
     'style = "bg:surface fg:warning"',
     'format = "[  took $duration]($style)"',
     '',
-    ...sourceThemes.flatMap(({ source, theme }) => buildStarshipPalette(source.paletteName, theme)),
+    ...buildStarshipPalette(source.paletteName, theme),
   ].join('\n');
-}
-
-/**
- * @param {Array<{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }>} sourceThemes
- * @param {'dark' | 'light'} appearance
- * @returns {{ source: import('./themeSources.mjs').ThemeSource; theme: ThemeDefinition }}
- */
-function terminalSourceTheme(sourceThemes, appearance) {
-  const defaultSource = getTerminalDefaultThemeSource(
-    appearance,
-    sourceThemes.map(({ source }) => source)
-  );
-  const sourceTheme = sourceThemes.find(({ source }) => source.slug === defaultSource.slug);
-
-  if (!sourceTheme) {
-    throw new Error(`Missing resolved ${appearance} terminal source theme.`);
-  }
-
-  return sourceTheme;
 }
 
 /**
@@ -601,12 +574,4 @@ function fishRoleColor(theme, qualifiedRole) {
  */
 function footColor(color) {
   return opaqueHex(color).slice(1);
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function fishEscape(value) {
-  return value.replace(/([$"\\])/gu, '\\$1');
 }

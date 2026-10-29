@@ -9,8 +9,8 @@ import { contrastRatio } from '../../scripts/colorScience.mjs';
 import { opaqueHex, parseHexColor } from '../../scripts/colorUtils.mjs';
 import {
   buildDesktopThemeAssets,
-  desktopThemeAssetPaths,
-  isDesktopThemeId,
+  caelestiaFlavour,
+  kdeThemeId,
 } from '../../scripts/desktopThemes.mjs';
 import { themeColor } from '../../scripts/themeDefinition.mjs';
 import { flattenCssFile } from '../../scripts/union/flattenCss.mjs';
@@ -50,33 +50,11 @@ test('desktop theme assets match the neutral theme definitions', () => {
   }
 });
 
-test('desktop theme identifiers accept only Tyrian package IDs from source slugs', () => {
-  for (const source of SOURCE_THEMES) {
-    expect(isDesktopThemeId(desktopThemeAssetPaths(source.slug).themeId)).toBe(true);
-  }
-  for (const slug of ['tyrian-2d-night', 'tyrian-n-i-g-h-t']) {
-    expect(isDesktopThemeId(desktopThemeAssetPaths(slug).themeId)).toBe(true);
-  }
-
-  for (const invalidId of [
-    'Tyrian',
-    'CustomUser',
-    'TyrianNight.colors',
-    'TyrianNight/contents',
-    'Tyrian-Night',
-    'Tyriannight',
-  ]) {
-    expect(isDesktopThemeId(invalidId)).toBe(false);
-  }
-});
-
 test('desktop generation resolves catalog identity from the injected repository root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-desktop-root-'));
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'apps/desktop/package.json'), '{"version":"1.0.0"}\n');
     const themePath = path.join(root, 'source/themes/tyrian-night.cjs');
     const theme = readSourceData(themePath) as Record<string, unknown>;
     theme.name = 'Injected Desktop Night';
@@ -96,7 +74,7 @@ test('desktop generation resolves catalog identity from the injected repository 
 test('KDE color schemes consume neutral surface, accent, and text roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const schemeId = pascalSlug(source.slug);
+    const schemeId = kdeThemeId(source.slug);
     const colorScheme = requiredAsset(`desktop/kde/color-schemes/${schemeId}.colors`);
 
     expect(colorScheme).toContain(`ColorScheme=${schemeId}`);
@@ -117,7 +95,7 @@ test('KDE color schemes consume neutral surface, accent, and text roles', () => 
 test('Plasma desktop-theme colors consume the KDE palette without owning ColorEffects', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const schemeId = pascalSlug(source.slug);
+    const schemeId = kdeThemeId(source.slug);
     const plasmaColors = requiredAsset(`desktop/kde/plasma/desktoptheme/${schemeId}/colors`);
 
     expect(plasmaColors).toContain(`ColorScheme=${schemeId}`);
@@ -131,11 +109,14 @@ test('Plasma desktop-theme colors consume the KDE palette without owning ColorEf
   }
 });
 
-test('Plasma packages are full Tyrian-owned packages without a Monochrome base', () => {
-  const packageJson = readJson<{ version: string }>('apps/desktop/package.json');
+test('KDE ids and Caelestia flavours keep the names the READMEs document', () => {
+  expect(kdeThemeId('tyrian-night')).toBe('TyrianNight');
+  expect(caelestiaFlavour('tyrian-night')).toBe('night');
+});
 
+test('Plasma packages are full Tyrian-owned packages without a Monochrome base', () => {
   for (const source of SOURCE_THEMES) {
-    const schemeId = pascalSlug(source.slug);
+    const schemeId = kdeThemeId(source.slug);
     const theme = sourceTheme(source);
     const desktopMetadata = JSON.parse(
       requiredAsset(`desktop/kde/plasma/desktoptheme/${schemeId}/metadata.json`)
@@ -143,38 +124,21 @@ test('Plasma packages are full Tyrian-owned packages without a Monochrome base',
     const desktopMetadataDesktop = requiredAsset(
       `desktop/kde/plasma/desktoptheme/${schemeId}/metadata.desktop`
     );
-    const lookAndFeelMetadata = JSON.parse(
-      requiredAsset(`desktop/kde/plasma/look-and-feel/${schemeId}/metadata.json`)
-    );
-    const lookAndFeelDefaults = requiredAsset(
-      `desktop/kde/plasma/look-and-feel/${schemeId}/contents/defaults`
-    );
 
     expect(desktopMetadata.KPlugin.Id).toBe(schemeId);
     expect(desktopMetadata.KPlugin.Name).toBe(theme.name);
-    expect(desktopMetadata.KPlugin.Version).toBe(packageJson.version);
     expect(desktopMetadata.KPlugin.ServiceTypes).toEqual(['Plasma/Theme']);
     expect(desktopMetadataDesktop).toContain(`X-KDE-PluginInfo-Name=${schemeId}`);
-    expect(lookAndFeelMetadata.KPackageStructure).toBe('Plasma/LookAndFeel');
-    expect(lookAndFeelMetadata.KPlugin.Id).toBe(schemeId);
-    expect(lookAndFeelDefaults).toContain(`ColorScheme=${schemeId}`);
-    expect(lookAndFeelDefaults).toContain('widgetStyle=Breeze');
-    expect(lookAndFeelDefaults).toContain(`name=${schemeId}`);
-    expect(lookAndFeelDefaults).toContain(
-      `Theme=${source.appearance === 'light' ? 'Papirus' : 'Papirus-Dark'}`
+    expect(`${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}`).not.toContain(
+      'Monochrome'
     );
-    expect(
-      `${JSON.stringify(desktopMetadata)}\n${desktopMetadataDesktop}\n${JSON.stringify(
-        lookAndFeelMetadata
-      )}\n${lookAndFeelDefaults}`
-    ).not.toContain('Monochrome');
   }
 });
 
 test('Union CSS styles combine generated Tyrian tokens with the editable rice template', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const schemeId = pascalSlug(source.slug);
+    const schemeId = kdeThemeId(source.slug);
     const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
 
     expect(unionStyle).toStartWith(
@@ -209,7 +173,7 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
 test('Plasma widget skin derives popup, search, task, and row surfaces from Tyrian colors', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const schemeId = pascalSlug(source.slug);
+    const schemeId = kdeThemeId(source.slug);
     const background = sourceColor(theme, 'ui:surface.canvas');
     const surface = sourceColor(theme, 'ui:surface.hover');
     const surfaceLow = sourceColor(theme, 'ui:surface.sidebar');
@@ -313,7 +277,7 @@ test('DMS themes project the Caelestia Material roles for the source appearance'
 test('Caelestia schemes consume neutral Material and terminal roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const flavour = source.slug.replace(/^tyrian-/, '');
+    const flavour = caelestiaFlavour(source.slug);
     const mode = source.appearance === 'light' ? 'light' : 'dark';
     const scheme = requiredAsset(`desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`);
     const hypr = requiredAsset(`desktop/caelestia/hypr/${source.slug}.conf`);
@@ -386,15 +350,4 @@ function hexNoHash(color: string): string {
 
 function sourceColor(theme: ThemeDefinition, qualifiedRole: string): string {
   return opaqueHex(themeColor(theme, qualifiedRole), themeColor(theme, 'ui:surface.canvas'));
-}
-
-function readJson<T>(filePath: string): T {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
-}
-
-function pascalSlug(slug: string): string {
-  return slug
-    .split('-')
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join('');
 }

@@ -13,9 +13,11 @@ jobs:
   vscode-linux:
     name: VS Code package (Linux)
     runs-on: ubuntu-latest
-    container: node:26-trixie
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -43,12 +45,16 @@ jobs:
       - run: bun run verify:vscode-portable
       - run: bun run --cwd apps/vscode package:artifact
 
-  desktop-linux:
-    name: Desktop installer (Linux)
+  repository-linux:
+    name: Repository gate (Linux)
     runs-on: ubuntu-latest
-    container: node:26-trixie
     steps:
       - uses: actions/checkout@v7
+      # The fish startup test runs the generated snippet through a symlink.
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends fish
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

@@ -7,20 +7,12 @@ import path from 'node:path';
 
 import { opaqueHex } from '../../scripts/colorUtils.mjs';
 import {
-  FASTFETCH_IMAGE_ASSET_PATH,
-  FASTFETCH_IMAGE_CONFIG_PATH,
-} from '../../apps/desktop/src/installPaths.mjs';
-import {
-  buildFishStartupConfig,
+  FASTFETCH_LOGO_ASSET_PATH,
   buildTerminalThemeAssets,
   syncTerminalThemeAssets,
 } from '../../scripts/terminalThemes.mjs';
-import { themeColor } from '../../scripts/themeDefinition.mjs';
-import {
-  getTerminalDefaultThemeSource,
-  loadThemeInspectionRepository,
-  loadThemeRepository,
-} from '../../scripts/themeSources.mjs';
+import { TERMINAL_ANSI_ROLES, themeColor } from '../../scripts/themeDefinition.mjs';
+import { getTerminalDefaultThemeSource } from '../../scripts/themeSources.mjs';
 
 const assets = new Map(buildTerminalThemeAssets().map((asset) => [asset.path, asset.content]));
 
@@ -30,43 +22,103 @@ test('terminal theme assets match the generated neutral-role projections', () =>
   }
 });
 
-test('terminal generation resolves validated default roles from the injected catalog root', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-terminal-root-'));
+test('each linked fish startup file finds its checkout and wires its own variant', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `tyrian-fish-root-it's $x-`));
 
   try {
-    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    const catalogPath = path.join(root, 'source/themeCatalog.cjs');
-    const catalog = readSourceData(catalogPath) as Array<{
-      slug: string;
-      terminalDefault?: boolean;
-    }>;
-    for (const entry of catalog) {
-      if (entry.slug === 'tyrian-abyss') delete entry.terminalDefault;
-      if (entry.slug === 'tyrian-night') entry.terminalDefault = true;
+    const checkout = path.join(root, 'checkout');
+    for (const [assetPath, content] of assets) {
+      fs.mkdirSync(path.dirname(path.join(checkout, assetPath)), { recursive: true });
+      fs.writeFileSync(path.join(checkout, assetPath), content);
     }
-    writeSourceData(catalogPath, catalog);
+    fs.mkdirSync(path.dirname(path.join(checkout, FASTFETCH_LOGO_ASSET_PATH)), { recursive: true });
+    fs.copyFileSync(FASTFETCH_LOGO_ASSET_PATH, path.join(checkout, FASTFETCH_LOGO_ASSET_PATH));
+    const resolvedCheckout = fs.realpathSync(checkout);
 
-    const injectedAssets = new Map(
-      buildTerminalThemeAssets(root).map((asset) => [asset.path, asset.content])
+    const functionsDir = path.join(root, 'home/functions');
+    fs.mkdirSync(functionsDir, { recursive: true });
+    fs.symlinkSync(
+      path.join(checkout, 'terminal/fish/functions/fish_greeting.fish'),
+      path.join(functionsDir, 'fish_greeting.fish')
     );
-    expect(injectedAssets.get('terminal/fish/config.example.fish')).toContain(
-      'terminal/fish/themes/tyrian-night.fish'
-    );
-    expect(injectedAssets.get('terminal/starship/tyrian-night.toml')).toContain(
-      'palette = "tyrian_night"'
-    );
+    // A stand-in fastfetch that prints the arguments the greeting passes.
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir);
+    fs.writeFileSync(path.join(binDir, 'fastfetch'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', {
+      mode: 0o755,
+    });
+
+    // Switching variants replaces the one documented link, as `ln -sfn` does.
+    const confDir = path.join(root, 'home/conf.d');
+    const startupLink = path.join(confDir, 'tyrian-night.fish');
+    fs.mkdirSync(confDir, { recursive: true });
+
+    for (const source of SOURCE_THEMES) {
+      const { slug } = source;
+      fs.rmSync(startupLink, { force: true });
+      fs.symlinkSync(path.join(checkout, `terminal/fish/conf.d/${slug}.fish`), startupLink);
+
+      const fish = Bun.spawnSync(
+        [
+          'fish',
+          '--no-config',
+          '--command',
+          [
+            'source $argv[1]',
+            'set -p fish_function_path $argv[2]',
+            "echo (count (set --names --export | string match -r '^TYRIAN_NIGHT_'))",
+            'printf "%s\\n" $fish_color_command $STARSHIP_CONFIG',
+            'fish_greeting',
+          ].join('; and '),
+          startupLink,
+          functionsDir,
+        ],
+        { env: { ...fishEnv(), PATH: `${binDir}:${process.env.PATH}` } }
+      );
+
+      const [exportedCount, commandColor, starshipConfig, ...fastfetchArgs] = fish.stdout
+        .toString()
+        .trimEnd()
+        .split('\n');
+      expect(fish.stderr.toString()).toBe('');
+      expect(fish.exitCode).toBe(0);
+      // Only fish reads these, so a child shell without the link must not inherit them.
+      expect(exportedCount).toBe('0');
+      expect(commandColor).toBe(fishHex(themeColor(sourceTheme(source), 'syntax:function')));
+      expect(starshipConfig).toBe(`${resolvedCheckout}/terminal/starship/${slug}.toml`);
+      expect(fastfetchArgs).toEqual([
+        '--config',
+        `${resolvedCheckout}/terminal/fastfetch/${slug}.jsonc`,
+        '--logo',
+        `${resolvedCheckout}/${FASTFETCH_LOGO_ASSET_PATH}`,
+      ]);
+      for (const referenced of [starshipConfig, fastfetchArgs[1], fastfetchArgs[3]]) {
+        expect(fs.existsSync(referenced!)).toBe(true);
+      }
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('Fish startup generation preserves arbitrary checkout roots as literal paths', () => {
-  const tyrianRoot = String.raw`/tmp/$PROJECT/it's\a literal root`;
-  const startup = buildFishStartupConfig({ repository: THEME_REPOSITORY, tyrianRoot });
+test('fish greeting without the startup snippet reports the missing link', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-fish-greeting-'));
 
-  expect(startup.split('\n')[0]).toBe(
-    String.raw`set -gx TYRIAN_NIGHT_ROOT "/tmp/\$PROJECT/it's\\a literal root"`
-  );
+  try {
+    const greetingPath = path.join(root, 'fish_greeting.fish');
+    fs.writeFileSync(greetingPath, requiredAsset('terminal/fish/functions/fish_greeting.fish'));
+    const fish = Bun.spawnSync(
+      ['fish', '--no-config', '--command', 'source $argv[1]; and fish_greeting', greetingPath],
+      { env: fishEnv() }
+    );
+
+    expect(fish.exitCode).toBe(1);
+    expect(fish.stderr.toString()).toContain(
+      'link a terminal/fish/conf.d/tyrian-*.fish as ~/.config/fish/conf.d/tyrian-night.fish'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('terminal config generators require an admitted repository snapshot', () => {
@@ -74,22 +126,14 @@ test('terminal config generators require an admitted repository snapshot', () =>
 
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
-    const admitted = loadThemeRepository(root);
     const themePath = path.join(root, 'source/themes/tyrian-abyss.cjs');
     const recipe = readSourceData(themePath) as { syntax: { contrast: Record<string, number> } };
     recipe.syntax.contrast.plain = 50;
     writeSourceData(themePath, recipe);
-    const inspection = loadThemeInspectionRepository(root);
 
-    expect(buildFishStartupConfig({ repository: admitted })).toContain('terminal/fish/themes/');
-    expect(() => loadThemeRepository(root)).toThrow('violates theme safety policy');
-
-    // Admission is a type-level contract, proved by `bun run check`: generators
-    // accept only admitted repositories. The call is never made.
-    const rejectsInspection = () =>
-      // @ts-expect-error an inspection repository is not an admitted ThemeRepository
-      buildFishStartupConfig({ repository: inspection });
-    void rejectsInspection;
+    expect(() => buildTerminalThemeAssets(root)).toThrow(
+      "Theme 'tyrian-abyss' violates theme safety policy"
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -113,6 +157,9 @@ test('terminal generation preserves unrelated files in mixed output directories'
 
     syncTerminalThemeAssets(root);
 
+    for (const assetPath of assets.keys()) {
+      expect(fs.existsSync(path.join(root, assetPath))).toBe(true);
+    }
     for (const filePath of manualFiles) {
       expect(fs.readFileSync(path.join(root, filePath), 'utf8')).toBe('manual\n');
     }
@@ -124,16 +171,14 @@ test('terminal generation preserves unrelated files in mixed output directories'
 test('Ghostty themes derive their palette from neutral terminal roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const ghosttyTheme = requiredAsset(`terminal/ghostty/themes/${source.slug}`);
+    const ghosttyTheme = requiredAsset(`terminal/ghostty/themes/${source.slug}`).split('\n');
     const background = themeColor(theme, 'terminal:background');
 
     expect(ghosttyTheme).toContain(`background = ${themeColor(theme, 'terminal:background')}`);
     expect(ghosttyTheme).toContain(`foreground = ${themeColor(theme, 'terminal:foreground')}`);
-    expect(ghosttyTheme).toContain(`palette = 0=${themeColor(theme, 'terminal:ansi.black')}`);
-    expect(ghosttyTheme).toContain(`palette = 5=${themeColor(theme, 'terminal:ansi.magenta')}`);
-    expect(ghosttyTheme).toContain(
-      `palette = 15=${themeColor(theme, 'terminal:ansi.brightWhite')}`
-    );
+    TERMINAL_ANSI_ROLES.forEach((role, slot) => {
+      expect(ghosttyTheme).toContain(`palette = ${slot}=${themeColor(theme, role)}`);
+    });
     expect(ghosttyTheme).toContain(
       `selection-background = ${opaqueHex(themeColor(theme, 'terminal:selection'), background)}`
     );
@@ -149,7 +194,8 @@ test('Ghostty themes derive their palette from neutral terminal roles', () => {
 test('Foot themes derive their palette from neutral terminal roles', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
-    const footTheme = requiredAsset(`terminal/foot/themes/${source.slug}.ini`);
+    const footText = requiredAsset(`terminal/foot/themes/${source.slug}.ini`);
+    const footTheme = footText.split('\n');
 
     expect(footTheme).toContain(theme.appearance === 'light' ? '[colors-light]' : '[colors-dark]');
     expect(footTheme).not.toContain(
@@ -160,11 +206,10 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
     expect(footTheme).toContain(`foreground=${footHex(themeColor(theme, 'terminal:foreground'))}`);
     expect(footTheme).toContain('alpha=0.82');
     expect(footTheme).toContain('blur=yes');
-    expect(footTheme).toContain(`regular0=${footHex(themeColor(theme, 'terminal:ansi.black'))}`);
-    expect(footTheme).toContain(`regular5=${footHex(themeColor(theme, 'terminal:ansi.magenta'))}`);
-    expect(footTheme).toContain(
-      `bright7=${footHex(themeColor(theme, 'terminal:ansi.brightWhite'))}`
-    );
+    TERMINAL_ANSI_ROLES.forEach((role, slot) => {
+      const key = slot < 8 ? `regular${slot}` : `bright${slot - 8}`;
+      expect(footTheme).toContain(`${key}=${footHex(themeColor(theme, role))}`);
+    });
     expect(footTheme).toContain(
       `selection-background=${footHex(
         opaqueHex(themeColor(theme, 'terminal:selection'), themeColor(theme, 'terminal:background'))
@@ -180,7 +225,7 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
     expect(footTheme).toContain(
       `button-color=ff${footHex(themeColor(theme, 'terminal:foreground'))}`
     );
-    expect(footTheme).not.toContain('#');
+    expect(footText).not.toContain('#');
   }
 });
 
@@ -208,7 +253,7 @@ test('terminal READMEs name the catalog terminal defaults', () => {
   );
 });
 
-test('fish themes derive shell syntax colors without owning terminal window colors', () => {
+test('fish themes derive shell syntax colors as session-scoped variables', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
     const fishTheme = requiredAsset(`terminal/fish/themes/${source.slug}.fish`);
@@ -224,14 +269,12 @@ test('fish themes derive shell syntax colors without owning terminal window colo
     );
     expect(fishTheme).not.toContain('set -U ');
     expect(fishTheme).not.toMatch(/#[0-9A-Fa-f]{6}/u);
-    expect(fishTheme).not.toContain('background =');
   }
 });
 
-test('Starship prompt uses named Tyrian palettes backed by neutral roles', () => {
+test('Starship prompts select their own variant palette backed by neutral roles', () => {
   const starshipConfig = requiredAsset('terminal/starship/tyrian-night.toml');
 
-  expect(starshipConfig).toContain('palette = "tyrian_abyss"');
   expect(starshipConfig).toContain('CachyOS = "󰣇"');
   expect(starshipConfig).toContain('style = "bg:surface fg:command"');
   expect(starshipConfig).toContain('style = "bg:surface fg:language"');
@@ -242,25 +285,43 @@ test('Starship prompt uses named Tyrian palettes backed by neutral roles', () =>
 
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
+    const variantConfig = requiredAsset(`terminal/starship/${source.slug}.toml`).split('\n');
 
-    expect(starshipConfig).toContain(`[palettes.${source.paletteName}]`);
-    expect(starshipConfig).toContain(`surface = "${themeColor(theme, 'ui:surface.hover')}"`);
-    expect(starshipConfig).toContain(`text = "${themeColor(theme, 'terminal:foreground')}"`);
-    expect(starshipConfig).toContain(`accent = "${themeColor(theme, 'terminal:ansi.magenta')}"`);
-    expect(starshipConfig).toContain(`command = "${themeColor(theme, 'terminal:ansi.cyan')}"`);
-    expect(starshipConfig).toContain(`language = "${themeColor(theme, 'terminal:ansi.blue')}"`);
-    expect(starshipConfig).toContain(`container = "${themeColor(theme, 'syntax:data')}"`);
+    expect(variantConfig).toContain(`palette = "${source.paletteName}"`);
+    expect(variantConfig.filter((line) => line.startsWith('[palettes.'))).toEqual([
+      `[palettes.${source.paletteName}]`,
+    ]);
+    for (const [key, role] of [
+      ['surface', 'ui:surface.hover'],
+      ['text', 'terminal:foreground'],
+      ['muted', 'ui:text.muted'],
+      ['accent', 'terminal:ansi.magenta'],
+      ['command', 'terminal:ansi.cyan'],
+      ['language', 'terminal:ansi.blue'],
+      ['container', 'syntax:data'],
+      ['success', 'terminal:ansi.green'],
+      ['danger', 'terminal:ansi.red'],
+      ['warning', 'terminal:ansi.yellow'],
+    ] as const) {
+      expect(variantConfig).toContain(`${key} = "${themeColor(theme, role)}"`);
+    }
   }
 });
 
-test('Fastfetch startup config uses the default Tyrian terminal palette with the Chafa logo asset', () => {
-  const theme = sourceTheme(requiredThemeSource('tyrian-abyss'));
-  const fastfetchConfig = JSON.parse(requiredAsset('terminal/fastfetch/tyrian-night.jsonc'));
+test('Fastfetch configs render the passed logo with Chafa in their own variant colors', () => {
+  for (const source of SOURCE_THEMES) {
+    const theme = sourceTheme(source);
+    const variantConfig = JSON.parse(requiredAsset(`terminal/fastfetch/${source.slug}.jsonc`));
 
-  expect(fs.existsSync(FASTFETCH_IMAGE_ASSET_PATH)).toBe(true);
+    expect(variantConfig.display.color.keys).toBe(themeColor(theme, 'terminal:ansi.magenta'));
+    expect(variantConfig.display.color.title).toBe(themeColor(theme, 'terminal:foreground'));
+    expect(variantConfig.display.color.separator).toBe(themeColor(theme, 'ui:text.muted'));
+  }
+
+  const fastfetchConfig = JSON.parse(requiredAsset('terminal/fastfetch/tyrian-night.jsonc'));
+  expect(fastfetchConfig.logo.source).toBeUndefined();
   expect(fastfetchConfig.logo).toMatchObject({
     type: 'chafa',
-    source: FASTFETCH_IMAGE_CONFIG_PATH,
     width: 50,
     height: 26,
     preserveAspectRatio: true,
@@ -268,9 +329,6 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
   expect(fastfetchConfig.logo.cache).toBe(true);
   expect(fastfetchConfig.logo.printRemaining).toBe(true);
   expect(fastfetchConfig.logo.chafa.symbols).toBe('braille');
-  expect(fastfetchConfig.display.color.keys).toBe(themeColor(theme, 'terminal:ansi.magenta'));
-  expect(fastfetchConfig.display.color.title).toBe(themeColor(theme, 'terminal:foreground'));
-  expect(fastfetchConfig.display.color.separator).toBe(themeColor(theme, 'ui:text.muted'));
   expect(
     fastfetchConfig.modules.map((module: string | { type: string }) =>
       typeof module === 'string' ? module : module.type
@@ -294,30 +352,18 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
   ]);
 });
 
-test('Fish example, startup snippet and greeting point each layer at the Tyrian root', () => {
-  expect(requiredAsset('terminal/fish/config.example.fish')).not.toContain(
-    'function fish_greeting'
-  );
-  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
-    'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
-  );
-  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
-    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-abyss.fish'
-  );
-  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).toContain(
-    'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'
-  );
-  expect(requiredAsset('terminal/fish/conf.d/tyrian-night.fish')).not.toContain('starship init');
-  const fishGreeting = requiredAsset('terminal/fish/functions/fish_greeting.fish');
-  expect(fishGreeting).toContain('status current-filename');
-  expect(fishGreeting).toContain(
-    'fastfetch --config $tyrian_night_root/terminal/fastfetch/tyrian-night.jsonc'
-  );
-  expect(fishGreeting).not.toMatch(/\/home\/[^/\s]+/u);
-  expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'starship init fish | source'
-  );
+test('fish startup snippets leave prompt init to the user config', () => {
+  for (const { slug } of SOURCE_THEMES) {
+    expect(requiredAsset(`terminal/fish/conf.d/${slug}.fish`)).not.toContain('starship init');
+  }
 });
+
+/** The test process's environment without a Tyrian setup inherited from the developer's shell. */
+function fishEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('TYRIAN_NIGHT_'))
+  );
+}
 
 function requiredAsset(assetPath: string): string {
   const content = assets.get(assetPath);
@@ -327,16 +373,6 @@ function requiredAsset(assetPath: string): string {
   }
 
   return content;
-}
-
-function requiredThemeSource(slug: string) {
-  const source = SOURCE_THEMES.find((candidate) => candidate.slug === slug);
-
-  if (!source) {
-    throw new Error(`Missing theme source '${slug}'`);
-  }
-
-  return source;
 }
 
 function fishHex(color: string | undefined): string {

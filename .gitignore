@@ -28,19 +28,3 @@ apps/vscode/assets/icon.png
 
 # Generated theme/package artifacts
 apps/vscode/island/tyrian-*.css
-desktop/caelestia/hypr/
-desktop/caelestia/schemes/
-desktop/caelestia/state/
-desktop/dms/themes/
-desktop/kde/color-schemes/
-desktop/kde/plasma/desktoptheme/
-desktop/kde/plasma/look-and-feel/
-desktop/kde/union/css/styles/
-terminal/fastfetch/tyrian-night.jsonc
-terminal/fish/config.example.fish
-terminal/fish/conf.d/tyrian-night.fish
-terminal/fish/functions/fish_greeting.fish
-terminal/fish/themes/
-terminal/foot/themes/
-terminal/ghostty/themes/
-terminal/starship/tyrian-night.toml

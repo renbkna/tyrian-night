@@ -9,8 +9,7 @@ Tyrian Night is one visual system exported to independently supported editor, te
 | VS Code color themes | VS Code 1.118+ on Linux, macOS, and Windows | Standard extension install | [`apps/vscode/README.md`](apps/vscode/README.md) |
 | VS Code Island UI | Linux, macOS, Windows | Patches the VS Code application | [`apps/vscode/README.md#island-ui`](apps/vscode/README.md#island-ui) |
 | Zed themes | Systems supported by Zed | Standard theme extension | [`apps/zed/README.md`](apps/zed/README.md) |
-| Terminal and desktop files | Wherever each target accepts them | User-selected files | Component README files |
-| Live desktop installer | Linux with GNU `mv --exchange` and util-linux `flock` | Replaces user configuration atomically, with backups | [`apps/desktop/README.md`](apps/desktop/README.md) |
+| Terminal and desktop files | Wherever each target accepts them | Files you link or copy from the checkout | Component README files |
 
 The root `package.json` owns the workspace's Bun version (`packageManager`) and Node.js floor (`engines`); CI reads both from it. Product manifests own narrower runtime requirements.
 
@@ -18,7 +17,7 @@ The root `package.json` owns the workspace's Bun version (`packageManager`) and 
 
 - Installing or selecting the VS Code and Zed color themes uses the editors' normal extension mechanisms. It does not patch application or desktop files.
 - Island UI is a separate, opt-in feature that modifies VS Code application files on Linux, macOS, and Windows. Doctor and the restore-before-uninstall warning are part of its product contract.
-- Desktop preview commands are read-only. Desktop apply commands are Linux-only, user-scoped, atomic replacements of the paths listed by the preview; each apply is backed up first and `desktop:recover` restores the latest backup. They never request administrator privileges.
+- Nothing in the repository writes terminal or desktop configuration. Those files are committed so they can be used from the checkout, and their READMEs give the link or copy steps.
 
 ## Family
 
@@ -68,21 +67,9 @@ There is one VS Code extension download. It contains the color themes and the op
 
 For Zed, install the extension from `apps/zed/` or follow its product README.
 
-## Desktop Commands
+## Terminal and Desktop Files
 
-Desktop preview commands are observational: they read repository and destination state, print the plan, and do not generate files, take the desktop lock, or create backups.
-
-```sh
-bun run desktop:plasma:preview
-bun run desktop:plasma:apply
-
-bun run desktop:caelestia:preview
-bun run desktop:caelestia:apply
-
-bun run desktop:recover
-```
-
-Read the desktop product contract before applying it.
+Each target has its own README: [Ghostty](terminal/ghostty/README.md), [foot](terminal/foot/README.md), [fish](terminal/fish/README.md), [Starship](terminal/starship/README.md), [KDE Plasma](desktop/kde/README.md), [Caelestia](desktop/caelestia/README.md), and [DMS](desktop/dms/README.md). Symlinked files follow the checkout, so `git pull` updates them.
 
 ## Authority and Repository Layout
 
@@ -103,12 +90,9 @@ Read the desktop product contract before applying it.
 - `scripts/generate.mjs` owns the generator registry: `bun run generate` writes every projection, `--check` reports stale outputs, and `--product`/`--tracked`/`--untracked` select a subset.
 - `apps/vscode/` owns the VS Code manifest, build, runtime, package contents, and support contract.
 - `apps/zed/` owns the Zed extension.
-- `apps/desktop/` owns the Linux installers (`apps/desktop/src`), their version, and support contract.
-- `terminal/` and `desktop/` contain generated product assets.
+- `terminal/` and `desktop/` contain generated product assets, committed so they are used from a checkout; `bun run verify` fails when they are stale.
 
 Generated consumers never become palette inputs.
-
-Installation has separate owners from theme generation. `apps/desktop/src/installOps.mjs` owns the desktop filesystem primitives: atomic file and directory publication, backups and their restore, and the per-user `flock`. `installLiveTyrian.mjs` owns the style install and its ownership record.
 
 Island command orchestration stays in `islandShell.ts`. `islandPatchPlan.ts` derives the ordered file changes and verifies patch invariants; `islandFileSystem.ts` applies them with atomic writes; `islandRegistry.ts` owns desired state, discovery, and quarantine. The Island CLI owns serialization (`islandLock.ts`): every mutating command holds one per-user operating-system lock. Each command publishes desired intent, then converges the app files, so rerunning an interrupted command completes it. Decisions that depend on the saved desired style (startup reconciliation and Repair) run as the one `converge` command, so they read and act on that style under the same lock.
 
@@ -124,7 +108,7 @@ bun run package:vscode
 
 `color:audit` reports accessibility and brand-policy failures separately. The opt-in diagnostics expose contrast, OKLCH, richness, and normal/simulated state distances without assigning them a quality score. Use the real-editor preview scenes for atmosphere, hierarchy, glare, and comfort; those judgments cannot be reduced to a repository score.
 
-CI packages the VS Code product on Linux, macOS, and Windows, and runs the bundled Island CLI end to end on each. Linux additionally runs the full Island mutation proofs and desktop installer proofs.
+CI packages the VS Code product on Linux, macOS, and Windows, and runs the shipped Island CLI bundle end to end on each. Linux additionally runs the full repository gate, including the Island mutation proofs. The fish startup test needs `fish` on `PATH`.
 
 ## Contributing
 

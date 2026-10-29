@@ -12,24 +12,22 @@ import {
   buildIslandPatchPaths,
 } from '../../apps/vscode/src/islandPatchContract.js';
 
-// These tests run on every CI operating system: they execute the bundled CLI
-// under Node, the way the extension runs it, with that platform's Island lock.
+// These tests run on every CI operating system: they build the extension with its own
+// `bundle` script and execute the shipped out/islandCli.js under Node, the way the
+// extension runs it, with that platform's Island lock.
 setDefaultTimeout(60_000);
 
 let root: string;
-let cliPath: string;
+const cliPath = path.resolve('apps/vscode/out/islandCli.js');
 
-beforeAll(async () => {
+beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-island-portable-'));
-  const build = await Bun.build({
-    entrypoints: [path.resolve('apps/vscode/src/islandCli.ts')],
-    outdir: path.join(root, 'bundle'),
-    target: 'node',
-    format: 'esm',
-    naming: '[name].mjs',
+  const build = Bun.spawnSync(['bun', 'run', '--cwd', 'apps/vscode', 'bundle'], {
+    stderr: 'pipe',
   });
-  if (!build.success) throw new AggregateError(build.logs, 'Island CLI bundle failed');
-  cliPath = path.join(root, 'bundle', 'islandCli.mjs');
+  if (build.exitCode !== 0) {
+    throw new Error(`Island CLI bundle failed:\n${build.stderr.toString()}`);
+  }
 });
 
 afterAll(() => {

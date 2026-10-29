@@ -1,0 +1,130 @@
+"$schema" = "https://starship.rs/config-schema.json"
+
+palette = "tyrian_nocturne"
+
+format = """
+[](fg:surface)\
+$os\
+$username\
+$directory\
+$git_branch\
+$git_status\
+$c\
+$rust\
+$golang\
+$nodejs\
+$bun\
+$python\
+$java\
+$docker_context\
+$cmd_duration\
+$time\
+[](fg:surface)\
+$line_break$character"""
+
+[os]
+disabled = false
+style = "bg:surface fg:accent"
+format = "[$symbol]($style)"
+
+[os.symbols]
+Arch = "󰣇"
+CachyOS = "󰣇"
+Linux = "󰌽"
+
+[username]
+show_always = true
+style_user = "bg:surface fg:muted"
+style_root = "bg:surface fg:danger"
+format = "[ $user]($style)"
+
+[directory]
+style = "bg:surface fg:text"
+format = "[  $path]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+
+[directory.substitutions]
+Documents = "󰈙 "
+Downloads = " "
+Music = "󰝚 "
+Pictures = " "
+
+[c]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[rust]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[golang]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[nodejs]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[bun]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[python]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[java]
+symbol = ""
+style = "bg:surface fg:language"
+format = "[  $symbol $version]($style)"
+
+[docker_context]
+symbol = ""
+style = "bg:surface fg:container"
+format = "[  $symbol $context]($style)"
+
+[git_branch]
+symbol = ""
+style = "bg:surface fg:command"
+format = "[  $symbol $branch]($style)"
+
+[git_status]
+style = "bg:surface fg:warning"
+format = "[ $all_status$ahead_behind]($style)"
+
+[time]
+disabled = false
+time_format = "%R"
+style = "bg:surface fg:muted"
+format = "[   $time ]($style)"
+
+[character]
+success_symbol = "[❯](fg:success)"
+error_symbol = "[❯](fg:danger)"
+
+[line_break]
+disabled = false
+
+[cmd_duration]
+min_time = 2000
+style = "bg:surface fg:warning"
+format = "[  took $duration]($style)"
+
+[palettes.tyrian_nocturne]
+surface = "#1D1434"
+text = "#D0C8DA"
+muted = "#887F98"
+accent = "#AE55D9"
+command = "#8080CD"
+language = "#6B99D5"
+container = "#D682B8"
+success = "#649B68"
+danger = "#DC7177"
+warning = "#C99546"

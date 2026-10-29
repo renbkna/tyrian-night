@@ -24,8 +24,7 @@
     "themes/tyrian-dawn.json"
   ],
   "engines": {
-    "vscode": "^1.118.0",
-    "node": ">=26.13.0"
+    "vscode": "^1.118.0"
   },
   "categories": [
     "Themes"

@@ -1,0 +1,25 @@
+{
+  "dark": {
+    "name": "Tyrian Abyss",
+    "primary": "#c13cfb",
+    "primaryText": "#000000",
+    "primaryContainer": "#390e51",
+    "secondary": "#5698ec",
+    "surface": "#010004",
+    "surfaceText": "#ded6e9",
+    "surfaceVariant": "#2e1243",
+    "surfaceVariantText": "#c4b9da",
+    "surfaceTint": "#c13cfb",
+    "background": "#010004",
+    "backgroundText": "#ded6e9",
+    "outline": "#817395",
+    "surfaceContainer": "#1a0e34",
+    "surfaceContainerHigh": "#1f0830",
+    "surfaceContainerHighest": "#390e51",
+    "error": "#fc8c92",
+    "warning": "#eaa222",
+    "info": "#5698ec",
+    "success": "#59a961",
+    "matugen_type": "scheme-fidelity"
+  }
+}

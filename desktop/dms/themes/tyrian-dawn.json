@@ -1,0 +1,25 @@
+{
+  "light": {
+    "name": "Tyrian Dawn",
+    "primary": "#784296",
+    "primaryText": "#ffffff",
+    "primaryContainer": "#d7c5e2",
+    "secondary": "#275d95",
+    "surface": "#f6f4fd",
+    "surfaceText": "#2d2332",
+    "surfaceVariant": "#c8b8cf",
+    "surfaceVariantText": "#48394d",
+    "surfaceTint": "#784296",
+    "background": "#f6f4fd",
+    "backgroundText": "#2d2332",
+    "outline": "#6f6274",
+    "surfaceContainer": "#dedaef",
+    "surfaceContainerHigh": "#e5dae9",
+    "surfaceContainerHighest": "#d7c5e2",
+    "error": "#b71434",
+    "warning": "#885d0f",
+    "info": "#275d95",
+    "success": "#2f6933",
+    "matugen_type": "scheme-fidelity"
+  }
+}

@@ -1,0 +1,1419 @@
+/*
+ * Tyrian Abyss Union CSS style.
+ * Static rice controls live in source/union-css/index.css and parts/.
+ * Palette and shape tokens are generated from the family contract and neutral source-theme roles by scripts/desktopThemes.mjs.
+ */
+
+:root {
+  --tyrian-background: #010004;
+  --tyrian-foreground: #ded6e9;
+  --tyrian-surface-low: #010003;
+  --tyrian-surface: #1a0e34;
+  --tyrian-surface-high: #1f0830;
+  --tyrian-surface-highest: #390e51;
+  --tyrian-border: #2e1243;
+  --tyrian-muted: #817395;
+  --tyrian-accent: #c13cfb;
+  --tyrian-accent-hover: #491568;
+  --tyrian-selection: #390e51;
+  --tyrian-selection-text: #ded6e9;
+  --tyrian-positive: #59a961;
+  --tyrian-neutral: #eaa222;
+  --tyrian-negative: #fc8c92;
+  --tyrian-positive-bg: #59a96122;
+  --tyrian-neutral-bg: #eaa22222;
+  --tyrian-negative-bg: #fc8c9222;
+  --tyrian-disabled-fg: #817395;
+  --tyrian-disabled-bg: #010003;
+  --tyrian-hover: #390e51aa;
+  --tyrian-window-bg: var(--tyrian-background);
+  --tyrian-panel-bg: var(--tyrian-surface-low);
+  --tyrian-panel-raised-bg: var(--tyrian-surface);
+  --tyrian-control-bg: var(--tyrian-surface-low);
+  --tyrian-control-hover-bg: var(--tyrian-surface);
+  --tyrian-control-active-bg: var(--tyrian-selection);
+  --tyrian-control-disabled-bg: var(--tyrian-disabled-bg);
+  --tyrian-field-bg: var(--tyrian-background);
+  --tyrian-row-hover-bg: var(--tyrian-surface);
+  --tyrian-row-selected-bg: var(--tyrian-selection);
+  --tyrian-indicator-bg: var(--tyrian-surface-high);
+  --tyrian-indicator-checked-bg: var(--tyrian-accent);
+  --tyrian-track-bg: var(--tyrian-surface-low);
+  --tyrian-fill-bg: var(--tyrian-accent);
+  --tyrian-border-color: var(--tyrian-border);
+  --tyrian-border-hover: #5b2b74;
+  --tyrian-focus-ring: var(--tyrian-accent);
+  --tyrian-overlay-modal-bg: rgba(0, 0, 0, 0.35);
+  --tyrian-overlay-modeless-bg: rgba(0, 0, 0, 0.18);
+  --tyrian-shadow-elevation: 0px 2px 24px 0px rgba(0, 0, 0, 0.28);
+  --tyrian-radius-small: 4px;
+  --tyrian-radius-medium: 5px;
+  --tyrian-radius-large: 10px;
+  --tyrian-pill-radius: 999px;
+  --tyrian-minimal-spacing: 2px;
+  --tyrian-small-spacing: 4px;
+  --tyrian-medium-spacing: 6px;
+  --tyrian-large-spacing: 8px;
+  --tyrian-grid-unit: 18px;
+  --tyrian-icon-small: 16px;
+  --tyrian-icon-small-medium: 22px;
+  --tyrian-icon-medium: 32px;
+  --tyrian-icon-large: 48px;
+  --tyrian-small-element: 16px;
+  --tyrian-medium-element: 24px;
+  --tyrian-large-element: 32px;
+  --tyrian-scrollbar-size: 20px;
+  --tyrian-menu-width: 150px;
+  --tyrian-field-width: 200px;
+}
+
+* {
+  color: var(--tyrian-foreground);
+  icon-color: var(--tyrian-foreground);
+  icon-size: var(--tyrian-icon-small);
+  layout-alignment: item start center 0;
+  icon-alignment: content start center 0;
+  text-alignment: content start center 1;
+}
+
+action,
+actiongroup,
+control,
+abstractbutton {
+  color: var(--tyrian-foreground);
+  icon-color: var(--tyrian-foreground);
+}
+
+applicationwindow,
+window,
+page,
+pane,
+container,
+stackview,
+swipeview,
+dialog,
+drawer,
+overlaydrawer {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-foreground);
+}
+
+label {
+  color: var(--tyrian-foreground);
+}
+
+label:disabled {
+  color: var(--tyrian-disabled-fg);
+}
+
+popup,
+menu,
+tooltip {
+  padding: var(--tyrian-large-spacing);
+  background-color: var(--tyrian-panel-raised-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-large);
+  box-shadow: var(--tyrian-shadow-elevation);
+}
+abstractbutton,
+button,
+toolbutton,
+combobox,
+roundbutton,
+delaybutton {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  layout-alignment: content fill fill 0;
+  text-alignment-horizontal: center;
+  icon-alignment-horizontal: center;
+  background-color: var(--tyrian-control-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-medium);
+  color: var(--tyrian-foreground);
+}
+
+abstractbutton:hovered,
+button:hovered,
+toolbutton:hovered,
+combobox:hovered,
+roundbutton:hovered,
+delaybutton:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+abstractbutton:pressed,
+button:pressed,
+toolbutton:pressed,
+combobox:pressed,
+roundbutton:pressed,
+delaybutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+abstractbutton:checked,
+button:checked,
+toolbutton:checked,
+roundbutton:checked {
+  background-color: var(--tyrian-selection);
+  border-color: var(--tyrian-focus-ring);
+}
+
+abstractbutton:disabled,
+button:disabled,
+toolbutton:disabled,
+combobox:disabled,
+roundbutton:disabled,
+delaybutton:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+  box-shadow: none;
+}
+
+abstractbutton:visual-focus,
+button:visual-focus,
+toolbutton:visual-focus,
+combobox:visual-focus,
+roundbutton:visual-focus,
+delaybutton:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+abstractbutton.flat,
+button.flat,
+combobox.flat,
+roundbutton.flat,
+toolbutton {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+abstractbutton.flat:hovered,
+button.flat:hovered,
+combobox.flat:hovered,
+roundbutton.flat:hovered,
+toolbutton:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+}
+
+abstractbutton.flat:pressed,
+button.flat:pressed,
+combobox.flat:pressed,
+roundbutton.flat:pressed,
+toolbutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+button.with-icon,
+toolbutton.with-icon,
+roundbutton.with-icon,
+delaybutton.with-icon,
+combobox[display="icon"],
+tabbutton.with-icon {
+  spacing: var(--tyrian-small-spacing);
+}
+
+toolbutton.raised {
+  background-color: var(--tyrian-control-bg);
+  border: 1px solid var(--tyrian-border-color);
+}
+
+roundbutton {
+  border-radius: var(--tyrian-pill-radius);
+}
+
+combobox > indicator,
+abstractbutton.with-menu > indicator,
+button.with-menu > indicator,
+toolbutton.with-menu > indicator {
+  width: var(--tyrian-icon-small);
+  height: var(--tyrian-icon-small);
+  icon-name: "arrow-down-symbolic";
+  icon-color: var(--tyrian-foreground);
+  layout-alignment: content end center 0;
+}
+
+toolseparator {
+  background-color: var(--tyrian-border-color);
+}
+
+toolseparator.horizontal {
+  width: var(--tyrian-large-element);
+  height: 1px;
+  inset: 0px var(--tyrian-small-spacing);
+}
+
+toolseparator.vertical {
+  width: 1px;
+  height: var(--tyrian-large-element);
+  inset: var(--tyrian-small-spacing) 0px;
+}
+
+delaybutton > fill {
+  border-radius: var(--tyrian-radius-medium);
+  border: 1px solid var(--tyrian-border-hover);
+  background-color: var(--tyrian-fill-bg);
+}
+
+tumbler {
+  width: 60px;
+  height: 200px;
+  background-color: var(--tyrian-panel-bg);
+}
+
+tumbler text {
+  text-alignment-horizontal: center;
+  color: var(--tyrian-muted);
+}
+
+tumbler text:highlighted {
+  color: var(--tyrian-accent);
+}
+
+toolbar,
+applicationheader {
+  background-color: var(--tyrian-panel-bg);
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+textfield,
+textarea,
+spinbox,
+doublespinbox,
+searchfield {
+  width: var(--tyrian-field-width);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background-color: var(--tyrian-field-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-medium);
+  color: var(--tyrian-foreground);
+}
+
+textfield:hovered,
+textarea:hovered,
+spinbox:hovered,
+doublespinbox:hovered,
+searchfield:hovered {
+  border-color: var(--tyrian-border-hover);
+}
+
+textfield:active-focus,
+textarea:active-focus,
+spinbox:active-focus,
+doublespinbox:active-focus,
+searchfield:active-focus,
+textfield:visual-focus,
+textarea:visual-focus,
+spinbox:visual-focus,
+doublespinbox:visual-focus,
+searchfield:visual-focus {
+  border-color: var(--tyrian-focus-ring);
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+textfield:disabled,
+textarea:disabled,
+spinbox:disabled,
+doublespinbox:disabled,
+searchfield:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+textfield > .placeholder,
+textarea > .placeholder,
+spinbox > .placeholder,
+doublespinbox > .placeholder,
+searchfield > .placeholder {
+  color: var(--tyrian-muted);
+}
+
+spinbox,
+doublespinbox {
+  layout-alignment: content fill fill 0;
+  text-alignment: content center fill 0;
+}
+
+spinbox > indicator,
+doublespinbox > indicator {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-small-element);
+  color: var(--tyrian-foreground);
+  border-radius: var(--tyrian-radius-small);
+}
+
+spinbox > indicator:hovered,
+doublespinbox > indicator:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border: 1px solid var(--tyrian-border-hover);
+}
+
+spinbox > indicator:pressed,
+doublespinbox > indicator:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+spinbox > indicator.decrease,
+doublespinbox > indicator.decrease {
+  icon-name: "spinbox-decrease";
+}
+
+spinbox > indicator.increase,
+doublespinbox > indicator.increase {
+  icon-name: "spinbox-increase";
+}
+
+searchfield {
+  layout-alignment: content fill fill 1;
+  text-alignment: content fill center 0;
+}
+
+searchfield > searchindicator,
+searchfield > clearindicator {
+  width: var(--tyrian-icon-small-medium);
+  height: var(--tyrian-icon-small-medium);
+}
+
+searchfield > searchindicator {
+  icon-name: "search";
+  layout-alignment: content start fill 0;
+}
+
+searchfield > clearindicator {
+  icon-name: "edit-clear";
+  layout-alignment: content end fill 2;
+}
+
+textfield.changed,
+textarea.changed,
+spinbox.changed,
+doublespinbox.changed,
+searchfield.changed {
+  background-color: var(--tyrian-neutral-bg);
+  border: 1px solid var(--tyrian-neutral);
+}
+
+combobox.editable,
+spinbox.editable,
+doublespinbox.editable,
+spinbox.doublespinbox {
+  background-color: var(--tyrian-field-bg);
+}
+
+spinbox.constrained,
+doublespinbox.constrained {
+  border-color: var(--tyrian-neutral);
+}
+itemdelegate,
+checkdelegate,
+radiodelegate,
+switchdelegate,
+swipedelegate,
+menuitem {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--tyrian-foreground);
+}
+
+itemdelegate:hovered,
+checkdelegate:hovered,
+radiodelegate:hovered,
+switchdelegate:hovered,
+swipedelegate:hovered,
+menuitem:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+itemdelegate.hover-enabled,
+checkdelegate.hover-enabled,
+radiodelegate.hover-enabled,
+switchdelegate.hover-enabled,
+swipedelegate.hover-enabled {
+  border-radius: var(--tyrian-radius-medium);
+}
+
+itemdelegate:highlighted,
+checkdelegate:highlighted,
+radiodelegate:highlighted,
+switchdelegate:highlighted,
+swipedelegate:highlighted,
+menuitem:highlighted {
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+itemdelegate:pressed,
+checkdelegate:pressed,
+radiodelegate:pressed,
+switchdelegate:pressed,
+swipedelegate:pressed,
+menuitem:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+itemdelegate:visual-focus,
+checkdelegate:visual-focus,
+radiodelegate:visual-focus,
+switchdelegate:visual-focus,
+swipedelegate:visual-focus,
+menuitem:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+itemdelegate:disabled,
+checkdelegate:disabled,
+radiodelegate:disabled,
+switchdelegate:disabled,
+swipedelegate:disabled,
+menuitem:disabled {
+  color: var(--tyrian-disabled-fg);
+  background: none;
+  border: none;
+}
+
+itemdelegate.alternating-colors,
+checkdelegate.alternating-colors,
+radiodelegate.alternating-colors,
+switchdelegate.alternating-colors,
+swipedelegate.alternating-colors {
+  background-color: var(--tyrian-panel-bg);
+}
+
+itemdelegate.inside-table,
+itemdelegate.inside-list,
+checkdelegate.inside-table,
+checkdelegate.inside-list,
+radiodelegate.inside-table,
+radiodelegate.inside-list,
+switchdelegate.inside-table,
+switchdelegate.inside-list,
+swipedelegate.inside-table,
+swipedelegate.inside-list {
+  border-radius: 0px;
+  inset: 0px;
+}
+
+checkbox > indicator,
+checkdelegate > indicator,
+radiobutton > indicator,
+radiodelegate > indicator,
+menuitem > indicator {
+  width: 18px;
+  height: 18px;
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-small);
+}
+
+checkbox:checked > indicator,
+checkdelegate:checked > indicator,
+radiobutton:checked > indicator,
+radiodelegate:checked > indicator,
+menuitem:checked > indicator {
+  background-color: var(--tyrian-indicator-checked-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+checkbox:visual-focus > indicator,
+checkdelegate:visual-focus > indicator,
+radiobutton:visual-focus > indicator,
+radiodelegate:visual-focus > indicator,
+menuitem:visual-focus > indicator {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+switch > indicator,
+switchdelegate > indicator {
+  width: 36px;
+  height: 16px;
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-pill-radius);
+}
+
+switch:checked > indicator,
+switchdelegate:checked > indicator {
+  background-color: var(--tyrian-indicator-checked-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+switch:checked > indicator > handle,
+switchdelegate:checked > indicator > handle {
+  background-color: var(--tyrian-selection-text);
+  border-color: var(--tyrian-focus-ring);
+}
+
+checkbox:hovered > indicator,
+checkdelegate:hovered > indicator,
+radiobutton:hovered > indicator,
+radiodelegate:hovered > indicator,
+menuitem:hovered > indicator,
+switch:hovered > indicator,
+switchdelegate:hovered > indicator {
+  border-color: var(--tyrian-border-hover);
+}
+
+checkbox:disabled > indicator,
+checkdelegate:disabled > indicator,
+radiobutton:disabled > indicator,
+radiodelegate:disabled > indicator,
+menuitem:disabled > indicator,
+switch:disabled > indicator,
+switchdelegate:disabled > indicator {
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+radiobutton > indicator,
+radiodelegate > indicator,
+menuitem.exclusive > indicator {
+  border-radius: var(--tyrian-pill-radius);
+}
+
+checkbox:checked > indicator,
+checkdelegate:checked > indicator,
+menuitem:checked > indicator {
+  icon-name: "checkmark-symbolic";
+  icon-color: var(--tyrian-selection-text);
+}
+
+radiobutton:checked > indicator,
+radiodelegate:checked > indicator,
+menuitem.exclusive:checked > indicator {
+  icon-name: "radio-symbolic";
+  icon-color: var(--tyrian-selection-text);
+}
+
+switch > indicator > handle,
+switchdelegate > indicator > handle {
+  width: var(--tyrian-grid-unit);
+  height: var(--tyrian-grid-unit);
+  border-radius: var(--tyrian-pill-radius);
+  background-color: var(--tyrian-window-bg);
+  border: 1px solid var(--tyrian-border-color);
+}
+
+switch:visual-focus > indicator > handle,
+switchdelegate:visual-focus > indicator > handle {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+checkbox.changed > indicator,
+checkdelegate.changed > indicator,
+radiobutton.changed > indicator,
+radiodelegate.changed > indicator,
+switch.changed > indicator {
+  background-color: var(--tyrian-neutral-bg);
+  border: 1px solid var(--tyrian-neutral);
+}
+menu {
+  padding: var(--tyrian-small-spacing);
+  margin: var(--tyrian-scrollbar-size);
+}
+
+menuitem {
+  width: var(--tyrian-menu-width);
+  border-radius: var(--tyrian-radius-medium);
+}
+
+menuitem:hovered,
+menuitem.with-submenu:highlighted {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+menuitem:highlighted {
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+menuitem:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+menuitem:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+menuitem > indicator,
+menuitem > arrow {
+  width: var(--tyrian-icon-small);
+  height: var(--tyrian-icon-small);
+}
+
+menuitem > arrow {
+  icon-name: "arrow-right-symbolic";
+  layout-alignment: content end center 0;
+}
+
+menuitem > shortcuttext {
+  spacing: 40px;
+  color: var(--tyrian-muted);
+}
+
+popup.combobox {
+  padding: 0px;
+  background-color: var(--tyrian-panel-raised-bg);
+}
+
+popup.combobox itemdelegate:highlighted,
+popup.combobox itemdelegate:highlight,
+popup.combobox menuitem:highlighted {
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+overlay.modal,
+overlay.drawer.modal {
+  background-color: var(--tyrian-overlay-modal-bg);
+}
+
+overlay.modeless,
+overlay.drawer.modeless {
+  background-color: var(--tyrian-overlay-modeless-bg);
+}
+
+menuseparator {
+  inset: 0px var(--tyrian-small-spacing);
+  width: var(--tyrian-large-element);
+  height: 1px;
+  background-color: var(--tyrian-border-color);
+}
+
+menubar,
+menubaritem {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  border-radius: var(--tyrian-radius-medium);
+  color: var(--tyrian-foreground);
+}
+
+menubaritem:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+menubaritem:pressed,
+menubaritem:highlighted {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+menubaritem:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+dialog {
+  spacing: var(--tyrian-small-spacing);
+  padding: var(--tyrian-large-spacing);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-large);
+  background-color: var(--tyrian-panel-raised-bg);
+  color: var(--tyrian-foreground);
+  box-shadow: var(--tyrian-shadow-elevation);
+}
+
+dialog .header {
+  font-size: 20px;
+  padding: var(--tyrian-large-spacing);
+}
+
+header {
+  color: var(--tyrian-foreground);
+}
+
+dialogbuttonbox {
+  spacing: var(--tyrian-medium-spacing);
+  padding: var(--tyrian-large-spacing);
+}
+
+dialogbuttonbox[position="header"] {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+dialogbuttonbox[position="footer"] {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+dialogbuttonbox button[role="destructive"],
+dialogbuttonbox button[role="reject"],
+dialogbuttonbox button[role="no"] {
+  border-color: var(--tyrian-negative);
+}
+
+tooltip {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  color: var(--tyrian-foreground);
+}
+applicationwindow.inactive,
+.inactive applicationwindow,
+.inactive page,
+.inactive toolbar {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-muted);
+}
+
+toolbar.footer {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+drawer.modal,
+overlaydrawer.modal {
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-panel-bg);
+}
+
+drawer[edge="left"],
+overlaydrawer[edge="left"] {
+  border-right: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="right"],
+overlaydrawer[edge="right"] {
+  border-left: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="top"],
+overlaydrawer[edge="top"] {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+drawer[edge="bottom"],
+overlaydrawer[edge="bottom"] {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+swipeview.horizontal,
+swipeview.vertical {
+  layout-alignment: content fill fill 0;
+}
+
+scrollview.vertical-scroll {
+  padding-right: var(--tyrian-scrollbar-size);
+}
+
+scrollview.horizontal-scroll {
+  padding-bottom: var(--tyrian-scrollbar-size);
+}
+
+scrollview.framed-background {
+  background-color: var(--tyrian-panel-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-large);
+}
+
+splitview handle {
+  width: 1px;
+  height: 1px;
+  background-color: var(--tyrian-border-color);
+}
+
+splitview handle:hovered,
+splitview handle:pressed {
+  background-color: var(--tyrian-border-hover);
+}
+
+splitview.horizontal handle {
+  margin-left: var(--tyrian-medium-spacing);
+  margin-right: var(--tyrian-medium-spacing);
+}
+
+splitview.vertical handle {
+  margin-top: var(--tyrian-medium-spacing);
+  margin-bottom: var(--tyrian-medium-spacing);
+}
+
+pageindicator {
+  spacing: var(--tyrian-small-spacing);
+}
+
+pageindicatordelegate {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--tyrian-pill-radius);
+  background-color: var(--tyrian-muted);
+}
+
+pageindicatordelegate:hovered {
+  background-color: var(--tyrian-border-hover);
+}
+
+pageindicatordelegate:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+pageindicatordelegate.current {
+  background-color: var(--tyrian-fill-bg);
+}
+
+frame,
+groupbox {
+  padding: var(--tyrian-small-spacing);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-large);
+}
+
+groupbox {
+  background-color: var(--tyrian-window-bg);
+  color: var(--tyrian-foreground);
+}
+progressbar,
+slider,
+rangeslider,
+dial {
+  height: 20px;
+  background-color: var(--tyrian-track-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-pill-radius);
+}
+
+busyindicator {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  icon-name: "view-refresh";
+  icon-color: var(--tyrian-fill-bg);
+}
+
+progressbar > track,
+slider > fill,
+rangeslider > fill {
+  background-color: var(--tyrian-fill-bg);
+  border: 1px solid var(--tyrian-border-hover);
+  border-radius: var(--tyrian-pill-radius);
+}
+
+progressbar.indeterminate > track {
+  background-color: var(--tyrian-neutral);
+}
+
+slider > handle,
+rangeslider > handle,
+dial > handle,
+scrollbar > handle,
+scrollindicator > handle,
+selectionrectanglehandle {
+  width: var(--tyrian-scrollbar-size);
+  height: var(--tyrian-scrollbar-size);
+  background-color: var(--tyrian-indicator-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-pill-radius);
+}
+
+scrollindicator {
+  width: 10px;
+  height: 10px;
+  padding: var(--tyrian-minimal-spacing);
+}
+
+scrollindicator[orientation="horizontal"] {
+  height: 10px;
+}
+
+scrollindicator[orientation="vertical"] {
+  width: 10px;
+}
+
+slider:visual-focus > handle,
+rangeslider > handle:active-focus,
+selectionrectanglehandle:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+slider:hovered > handle,
+rangeslider > handle:hovered,
+scrollbar > handle:hovered,
+scrollindicator > handle:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+slider:pressed > handle,
+rangeslider > handle:pressed,
+scrollbar > handle:pressed,
+scrollindicator > handle:pressed {
+  background-color: var(--tyrian-fill-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+slider.horizontal,
+rangeslider.horizontal {
+  width: var(--tyrian-field-width);
+  height: var(--tyrian-medium-spacing);
+}
+
+slider.vertical,
+rangeslider.vertical {
+  width: var(--tyrian-medium-spacing);
+  height: var(--tyrian-field-width);
+}
+
+slider > tickmark,
+rangeslider > tickmark {
+  background-color: var(--tyrian-border-color);
+}
+
+slider > tickmark.active,
+rangeslider > tickmark.active {
+  background-color: var(--tyrian-fill-bg);
+}
+
+rangeslider > handle.first {
+  border-color: var(--tyrian-border-hover);
+}
+
+rangeslider > handle.second {
+  border-color: var(--tyrian-focus-ring);
+}
+
+scrollbar {
+  width: var(--tyrian-scrollbar-size);
+  height: var(--tyrian-scrollbar-size);
+  padding: var(--tyrian-medium-spacing);
+}
+
+scrollbar.horizontal {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+scrollbar.vertical {
+  border-left: 1px solid var(--tyrian-border-color);
+}
+
+scrollbar.noninteractive {
+  width: 10px;
+  height: 10px;
+}
+
+dial:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+dial:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+slider.changed > fill,
+slider.changed > tickmark.active {
+  background-color: var(--tyrian-neutral);
+}
+tabbutton {
+  height: 32px;
+  padding: var(--tyrian-medium-spacing) var(--tyrian-large-spacing);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--tyrian-muted);
+}
+
+tabbutton:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  color: var(--tyrian-foreground);
+}
+
+tabbutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  color: var(--tyrian-foreground);
+}
+
+tabbutton:checked {
+  background-color: var(--tyrian-window-bg);
+  border-top: 2px solid var(--tyrian-focus-ring);
+  color: var(--tyrian-foreground);
+}
+
+tabbutton:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+tabbutton:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+}
+
+tabbutton[direction="top"] {
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
+}
+
+tabbutton[direction="bottom"] {
+  border-top-left-radius: 0px;
+  border-top-right-radius: 0px;
+}
+
+tabbar {
+  spacing: 0px;
+}
+
+tabbar[tab-position="top"],
+tabbar[tab-position="bottom"] {
+  background-color: var(--tyrian-panel-bg);
+}
+
+tabbarhighlight.itemview-highlight {
+  background-color: var(--tyrian-fill-bg);
+  border-radius: var(--tyrian-radius-small);
+}
+
+tabbutton.itemview-highlight {
+  background-color: transparent;
+}
+applicationheader {
+  color: var(--tyrian-foreground);
+}
+
+applicationheader[colorset="window"] {
+  background-color: var(--tyrian-window-bg);
+}
+
+card {
+  background-color: var(--tyrian-panel-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-large);
+  box-shadow: 0px 2px var(--tyrian-grid-unit) 0px rgba(0, 0, 0, 0.1);
+  color: var(--tyrian-foreground);
+}
+
+card:hovered {
+  background-color: var(--tyrian-panel-raised-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+card:pressed {
+  background-color: var(--tyrian-control-active-bg);
+}
+
+card:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+chip {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-medium-spacing);
+  spacing: var(--tyrian-small-spacing);
+  layout-alignment: content fill fill 0;
+  text-alignment: content fill center 0;
+  icon-alignment: content start center 0;
+  background-color: var(--tyrian-control-hover-bg);
+  border-radius: var(--tyrian-pill-radius);
+  border: 1px solid var(--tyrian-border-color);
+  color: var(--tyrian-foreground);
+}
+
+chip > .indicator {
+  width: var(--tyrian-small-element);
+  height: var(--tyrian-small-element);
+  icon-name: "edit-delete-remove";
+  layout-alignment: item end center 0;
+}
+
+chip.closable > .indicator {
+  opacity: 1;
+}
+
+chip.interactive {
+  border-color: var(--tyrian-border-hover);
+}
+
+chip:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+  border-color: var(--tyrian-border-hover);
+}
+
+chip:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  border-color: var(--tyrian-focus-ring);
+}
+
+chip:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+heading {
+  color: var(--tyrian-foreground);
+}
+
+heading.primary,
+heading.primary.level-1,
+heading.primary.level-2,
+heading.primary.level-3,
+heading.primary.level-4 {
+  font-weight: 600;
+}
+
+heading.level-1,
+heading.primary.level-1 {
+  font-size: 20px;
+}
+
+heading.level-2,
+heading.primary.level-2 {
+  font-size: 18px;
+}
+
+heading.level-3,
+heading.primary.level-3 {
+  font-size: 17px;
+}
+
+heading.level-4,
+heading.primary.level-4 {
+  font-size: 16px;
+}
+
+heading.secondary {
+  color: var(--tyrian-muted);
+}
+
+inlinemessage {
+  padding: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-row-selected-bg);
+  border: 1px solid var(--tyrian-border-color);
+  border-radius: var(--tyrian-radius-medium);
+  color: var(--tyrian-foreground);
+}
+
+inlinemessage[type="positive"] {
+  background-color: var(--tyrian-positive-bg);
+  border-color: var(--tyrian-positive);
+}
+
+inlinemessage[type="warning"] {
+  background-color: var(--tyrian-neutral-bg);
+  border-color: var(--tyrian-neutral);
+}
+
+inlinemessage[type="error"] {
+  background-color: var(--tyrian-negative-bg);
+  border-color: var(--tyrian-negative);
+}
+
+inlinemessage[position="header"],
+inlinemessage[position="footer"] {
+  border-radius: 0px;
+  border-left: none;
+  border-right: none;
+}
+
+navigationtabbar {
+  height: 64px;
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-window-bg);
+}
+
+navigationtabbar.header {
+  border-bottom: 1px solid var(--tyrian-border-color);
+}
+
+navigationtabbar.footer {
+  border-top: 1px solid var(--tyrian-border-color);
+}
+
+navigationtabbutton {
+  inset: var(--tyrian-minimal-spacing);
+  padding: var(--tyrian-small-spacing);
+  border: 1px solid transparent;
+  border-radius: var(--tyrian-radius-medium);
+  color: var(--tyrian-muted);
+  icon-size: var(--tyrian-icon-small-medium);
+  text-alignment-horizontal: center;
+  icon-alignment-horizontal: center;
+}
+
+navigationtabbutton:hovered {
+  background-color: var(--tyrian-control-hover-bg);
+  color: var(--tyrian-foreground);
+}
+
+navigationtabbutton:pressed {
+  background-color: var(--tyrian-control-active-bg);
+  color: var(--tyrian-foreground);
+}
+
+navigationtabbutton:checked {
+  background-color: var(--tyrian-selection);
+  border-color: var(--tyrian-focus-ring);
+  color: var(--tyrian-foreground);
+}
+
+navigationtabbutton:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+navigationtabbutton:disabled {
+  color: var(--tyrian-disabled-fg);
+}
+
+overlaydrawer itemdelegate {
+  width: var(--tyrian-icon-medium);
+  height: var(--tyrian-icon-medium);
+}
+treeviewdelegate,
+tableviewdelegate {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-medium-element);
+  padding: var(--tyrian-small-spacing);
+  spacing: var(--tyrian-small-spacing);
+  border: 1px solid transparent;
+  border-radius: 0px;
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-window-bg);
+}
+
+treeviewdelegate.alternating-colors,
+tableviewdelegate.alternating-colors {
+  background-color: var(--tyrian-panel-bg);
+}
+
+treeviewdelegate:hovered,
+tableviewdelegate:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+treeviewdelegate:active-focus,
+tableviewdelegate:active-focus,
+treeviewdelegate:visual-focus,
+tableviewdelegate:visual-focus {
+  outline: 2px solid var(--tyrian-focus-ring);
+}
+
+treeviewdelegate:highlighted,
+treeviewdelegate.selected,
+tableviewdelegate:highlighted,
+tableviewdelegate.selected {
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+treeviewdelegate.selected > label,
+tableviewdelegate.selected > label {
+  color: var(--tyrian-foreground);
+}
+
+treeviewdelegate.editing,
+tableviewdelegate.editing {
+  border: 1px solid var(--tyrian-focus-ring);
+}
+
+treeviewdelegate > indentation {
+  width: var(--tyrian-medium-element);
+  layout-alignment: item start center 0;
+}
+
+treeviewdelegate > indicator {
+  width: var(--tyrian-medium-element);
+  height: var(--tyrian-icon-small);
+  icon-name: "arrow-right-symbolic";
+}
+
+treeviewdelegate.expanded > indicator {
+  icon-name: "arrow-down-symbolic";
+}
+
+treeviewdelegate > radiobutton,
+treeviewdelegate > checkbox {
+  text-wrap-mode: no-wrap;
+}
+
+horizontalheaderview,
+verticalheaderview,
+headerview {
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+}
+
+horizontalheaderviewdelegate,
+verticalheaderviewdelegate,
+headerviewdelegate {
+  width: var(--tyrian-large-element);
+  height: var(--tyrian-large-element);
+  padding: var(--tyrian-small-spacing);
+  background-color: var(--tyrian-panel-bg);
+  color: var(--tyrian-foreground);
+  border-bottom: 1px solid var(--tyrian-border-color);
+  border-right: 1px solid var(--tyrian-border-color);
+}
+
+horizontalheaderviewdelegate:hovered,
+verticalheaderviewdelegate:hovered,
+headerviewdelegate:hovered {
+  background-color: var(--tyrian-row-hover-bg);
+}
+
+horizontalheaderviewdelegate.sort-ascending,
+verticalheaderviewdelegate.sort-ascending,
+headerviewdelegate.sort-ascending {
+  icon-name: "arrow-up";
+}
+
+horizontalheaderviewdelegate.sort-descending,
+verticalheaderviewdelegate.sort-descending,
+headerviewdelegate.sort-descending {
+  icon-name: "arrow-down";
+}
+
+selectionrectangle {
+  color: var(--tyrian-focus-ring);
+  border: 1px solid var(--tyrian-focus-ring);
+  border-radius: var(--tyrian-radius-medium);
+  background-color: var(--tyrian-row-selected-bg);
+}
+
+selectionrectangle:disabled,
+selectionrectanglehandle:disabled {
+  color: var(--tyrian-disabled-fg);
+  background-color: var(--tyrian-control-disabled-bg);
+  border-color: var(--tyrian-border-color);
+}
+
+calendar,
+monthgrid,
+dayofweekrow,
+weeknumbercolumn {
+  background-color: var(--tyrian-background);
+  border: 1px solid var(--tyrian-border);
+}
+
+monthgrid > label,
+dayofweekrow > label,
+weeknumbercolumn > label {
+  outline: 1px solid var(--tyrian-border);
+  text-alignment-horizontal: center;
+  text-alignment-vertical: center;
+  color: var(--tyrian-foreground);
+  background-color: var(--tyrian-surface-low);
+}
+
+monthgrid label {
+  color: var(--tyrian-muted);
+}
+
+monthgrid label.current-month {
+  color: var(--tyrian-foreground);
+}
+
+monthgrid label.today {
+  background-color: var(--tyrian-accent);
+  color: var(--tyrian-selection-text);
+}
+
+text.positive {
+  color: var(--tyrian-positive);
+}
+
+text.neutral {
+  color: var(--tyrian-neutral);
+}
+
+text.negative {
+  color: var(--tyrian-negative);
+}

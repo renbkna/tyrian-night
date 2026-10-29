@@ -1,0 +1,25 @@
+{
+  "dark": {
+    "name": "Tyrian Night",
+    "primary": "#916da5",
+    "primaryText": "#000000",
+    "primaryContainer": "#362a3e",
+    "secondary": "#6386b4",
+    "surface": "#08070d",
+    "surfaceText": "#b8b3be",
+    "surfaceVariant": "#3b3243",
+    "surfaceVariantText": "#a9a5b2",
+    "surfaceTint": "#916da5",
+    "background": "#08070d",
+    "backgroundText": "#b8b3be",
+    "outline": "#787380",
+    "surfaceContainer": "#2b2838",
+    "surfaceContainerHigh": "#28212f",
+    "surfaceContainerHighest": "#362a3e",
+    "error": "#fc898f",
+    "warning": "#e8a121",
+    "info": "#6386b4",
+    "success": "#5f8c62",
+    "matugen_type": "scheme-fidelity"
+  }
+}

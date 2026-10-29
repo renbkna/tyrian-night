@@ -32,8 +32,8 @@ const GENERATORS = [
   },
   { name: 'theme-preview', product: 'vscode', tracked: true, sync: syncProductionFamilyPreview },
   { name: 'zed-theme', product: 'zed', tracked: true, sync: syncZedThemeFamily },
-  { name: 'terminal-themes', product: 'desktop', tracked: false, sync: syncTerminalThemeAssets },
-  { name: 'desktop-themes', product: 'desktop', tracked: false, sync: syncDesktopThemeAssets },
+  { name: 'terminal-themes', product: 'desktop', tracked: true, sync: syncTerminalThemeAssets },
+  { name: 'desktop-themes', product: 'desktop', tracked: true, sync: syncDesktopThemeAssets },
 ];
 
 const { values } = parseArgs({
@@ -49,6 +49,9 @@ const productNames = new Set(GENERATORS.map(({ product }) => product));
 if (values.product !== undefined && !productNames.has(/** @type {any} */ (values.product))) {
   throw new Error(`Unknown product '${values.product}'. Use ${[...productNames].join(', ')}.`);
 }
+if (values.tracked && values.untracked) {
+  throw new Error('--tracked and --untracked select disjoint generators; pass at most one.');
+}
 
 const selected = GENERATORS.filter(
   (generator) =>
@@ -56,6 +59,10 @@ const selected = GENERATORS.filter(
     (!values.tracked || generator.tracked) &&
     (!values.untracked || !generator.tracked)
 );
+// A filter that matches nothing would otherwise pass as "nothing stale".
+if (selected.length === 0) {
+  throw new Error('The selected product has no generators matching the tracked filter.');
+}
 const stale = selected.flatMap(({ sync }) => sync(repoRoot, { check: values.check }));
 
 if (stale.length > 0) {

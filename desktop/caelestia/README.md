@@ -9,25 +9,19 @@ Generated outputs:
 - `state/*.scheme.json` is a direct current-scheme state file.
 - `hypr/*.lua` and `hypr/*.conf` are the current and legacy Hyprland variable modules.
 
-On a clean checkout, materialize these generated assets first:
+To apply one variant, copy its files over Caelestia's current scheme. Caelestia
+watches these files, so copy rather than symlink them:
 
 ```sh
-bun run generate --product=desktop
+cp desktop/caelestia/state/tyrian-abyss.scheme.json ~/.local/state/caelestia/scheme.json
+cp desktop/caelestia/state/tyrian-abyss.sequences.txt ~/.local/state/caelestia/sequences.txt
+cp desktop/caelestia/hypr/tyrian-abyss.lua ~/.config/hypr/scheme/current.lua
 ```
 
-For a user-level live install, use Tyrian's installer:
-
-```sh
-node apps/desktop/src/installLiveTyrian.mjs --target=caelestia --apply
-```
-
-The installer atomically replaces Caelestia's watched `scheme.json`, the current
-Hyprland scheme, and terminal sequences. It reads `configProvider` from
-`hyprctl -j status`: `lua` publishes `current.lua`, while `hyprlang` publishes
-legacy `current.conf`. Existing config files do not decide the active provider.
-For an offline install, pass `--hyprland-mode=lua` or
-`--hyprland-mode=legacy`. Even `--link` leaves watched runtime targets as
-regular files; only stable assets are linked to the repository.
+Use the `.lua` module when `hyprctl -j status` reports `"configProvider": "lua"`,
+and copy the `.conf` module to `~/.config/hypr/scheme/current.conf` when it
+reports `hyprlang`. Non-default `XDG_STATE_HOME` and `XDG_CONFIG_HOME` roots
+take the same relative paths.
 
 These destinations and formats match the current upstream
 [Caelestia CLI publisher](https://github.com/caelestia-dots/cli/blob/main/src/caelestia/utils/theme.py),
@@ -36,20 +30,14 @@ the shell's watched
 and Hyprland's reported
 [`configProvider`](https://github.com/hyprwm/Hyprland/blob/main/src/helpers/SystemInfo.cpp).
 
-This is a projection publisher for an existing Caelestia/Hyprland installation.
-It does not install either project or edit `hyprland.lua` / `hyprland.conf` to
-load Caelestia. The upstream integration must already consume the matching
-`hypr/scheme/current` module.
-
-`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` are resolved once by the
-installer. The defaults below are examples; non-default roots receive the same
-relative Caelestia paths. Roots outside the destination home are rejected because
-backups record their targets relative to that home.
+These files theme an existing Caelestia/Hyprland installation. They do not
+install either project or make `hyprland.lua` / `hyprland.conf` load Caelestia;
+the upstream integration must already consume the matching `hypr/scheme/current`
+module.
 
 The `schemes/tyrian/` tree is packaging input for distributions that choose to
-ship Tyrian in Caelestia's scheme registry. The user installer deliberately does
-not write into Python `site-packages` or another package-manager-owned directory.
-The live state publisher does not require that registry installation.
+ship Tyrian in Caelestia's scheme registry. Applying a scheme as above does not
+require that registry installation.
 
 ## Wallpaper
 

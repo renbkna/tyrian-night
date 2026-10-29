@@ -1,0 +1,25 @@
+{
+  "dark": {
+    "name": "Tyrian Pastel",
+    "primary": "#c4a1e3",
+    "primaryText": "#000000",
+    "primaryContainer": "#564565",
+    "secondary": "#91afdf",
+    "surface": "#1e1c29",
+    "surfaceText": "#ddd6e5",
+    "surfaceVariant": "#635172",
+    "surfaceVariantText": "#cac1d1",
+    "surfaceTint": "#c4a1e3",
+    "background": "#1e1c29",
+    "backgroundText": "#ddd6e5",
+    "outline": "#928999",
+    "surfaceContainer": "#48415f",
+    "surfaceContainerHigh": "#43364e",
+    "surfaceContainerHighest": "#564565",
+    "error": "#fc94a6",
+    "warning": "#efa823",
+    "info": "#91afdf",
+    "success": "#93c29b",
+    "matugen_type": "scheme-fidelity"
+  }
+}
