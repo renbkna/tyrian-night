@@ -440,8 +440,8 @@ function uninspectedStatus(
   return {
     appRoot,
     desired: desiredStateOf(registration),
-    active: false,
-    managed: false,
+    active: undefined,
+    managed: undefined,
     classification,
     verificationPassed: false,
     restorePlan: 'unknown',

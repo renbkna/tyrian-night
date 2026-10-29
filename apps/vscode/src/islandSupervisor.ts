@@ -311,7 +311,7 @@ function recommendIslandUiAction(
   return hasIslandEvidence(status) ? 'restore' : 'none';
 }
 
-/** Whether Tyrian has enabled, patched or left files on this root. */
+/** Whether Tyrian is known to have enabled, patched or left files on this root. */
 function hasIslandEvidence(status: IslandShellStatus): boolean {
-  return status.managed || status.active;
+  return status.managed === true || status.active === true;
 }

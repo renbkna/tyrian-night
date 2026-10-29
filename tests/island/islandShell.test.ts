@@ -163,7 +163,7 @@ test('status-all reports registered missing roots without mutating the registry'
   expect(statuses[0]).toMatchObject({
     appRoot: missingAppRoot,
     classification: 'missing',
-    managed: false,
+    managed: undefined,
     desired: { kind: 'disabled' },
     verificationPassed: false,
   });

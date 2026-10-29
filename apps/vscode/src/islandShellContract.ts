@@ -19,8 +19,10 @@ export type IslandDesiredState =
 export type IslandShellStatus = {
   appRoot: string;
   desired: IslandDesiredState;
-  active: boolean;
-  managed: boolean;
+  /** Whether Tyrian's workbench patch is present; undefined when the app files were not read. */
+  active: boolean | undefined;
+  /** Whether Tyrian enabled a style or left files here; undefined when the app files were not read. */
+  managed: boolean | undefined;
   classification:
     | 'clean'
     | 'patched'
