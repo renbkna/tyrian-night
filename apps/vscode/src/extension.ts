@@ -448,8 +448,14 @@ async function restoreIslandUi(): Promise<void> {
     return;
   }
 
-  if (!result.physicalChanged) {
+  if (result.kind === 'already-classic') {
     vscode.window.showInformationMessage('Tyrian Night: Classic UI is already active.');
+    return;
+  }
+  if (!result.physicalChanged) {
+    vscode.window.showInformationMessage(
+      'Tyrian Night: Island UI records were cleaned up; the app files were already Classic UI.'
+    );
     return;
   }
 

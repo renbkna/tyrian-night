@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { themeColor } from './themeDefinition.mjs';
+import { CANVAS_ROLE, themeColor } from './themeDefinition.mjs';
 import {
   loadThemeRepository,
   meanSemanticChroma,
@@ -30,7 +30,7 @@ export function buildProductionFamilyPreview(repoRoot = defaultRepoRoot) {
     if (!energyVariant && !branch) {
       throw new Error(`Theme '${source.slug}' has no preview classification.`);
     }
-    const canvas = themeColor(theme, 'ui:surface.canvas');
+    const canvas = themeColor(theme, CANVAS_ROLE);
     const semanticChroma = meanSemanticChroma(theme, family.semanticPigments);
     const semanticContrast = meanSemanticContrast(theme, family.semanticPigments);
     const classification = source.isDefault

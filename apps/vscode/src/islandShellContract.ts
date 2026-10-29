@@ -95,19 +95,12 @@ export type IslandShellFailureDescription = IslandMutationResult & {
 };
 
 export function describeIslandShellFailure(error: unknown): IslandShellFailureDescription {
-  const typedFailure = findNestedError(error, (candidate) =>
-    candidate instanceof IslandShellFailure ? candidate : undefined
-  );
   const causes = collectIslandFailureCauses(error);
   const reason =
     causes.map((cause) => cause.reason).join(' | ') ||
     (error instanceof Error ? error.message : String(error));
-  const leaves = [...islandErrorGraph(error)].filter((candidate) => !hasChildErrors(candidate));
-  const code =
-    typedFailure?.code ??
-    (leaves.length > 0 && leaves.every(isPermissionError) ? 'permission-required' : 'blocked');
 
-  return { code, ...readIslandMutationFacts(error), reason, causes };
+  return { code: failureCodeOf(error), ...readIslandMutationFacts(error), reason, causes };
 }
 
 export function readIslandShellFailureStatus(error: unknown): IslandShellStatus | undefined {
@@ -177,9 +170,17 @@ function hasChildErrors(candidate: unknown): boolean {
 }
 
 /** The failure code one error asserts by itself. */
-function failureCodeOf(error: Error): IslandShellFailureCode {
-  if (error instanceof IslandShellFailure) return error.code;
-  return isPermissionError(error) ? 'permission-required' : 'blocked';
+/**
+ * The code of a failure and everything it wraps: the first typed failure's code;
+ * otherwise permission-required only when every leaf cause is a permission error.
+ */
+function failureCodeOf(error: unknown): IslandShellFailureCode {
+  const typedFailure = findNestedError(error, (candidate) =>
+    candidate instanceof IslandShellFailure ? candidate : undefined
+  );
+  if (typedFailure !== undefined) return typedFailure.code;
+  const leaves = [...islandErrorGraph(error)].filter((candidate) => !hasChildErrors(candidate));
+  return leaves.length > 0 && leaves.every(isPermissionError) ? 'permission-required' : 'blocked';
 }
 
 function findNestedError<T>(

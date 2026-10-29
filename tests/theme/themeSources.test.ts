@@ -14,6 +14,7 @@ import {
   readSourceTheme,
 } from '../../scripts/themeSources.mjs';
 import {
+  CANVAS_ROLE,
   loadThemeDefinitionContext,
   resolveThemeRecipe,
   themeColor,
@@ -408,6 +409,33 @@ test('a color binding may target a role that derives an alpha from its own pigme
     writeSourceData(opacityPath, opacity);
 
     expect(() => loadThemeRepository(root)).not.toThrow();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the energy line must step its saturation bands and canvases down in order', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-energy-line-order-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const familyPath = path.join(root, 'source/themeFamilyContract.cjs');
+    const family = readSourceData<any>(familyPath);
+    const [deepest, next] = family.energyLine.canvasLightnessOrder;
+
+    const overlapping = structuredClone(family);
+    overlapping.energyLine.variants[next].syntaxSaturation.maximum =
+      family.energyLine.variants[deepest].syntaxSaturation.minimum;
+    writeSourceData(familyPath, overlapping);
+    expect(() => loadThemeRepository(root)).toThrow(
+      `Theme family energy variant '${next}' must have a lower saturation band`
+    );
+
+    writeSourceData(familyPath, family);
+    const deepestPath = path.join(root, `source/themes/${deepest}.cjs`);
+    const recipe = readSourceData<any>(deepestPath);
+    recipe.oklch['ui:surface.canvas'][0] = 0.11;
+    writeSourceData(deepestPath, recipe);
+    expect(() => loadThemeRepository(root)).toThrow('canvas lightness order is violated');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -896,9 +924,9 @@ function definitionFor(identity: { name: string }, appearance: 'dark' | 'light')
   const hasHue = (pigment: string) => family.pigmentHues[pigment][hueProfile] !== null;
   // Authored pigments sit at L 0.5; the canvas and the frame around it sit at
   // the appearance's end so every solved syntax target is reachable.
-  const { frame, stage } = family.editorStage;
+  const { frame } = family.editorStage;
   const lightness = (pigment: string) => {
-    if (pigment === stage) return appearance === 'light' ? 0.95 : 0.2;
+    if (pigment === CANVAS_ROLE) return appearance === 'light' ? 0.95 : 0.2;
     if (frame.includes(pigment)) return appearance === 'light' ? 0.9 : 0.18;
     return 0.5;
   };

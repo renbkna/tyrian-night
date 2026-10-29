@@ -56,7 +56,6 @@ const themeFamilyContract = {
     minimumRichness: 0.9,
   },
   editorStage: {
-    stage: 'ui:surface.canvas',
     frame: [
       'ui:surface.navigation',
       'ui:surface.chrome',

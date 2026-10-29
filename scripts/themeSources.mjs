@@ -10,6 +10,7 @@ import {
   hueDistance,
 } from './colorScience.mjs';
 import {
+  CANVAS_ROLE,
   loadThemeDefinitionContext,
   resolveThemeRecipe,
   themeColor,
@@ -301,7 +302,7 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
   const hierarchy = family.syntaxHierarchy;
   for (const { slug } of sources) {
     const theme = /** @type {ThemeDefinition} */ (themes.get(slug));
-    const canvas = themeColor(theme, 'ui:surface.canvas');
+    const canvas = themeColor(theme, CANVAS_ROLE);
     /** @param {readonly string[]} pigments */
     const contrasts = (pigments) =>
       pigments.map((pigment) => apcaContrast(themeColor(theme, pigment), canvas));
@@ -328,7 +329,7 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
         `Theme '${slug}' diagnostic '${pigment}' richness`
       );
     }
-    const stage = hexToOklch(themeColor(theme, family.editorStage.stage)).L;
+    const stage = hexToOklch(themeColor(theme, CANVAS_ROLE)).L;
     for (const surface of family.editorStage.frame) {
       if (hexToOklch(themeColor(theme, surface)).L > stage) {
         throw new Error(
@@ -353,7 +354,7 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
       const effectiveMaximum = Math.min(band.maximum, ceilingInMeasure);
       requireMetricRange(
         value,
-        { minimum: (effectiveMaximum * band.minimum) / band.maximum, maximum: band.maximum },
+        { minimum: (effectiveMaximum * band.minimum) / band.maximum, maximum: effectiveMaximum },
         `Theme '${slug}' syntax pigment '${pigment}' ${band.measure}`
       );
     }
@@ -362,7 +363,7 @@ function validateThemeFamilyRelationships(sources, themes, definition) {
   let previousCanvasLightness = Number.NEGATIVE_INFINITY;
   for (const slug of family.energyLine.canvasLightnessOrder) {
     const theme = /** @type {ThemeDefinition} */ (themes.get(slug));
-    const canvasLightness = hexToOklch(themeColor(theme, 'ui:surface.canvas')).L;
+    const canvasLightness = hexToOklch(themeColor(theme, CANVAS_ROLE)).L;
     if (canvasLightness <= previousCanvasLightness) {
       throw new Error('Theme family canvas lightness order is violated.');
     }
@@ -399,7 +400,7 @@ export function meanSemanticChroma(theme, semanticPigments) {
  * @param {readonly string[]} semanticPigments
  */
 export function meanSemanticContrast(theme, semanticPigments) {
-  const canvas = themeColor(theme, 'ui:surface.canvas');
+  const canvas = themeColor(theme, CANVAS_ROLE);
   return mean(semanticPigments.map((pigment) => contrastRatio(themeColor(theme, pigment), canvas)));
 }
 

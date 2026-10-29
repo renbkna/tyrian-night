@@ -7,6 +7,9 @@ import { PLAIN_TARGET, solveSyntaxPigments } from './syntaxSolver.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 
+/** The editor canvas: syntax is solved against it and contrast measured on it. */
+export const CANVAS_ROLE = 'ui:surface.canvas';
+
 /** Theme role namespaces; the role contract has exactly these keys. */
 export const THEME_ROLE_NAMESPACES = Object.freeze(
   /** @type {const} */ (['brackets', 'ui', 'syntax', 'terminal', 'vscode'])
@@ -64,9 +67,9 @@ export const THEME_ROLE_NAMESPACES = Object.freeze(
  * lightness and hue. Their visibility floor lives in the safety contract.
  * @typedef {{ pigments: string[]; minimumRichness: number }} DiagnosticsContract
  * The editor canvas is the lit stage: no frame surface around it may have a
- * higher OKLCH lightness than `stage` in any maintained theme. Near-black
+ * higher OKLCH lightness than the canvas in any maintained theme. Near-black
  * editors keep the frame flat with the stage; lighter ones frame it darker.
- * @typedef {{ stage: string; frame: string[] }} EditorStageContract
+ * @typedef {{ frame: string[] }} EditorStageContract
  * @typedef {{
  *   hueProfile: string;
  *   kind: 'light-counterpart' | 'soft-focus';
@@ -275,7 +278,7 @@ export function resolveThemeRecipe(recipe, sourceName, context) {
   );
   const solved = solveSyntaxPigments({
     appearance: classification.appearance,
-    canvas: /** @type {string} */ (resolvedPigments['ui:surface.canvas']),
+    canvas: /** @type {string} */ (resolvedPigments[CANVAS_ROLE]),
     coloredPigments: new Set(family.syntaxSaturation.pigments),
     hierarchy: family.syntaxHierarchy,
     hue,
@@ -509,14 +512,14 @@ function validateThemeFamilyContract(contract, requiredPigments) {
   }
 
   requireUnique(editorStage.frame, 'Theme family editor stage frame');
-  for (const pigment of [editorStage.stage, ...editorStage.frame]) {
+  for (const pigment of editorStage.frame) {
     if (!pigment.startsWith('ui:') || !requiredPigmentSet.has(pigment)) {
       throw new Error(
         `Theme family editor stage surface '${pigment}' is not a recipe-owned UI pigment.`
       );
     }
   }
-  if (editorStage.frame.includes(editorStage.stage)) {
+  if (editorStage.frame.includes(CANVAS_ROLE)) {
     throw new Error('Theme family editor stage must not frame itself.');
   }
 
@@ -563,6 +566,17 @@ function validateThemeFamilyContract(contract, requiredPigments) {
   );
   for (const [slug, variant] of Object.entries(energyLine.variants)) {
     requireSaturationBand(variant.syntaxSaturation, `Theme family energy variant '${slug}'`);
+  }
+  // The energy line steps down from the deepest canvas: each lighter variant's
+  // saturation band sits wholly below the previous one, in the same measure.
+  for (const [index, slug] of energyLine.canvasLightnessOrder.slice(1).entries()) {
+    const deeper = energyLine.variants[energyLine.canvasLightnessOrder[index]].syntaxSaturation;
+    const lighter = energyLine.variants[slug].syntaxSaturation;
+    if (lighter.measure !== deeper.measure || lighter.maximum >= deeper.minimum) {
+      throw new Error(
+        `Theme family energy variant '${slug}' must have a lower saturation band, in the same measure, than the variant before it in canvas lightness order.`
+      );
+    }
   }
 
   for (const [slug, branch] of Object.entries(branches)) {

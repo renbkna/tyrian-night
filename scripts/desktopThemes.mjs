@@ -5,11 +5,19 @@ import path from 'node:path';
 import { contrastRatio } from './colorScience.mjs';
 import { opaqueHex, opaqueHexDigits, parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
-import { TERMINAL_ANSI_ROLES, themeColor as readThemeColor } from './themeDefinition.mjs';
+import {
+  CANVAS_ROLE,
+  TERMINAL_ANSI_ROLES,
+  themeColor as readThemeColor,
+} from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
 import { readLintedUnionSourceCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
+
+const UNION_SCHEME_NAME_PLACEHOLDER = '{{schemeName}}';
+// The source keeps the marker indented inside :root; the tokens replace the whole line.
+const UNION_TOKENS_PLACEHOLDER = '  /* TYRIAN_GENERATED_TOKENS */';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
@@ -170,7 +178,7 @@ export function syncDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {})
  * @returns {DesktopPalette}
  */
 function buildDesktopPalette(theme) {
-  const background = desktopColor(theme, 'ui:surface.canvas');
+  const background = desktopColor(theme, CANVAS_ROLE);
 
   return {
     background,
@@ -396,9 +404,14 @@ function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName) {
  * @returns {string}
  */
 function buildUnionCssStyle(cssTemplate, schemeName, palette) {
+  for (const placeholder of [UNION_SCHEME_NAME_PLACEHOLDER, UNION_TOKENS_PLACEHOLDER]) {
+    if (!cssTemplate.includes(placeholder)) {
+      throw new Error(`Union CSS template lacks its '${placeholder.trim()}' placeholder.`);
+    }
+  }
   return cssTemplate
-    .replaceAll('{{schemeName}}', schemeName)
-    .replaceAll('  /* TYRIAN_GENERATED_TOKENS */', buildUnionCssTokens(palette));
+    .replaceAll(UNION_SCHEME_NAME_PLACEHOLDER, schemeName)
+    .replaceAll(UNION_TOKENS_PLACEHOLDER, buildUnionCssTokens(palette));
 }
 
 /**
@@ -1151,13 +1164,8 @@ function rgbTriplet(color) {
 function contrastText(color) {
   const dark = '#000000';
   const light = '#FFFFFF';
-  const text = contrastRatio(dark, color) >= contrastRatio(light, color) ? dark : light;
-
-  if (contrastRatio(text, color) < 4.5) {
-    throw new Error(`Could not derive AA contrast text for '${color}'.`);
-  }
-
-  return text;
+  // The better of black and white always reaches at least sqrt(21) (about 4.58) against an opaque color.
+  return contrastRatio(dark, color) >= contrastRatio(light, color) ? dark : light;
 }
 
 /**
@@ -1169,6 +1177,6 @@ function contrastText(color) {
 function desktopColor(theme, qualifiedRole, background) {
   return opaqueHex(
     readThemeColor(theme, qualifiedRole),
-    background ?? readThemeColor(theme, 'ui:surface.canvas')
+    background ?? readThemeColor(theme, CANVAS_ROLE)
   );
 }

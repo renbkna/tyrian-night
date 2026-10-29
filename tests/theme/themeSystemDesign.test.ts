@@ -55,8 +55,6 @@ test('the family contract fixes hue identity and proves each declared energy tie
     const colors = semanticColors(slug);
     return colors.reduce((sum, color) => sum + hexToOklch(color).C, 0) / colors.length;
   };
-  const canvasLightness = (slug: string) =>
-    hexToOklch(themeColor(themes[slug], 'ui:surface.canvas')).L;
   // Energy variants share the family hue profile by construction; rendered hex hue
   // drifts with 8-bit quantization at low chroma, so it cannot prove identity.
   for (const slug of Object.keys(family.energyLine.variants)) {
@@ -72,17 +70,11 @@ test('the family contract fixes hue identity and proves each declared energy tie
     expect(Math.max(...hueDistances)).toBeLessThan(12);
   }
 
-  const energyOrder = ['tyrian-night', 'tyrian-nocturne', 'tyrian-abyss'] as const;
-  for (const [lower, higher] of [energyOrder.slice(0, 2), energyOrder.slice(1)]) {
-    const lowerBand = family.energyLine.variants[lower].syntaxSaturation;
-    const higherBand = family.energyLine.variants[higher].syntaxSaturation;
-    expect([lowerBand.measure, higherBand.measure]).toEqual(['richness', 'richness']);
-    expect(lowerBand.maximum).toBeLessThan(higherBand.minimum);
-    expect(semanticChroma(lower)).toBeLessThan(semanticChroma(higher));
+  // The loader enforces the band and canvas order; the rendered chroma must follow it.
+  const energyOrder = family.energyLine.canvasLightnessOrder;
+  for (const [index, lighter] of energyOrder.slice(1).entries()) {
+    expect(semanticChroma(lighter)).toBeLessThan(semanticChroma(energyOrder[index]));
   }
-  expect(canvasLightness('tyrian-abyss')).toBeLessThan(canvasLightness('tyrian-nocturne'));
-  expect(canvasLightness('tyrian-nocturne')).toBeLessThan(canvasLightness('tyrian-night'));
-  expect(canvasLightness('tyrian-dawn')).toBeGreaterThan(0.95);
 });
 
 test('VS Code status and validation foregrounds bind to primary text', () => {

@@ -3,8 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** @typedef {{ path: string; content: string | Uint8Array }} GeneratedAsset */
+
 /**
- * @typedef {{ path: string; content: string | Uint8Array }} GeneratedAsset
  * A generator owns whole files, or the files of a directory that `match` accepts
  * (relative to the directory; every file when omitted).
  * @typedef {{ directory: string; match?: RegExp } | { file: string }} GeneratedOwnership
@@ -35,12 +36,12 @@ export function readOwnedGeneratedFile(repoRoot, filePath) {
  *
  * @param {GeneratedAsset[]} assets
  * @param {string} repoRoot
- * @param {{ check?: boolean; ownership?: GeneratedOwnership[] }} [options]
+ * @param {{ check?: boolean; ownership: GeneratedOwnership[] }} options
  * @returns {string[]}
  */
-export function syncGeneratedAssets(assets, repoRoot, options = {}) {
+export function syncGeneratedAssets(assets, repoRoot, options) {
   const check = options.check ?? false;
-  const ownership = options.ownership ?? [];
+  const { ownership } = options;
   const expected = new Map();
 
   for (const asset of assets) {
@@ -66,6 +67,7 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
   // so a later path replacement still cannot redirect an individual write.
   for (const filePath of expected.keys()) {
     assertNoGeneratedPathSymlink(repoRoot, filePath);
+    assertRegularFileOrAbsent(repoRoot, filePath);
   }
 
   const actualOwnedPaths = listOwnedFiles(repoRoot, ownership);
@@ -75,7 +77,7 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
 
   if (!check) {
     for (const filePath of unexpectedPaths) {
-      fs.rmSync(path.join(repoRoot, filePath), { force: true, recursive: true });
+      fs.rmSync(path.join(repoRoot, filePath), { force: true });
     }
 
     for (const rule of ownership) {
@@ -117,7 +119,7 @@ export function syncGeneratedAssets(assets, repoRoot, options = {}) {
     }
   }
 
-  return [...new Set(stalePaths)].toSorted();
+  return stalePaths.toSorted();
 }
 
 /**
@@ -132,7 +134,7 @@ function listOwnedFiles(repoRoot, ownership) {
     if ('file' in rule) {
       const file = requireRelativePath(rule.file);
       assertNoGeneratedPathSymlink(repoRoot, file);
-      if (fs.existsSync(path.join(repoRoot, file))) files.add(file);
+      if (assertRegularFileOrAbsent(repoRoot, file)) files.add(file);
       continue;
     }
     const directory = requireRelativePath(rule.directory);
@@ -140,11 +142,31 @@ function listOwnedFiles(repoRoot, ownership) {
     assertNoGeneratedPathSymlink(repoRoot, directory);
 
     walkOwnedDirectory(absoluteDirectory, '', rule.match, (relativePath) => {
-      files.add(path.posix.join(directory.replaceAll('\\', '/'), relativePath));
+      files.add(path.posix.join(directory, relativePath));
     });
   }
 
   return files;
+}
+
+/**
+ * An owned file path holds a regular file or nothing; returns whether it exists.
+ * A directory there would be deleted or overwritten by a sync.
+ *
+ * @param {string} repoRoot
+ * @param {string} relativePath
+ * @returns {boolean}
+ */
+function assertRegularFileOrAbsent(repoRoot, relativePath) {
+  try {
+    if (!fs.lstatSync(path.join(repoRoot, relativePath)).isFile()) {
+      throw new Error(`Generated path must be a regular file: '${relativePath}'`);
+    }
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
 }
 
 /**

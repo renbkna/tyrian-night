@@ -70,6 +70,33 @@ test('generated asset sync rejects an asset outside its declared ownership befor
     expect(syncGeneratedAssets(owned.slice(0, 1), repoRoot, { check: true, ownership })).toEqual([
       'LICENSE',
     ]);
+
+    fs.writeFileSync(path.join(repoRoot, 'mixed/old.generated.css'), 'stale\n');
+    expect(() =>
+      syncGeneratedAssets([...owned, { path: 'mixed/base.css', content: 'x' }], repoRoot, {
+        ownership,
+      })
+    ).toThrow('outside its generator');
+    expect(fs.existsSync(path.join(repoRoot, 'mixed/old.generated.css'))).toBe(true);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('an owned file path holding a directory fails before anything is removed or written', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-generated-owned-directory-'));
+
+  try {
+    fs.mkdirSync(path.join(repoRoot, 'LICENSE'));
+    fs.writeFileSync(path.join(repoRoot, 'LICENSE/keep.txt'), 'keep\n');
+    const ownership = [{ file: 'LICENSE' }];
+
+    for (const assets of [[], [{ path: 'LICENSE', content: 'license\n' }]]) {
+      expect(() => syncGeneratedAssets(assets, repoRoot, { ownership })).toThrow(
+        "Generated path must be a regular file: 'LICENSE'"
+      );
+      expect(fs.readFileSync(path.join(repoRoot, 'LICENSE/keep.txt'), 'utf8')).toBe('keep\n');
+    }
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }

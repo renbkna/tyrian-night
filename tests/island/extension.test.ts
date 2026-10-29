@@ -432,7 +432,7 @@ test('restore completes through the supervisor without extra prompts', async () 
   expect(warningMessages).toEqual([]);
 });
 
-test('restore does not request reload for desired-state and registry changes without physical change', async () => {
+test('a restore that only cleans up records says so and requests no reload', async () => {
   const restoreCommand = await activateAndGetCommand('tyrianNight.restoreClassicUi');
   resetObservations();
   queuedSpawnResponses.push({
@@ -445,7 +445,9 @@ test('restore does not request reload for desired-state and registry changes wit
 
   await restoreCommand();
 
-  expect(informationMessages.at(-1)?.[0]).toBe('Tyrian Night: Classic UI is already active.');
+  expect(informationMessages.at(-1)?.[0]).toBe(
+    'Tyrian Night: Island UI records were cleaned up; the app files were already Classic UI.'
+  );
   expect(informationMessages.some((message) => message.includes('Reload Window'))).toBe(false);
 });
 

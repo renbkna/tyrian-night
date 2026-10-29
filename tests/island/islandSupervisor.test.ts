@@ -172,6 +172,19 @@ test('a failure is permission-owned only when every leaf cause is a permission e
   ).toBe('blocked');
 });
 
+test('a partial-mutation wrapper and its causes share one failure code', () => {
+  const permission = Object.assign(new Error('EACCES: denied'), { code: 'EACCES' });
+  const failure = describeIslandShellFailure(
+    new IslandPartialMutationError('Tyrian changed Island files.', {}, { cause: permission })
+  );
+
+  expect(failure.code).toBe('permission-required');
+  expect(failure.causes.map(({ code }) => code)).toEqual([
+    'permission-required',
+    'permission-required',
+  ]);
+});
+
 test('supervised apply converts a read-only app root into permission-required', async () => {
   const appRoot = await createAppRoot('readonly-apply');
   const cssSource = await writeCssSource('theme.css');

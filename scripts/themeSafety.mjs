@@ -12,7 +12,12 @@ import {
 } from './colorScience.mjs';
 import { opaqueHex } from './colorUtils.mjs';
 import { COLOR_VISION_MODES, simulateColorVision } from './colorVision.mjs';
-import { isKnownThemeRole, loadThemeDefinitionContext, themeColor } from './themeDefinition.mjs';
+import {
+  CANVAS_ROLE,
+  isKnownThemeRole,
+  loadThemeDefinitionContext,
+  themeColor,
+} from './themeDefinition.mjs';
 import { loadSourceModule } from './sourceModule.mjs';
 
 /** @typedef {Record<string, any>} JsonObject */
@@ -20,7 +25,7 @@ import { loadSourceModule } from './sourceModule.mjs';
 /** @typedef {{ id: string; metric: SafetyContrastMetric; minimum: number; roles: string[] }} SafetyContrast */
 /** @typedef {{ background: string; foreground: string; id: string; minimum: number }} SafetyContrastPair */
 /** @typedef {{ id: string; pairing: 'adjacent' | 'all'; roles: string[] }} SafetyStateComparison */
-/** @typedef {{ background: string; contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
+/** @typedef {{ contrast: SafetyContrast[]; contrastPairs: SafetyContrastPair[]; stateComparisons: SafetyStateComparison[] }} ThemeSafetyContract */
 
 /** Valid floor range per metric: WCAG 2 ratio, APCA Lc. */
 const CONTRAST_METRIC_RANGES = /** @type {Record<string, [number, number]>} */ ({
@@ -56,7 +61,6 @@ export function readThemeSafetyContract(definition = loadThemeDefinitionContext(
  * @returns {ThemeSafetyContract}
  */
 export function validateThemeSafetyContract(contract, definition) {
-  requireThemeRole(contract.background, definition, 'background');
   invariant(contract.contrast.length > 0, 'contrast must not be empty');
   invariant(contract.contrastPairs.length > 0, 'contrastPairs must not be empty');
   invariant(contract.stateComparisons.length > 0, 'stateComparisons must not be empty');
@@ -92,7 +96,7 @@ export function validateThemeSafetyContract(contract, definition) {
  * @param {ReturnType<typeof readThemeSafetyContract>} [contract]
  */
 export function auditThemeSafety(theme, contract = readThemeSafetyContract()) {
-  const canvas = opaqueHex(themeColor(theme, contract.background));
+  const canvas = opaqueHex(themeColor(theme, CANVAS_ROLE));
   /** @type {JsonObject[]} */
   const violations = [];
   for (const constraint of contract.contrast) {
@@ -155,7 +159,7 @@ export function reportThemeColorDiagnostics(
   themeSlug,
   contract = readThemeSafetyContract()
 ) {
-  const background = opaqueHex(themeColor(theme, contract.background));
+  const background = opaqueHex(themeColor(theme, CANVAS_ROLE));
   const roles = /** @type {string[]} */ (
     [
       ...new Set([

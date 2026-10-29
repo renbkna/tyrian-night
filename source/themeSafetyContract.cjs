@@ -1,6 +1,5 @@
 /** @type {import('../scripts/themeSafety.mjs', { with: { 'resolution-mode': 'import' } }).ThemeSafetyContract} */
 const themeSafetyContract = {
-  background: 'ui:surface.canvas',
   contrast: [
     {
       id: 'readable-primary',
