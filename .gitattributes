@@ -1,0 +1,3 @@
+# Text files are LF on every OS. Generated files are compared byte for byte, so a CRLF checkout
+# (Windows' default core.autocrlf) would report all of them as stale.
+* text=auto eol=lf
