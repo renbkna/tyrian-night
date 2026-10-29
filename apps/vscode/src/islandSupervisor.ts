@@ -12,6 +12,7 @@ import {
   restoreIslandShell,
 } from './islandShell.js';
 import {
+  corruptDesiredStateFailure,
   describeIslandShellFailure,
   IslandShellFailure,
   readIslandShellFailureStatus,
@@ -110,7 +111,7 @@ export async function applyIslandUiSupervised(options: {
     };
   }
 
-  if (readiness.kind === 'unsupported' || readiness.kind === 'blocked') {
+  if (readiness.kind !== 'ready') {
     return {
       kind: readiness.kind,
       ...islandMutationFacts(),
@@ -119,21 +120,17 @@ export async function applyIslandUiSupervised(options: {
     };
   }
 
+  const { status, writeAccess } = readiness;
   try {
     const result = await applyIslandShell(options);
 
     return { ...result, kind: result.changed ? 'applied' : 'already-current' };
   } catch (error) {
     const failure = describeIslandShellFailure(error);
-    const failureStatus = readIslandShellFailureStatus(error) ?? readiness.status;
+    const failureStatus = readIslandShellFailureStatus(error) ?? status;
 
     if (failure.code === 'permission-required') {
-      return {
-        ...failure,
-        kind: 'permission-required',
-        status: failureStatus ?? (await readIslandShellStatus(options)),
-        writeAccess: readiness.writeAccess ?? (await readIslandShellWriteAccess(options)),
-      };
+      return { ...failure, kind: 'permission-required', status: failureStatus, writeAccess };
     }
 
     return {
@@ -159,10 +156,7 @@ export async function convergeIslandUiSupervised(options: {
   const status = await readIslandShellStatus(options);
 
   if (status.registrationState === 'corrupt') {
-    throw new IslandShellFailure(
-      'corrupt',
-      'Island UI desired-state record is corrupt. Run Doctor before changing app files.'
-    );
+    throw corruptDesiredStateFailure();
   }
 
   const cssFile =
@@ -290,14 +284,17 @@ function recommendIslandUiAction(
   status: IslandShellStatus,
   writeAccess: IslandShellWriteAccess
 ): IslandUiRecommendedAction {
-  if (status.classification === 'missing') return status.registered ? 'prune-missing' : 'none';
+  const registered = status.registrationState !== 'absent';
+  if (status.registrationState === 'unreadable') return 'fix-permissions';
+  if (status.classification === 'missing') return registered ? 'prune-missing' : 'none';
+  if (status.classification === 'unsupported-layout') {
+    return registered || status.managed || status.active ? 'manual-recovery' : 'none';
+  }
   if (status.registrationState === 'corrupt') return 'restore';
 
   const desired = typeof status.desiredCssFile === 'string';
   if (status.classification === 'permission-denied' || !writeAccess.writable) {
-    return desired || status.managed || status.active || status.registered
-      ? 'fix-permissions'
-      : 'none';
+    return desired || status.managed || status.active || registered ? 'fix-permissions' : 'none';
   }
 
   if (desired) {

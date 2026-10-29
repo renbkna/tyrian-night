@@ -8,63 +8,60 @@ import {
   readIslandUiSupervisorStatuses,
   restoreIslandUiSupervised,
 } from './islandSupervisor.js';
-import type { IslandCliCommand, IslandCliResults } from './islandWire.js';
+import {
+  ISLAND_CLI_OPTIONS,
+  type IslandCliArgs,
+  type IslandCliCommand,
+  type IslandCliResults,
+} from './islandWire.js';
 
-type IslandCliArgs = {
-  'app-root'?: string;
-  'css-source'?: string;
-  'fallback-css'?: string;
-  'island-dir'?: string;
-  repair?: boolean;
-  'theme-version'?: string;
-};
-
+/** Each command and whether it mutates; mutating commands run under the Island lock. */
 const COMMANDS: {
-  [Command in IslandCliCommand]: (args: IslandCliArgs) => Promise<IslandCliResults[Command]>;
+  [Command in IslandCliCommand]: {
+    mutates: boolean;
+    run: (args: IslandCliArgs) => Promise<IslandCliResults[Command]>;
+  };
 } = {
-  'apply-supervised': (args) =>
-    applyIslandUiSupervised({
-      appRoot: requireArg(args, 'app-root'),
-      cssSourcePath: requireArg(args, 'css-source'),
-      themeVersion: requireArg(args, 'theme-version'),
-    }),
-  converge: (args) => {
-    if (!args.repair && args['fallback-css'] !== undefined) {
-      throw new Error("Argument '--fallback-css' requires '--repair'.");
-    }
-    return convergeIslandUiSupervised({
-      appRoot: requireArg(args, 'app-root'),
-      islandDirectory: requireArg(args, 'island-dir'),
-      themeVersion: requireArg(args, 'theme-version'),
-      intent: args.repair
-        ? { kind: 'repair', fallbackCssFile: args['fallback-css'] }
-        : { kind: 'startup' },
-    });
+  'apply-supervised': {
+    mutates: true,
+    run: (args) =>
+      applyIslandUiSupervised({
+        appRoot: requireArg(args, 'app-root'),
+        cssSourcePath: requireArg(args, 'css-source'),
+        themeVersion: requireArg(args, 'theme-version'),
+      }),
   },
-  'restore-supervised': (args) =>
-    restoreIslandUiSupervised({ preferredAppRoots: optionalAppRoots(args) }),
-  'status-all-supervised': (args) =>
-    readIslandUiSupervisorStatuses({ preferredAppRoots: optionalAppRoots(args) }),
+  converge: {
+    mutates: true,
+    run: (args) => {
+      if (!args.repair && args['fallback-css'] !== undefined) {
+        throw new Error("Argument '--fallback-css' requires '--repair'.");
+      }
+      return convergeIslandUiSupervised({
+        appRoot: requireArg(args, 'app-root'),
+        islandDirectory: requireArg(args, 'island-dir'),
+        themeVersion: requireArg(args, 'theme-version'),
+        intent: args.repair
+          ? { kind: 'repair', fallbackCssFile: args['fallback-css'] }
+          : { kind: 'startup' },
+      });
+    },
+  },
+  'restore-supervised': {
+    mutates: true,
+    run: (args) => restoreIslandUiSupervised({ preferredAppRoots: optionalAppRoots(args) }),
+  },
+  'status-all-supervised': {
+    mutates: false,
+    run: (args) => readIslandUiSupervisorStatuses({ preferredAppRoots: optionalAppRoots(args) }),
+  },
 };
-
-const MUTATING_COMMANDS: ReadonlySet<string> = new Set<IslandCliCommand>([
-  'apply-supervised',
-  'converge',
-  'restore-supervised',
-]);
 
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     args: process.argv.slice(2),
-    options: {
-      'app-root': { type: 'string' },
-      'css-source': { type: 'string' },
-      'fallback-css': { type: 'string' },
-      'island-dir': { type: 'string' },
-      repair: { type: 'boolean' },
-      'theme-version': { type: 'string' },
-    },
+    options: ISLAND_CLI_OPTIONS,
     strict: true,
   });
   const [command, ...extraPositionals] = positionals;
@@ -80,8 +77,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const run = COMMANDS[command as IslandCliCommand];
-  if (!MUTATING_COMMANDS.has(command)) {
+  const { mutates, run } = COMMANDS[command as IslandCliCommand];
+  if (!mutates) {
     process.stdout.write(JSON.stringify(await run(values)));
     return;
   }

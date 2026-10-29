@@ -28,6 +28,7 @@ const configurationUpdates: Array<[string, unknown]> = [];
 const spawnCalls: Array<{ command: string; args: string[] }> = [];
 const warningMessages: unknown[][] = [];
 const informationMessages: unknown[][] = [];
+const errorMessages: unknown[][] = [];
 const externalUrls: string[] = [];
 const pendingSpawnClosers: Array<() => void> = [];
 const queuedWarningResponses: Array<string | undefined> = [];
@@ -119,7 +120,7 @@ mock.module('vscode', () => ({
   },
   window: {
     showErrorMessage: async (...args: unknown[]) => {
-      informationMessages.push(args);
+      errorMessages.push(args);
       return undefined;
     },
     showInformationMessage: async (...args: unknown[]) => {
@@ -202,6 +203,18 @@ test('repair without a desired or active Tyrian style changes nothing', async ()
   expect(informationMessages.at(-1)?.[0]).toContain('Apply Island UI once before repairing it');
 });
 
+test('activation registers exactly the commands the manifest contributes', async () => {
+  const manifest = (await Bun.file('apps/vscode/package.json').json()) as {
+    contributes: { commands: Array<{ command: string }> };
+  };
+  const { activate } = await import('../../apps/vscode/src/extension.js');
+  await activate(createExtensionContext());
+
+  expect([...registeredCommands.keys()].toSorted()).toEqual(
+    manifest.contributes.commands.map(({ command }) => command).toSorted()
+  );
+});
+
 test('unsupported platforms skip startup reconciliation and every Island command', async () => {
   const { activate } = await import('../../apps/vscode/src/extension.js');
   activeTheme = 'Default Dark Modern';
@@ -244,13 +257,12 @@ test('typed nonzero apply failure preserves causes, recovery guidance, and reloa
   await repairCommand();
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['converge']);
+  expect(String(errorMessages.at(-1)?.[0]).match(/apply verification failed/gu)).toHaveLength(1);
   expect(
-    informationMessages.some(([message]) => String(message).includes('apply verification failed'))
+    errorMessages.some(([message]) => String(message).includes('apply verification failed'))
   ).toBe(true);
   expect(
-    informationMessages.some(([message]) =>
-      String(message).includes('workbench checksum did not match')
-    )
+    errorMessages.some(([message]) => String(message).includes('workbench checksum did not match'))
   ).toBe(true);
   expect(warningMessages.some(([message]) => String(message).includes('manual recovery'))).toBe(
     true
@@ -273,7 +285,7 @@ test('typed nonzero supervised restore failure retains recovery and reload guida
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['restore-supervised']);
   expect(
-    informationMessages.some(([message]) => String(message).includes('restore verification failed'))
+    errorMessages.some(([message]) => String(message).includes('restore verification failed'))
   ).toBe(true);
   expect(warningMessages.some(([message]) => String(message).includes('manual recovery'))).toBe(
     true
@@ -283,7 +295,7 @@ test('typed nonzero supervised restore failure retains recovery and reload guida
   ).toBe(true);
 });
 
-test('activation converges under the CLI lock and offers reload after a restore', async () => {
+test('activation converges through the CLI and offers reload after a restore', async () => {
   activeTheme = 'Default Dark Modern';
   queuedSpawnResponses.push({
     action: 'restore',
@@ -356,10 +368,10 @@ test('activation reports an unavailable desired style from the CLI', async () =>
   await activate(createExtensionContext());
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['converge']);
-  expect(informationMessages.at(-1)?.[0]).toContain('desires unavailable style');
+  expect(errorMessages.at(-1)?.[0]).toContain('desires unavailable style');
 });
 
-test('activation surfaces a typed incomplete reconciliation result', async () => {
+test('activation reports a blocked startup apply', async () => {
   globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   queuedSpawnResponses.push({
     action: 'apply',
@@ -375,9 +387,33 @@ test('activation surfaces a typed incomplete reconciliation result', async () =>
   await activate(createExtensionContext());
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['converge']);
-  expect(informationMessages.at(-1)?.[0]).toContain('startup reconciliation is blocked');
-  expect(informationMessages.at(-1)?.[0]).toContain('changed after planning');
+  expect(errorMessages.at(-1)?.[0]).toContain('startup reconciliation is blocked');
+  expect(errorMessages.at(-1)?.[0]).toContain('changed after planning');
 });
+
+for (const kind of ['blocked', 'permission-required'] as const) {
+  test(`a ${kind} startup apply that changed app files offers reload`, async () => {
+    const facts = mutationFacts({ physicalChanged: true, incompleteRecovery: true });
+    const status = fakeStatus({ classification: 'broken-backup' });
+    const reason = 'Island target changed after planning';
+    queuedSpawnResponses.push({
+      action: 'apply',
+      result:
+        kind === 'blocked'
+          ? { kind, ...facts, status, reason }
+          : { kind, ...facts, status, writeAccess: writeAccess([BLOCKED_PRODUCT_JSON]), reason },
+    } satisfies CliResult<'converge'>);
+
+    const { activate } = await import('../../apps/vscode/src/extension.js');
+    await activate(createExtensionContext());
+
+    expect(informationMessages).toContainEqual([
+      expect.stringContaining('remains incomplete'),
+      'Reload Window',
+      'Later',
+    ]);
+  });
+}
 
 test('restore completes through the supervisor without extra prompts', async () => {
   const restoreCommand = await activateAndGetCommand('tyrianNight.restoreClassicUi');
@@ -434,8 +470,8 @@ test('restore reports a structured blocked result without rejecting the command'
   await expect(restoreCommand()).resolves.toBeUndefined();
 
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['restore-supervised']);
-  expect(informationMessages.at(-1)?.[0]).toContain('Classic UI restore is blocked');
-  expect(informationMessages.at(-1)?.[0]).toContain('changed after planning');
+  expect(errorMessages.at(-1)?.[0]).toContain('Classic UI restore is blocked');
+  expect(errorMessages.at(-1)?.[0]).toContain('changed after planning');
 });
 
 test('repair Island UI handles permission-required supervisor result through Doctor', async () => {
@@ -506,7 +542,6 @@ test('Doctor treats a null desired record as disabled and recommends restore for
       supervisedStatus(
         {
           registrationState: 'valid',
-          registered: true,
           desiredCssFile: null,
           classification: 'broken-backup',
         },
@@ -519,8 +554,34 @@ test('Doctor treats a null desired record as disabled and recommends restore for
   await doctor();
 
   const content = (openedDocuments.at(-1) as { content?: string } | undefined)?.content;
-  expect(content).toContain('Desired Island UI state: disabled');
+  expect(content).toContain('  Desired: disabled');
   expect(content).toContain('Recommended action: Restore Classic UI');
+});
+
+test('Doctor names unsupported layouts, unknown desired state and the restore plan', async () => {
+  const doctor = await activateAndGetCommand('tyrianNight.doctorIslandUi');
+  resetObservations();
+  queuedSpawnResponses.push({
+    statuses: [
+      supervisedStatus(
+        {
+          registrationState: 'corrupt',
+          classification: 'unsupported-layout',
+          restorePlan: 'strip-tyrian-block',
+        },
+        'manual-recovery'
+      ),
+    ],
+    registryDiagnostics: [],
+  } satisfies CliResult<'status-all-supervised'>);
+
+  await doctor();
+
+  const content = (openedDocuments.at(-1) as { content?: string } | undefined)?.content;
+  expect(content).toContain(': Unsupported VS Code layout');
+  expect(content).toContain('  Desired: unknown (the desired-state record is corrupt)');
+  expect(content).toContain('  Restore plan: Strip the Tyrian block and repair the checksum');
+  expect(content).toContain('  Recommended action: Inspect the reported files manually');
 });
 
 test('Doctor reports unidentifiable registry data without mutating it', async () => {
@@ -606,6 +667,7 @@ function resetObservations(): void {
   spawnCalls.length = 0;
   warningMessages.length = 0;
   informationMessages.length = 0;
+  errorMessages.length = 0;
   externalUrls.length = 0;
   pendingSpawnClosers.length = 0;
   queuedWarningResponses.length = 0;
@@ -662,10 +724,9 @@ function fakeStatus(overrides: Partial<IslandShellStatus> = {}): IslandShellStat
     registrationState: 'absent',
     active: false,
     managed: false,
-    registered: false,
     classification: 'clean',
     verificationPassed: true,
-    restoreProof: 'none',
+    restorePlan: 'noop',
     workbenchChecksum: 'test-workbench-hash',
     productWorkbenchChecksum: 'test-workbench-hash',
     receipt: undefined,
@@ -677,7 +738,6 @@ function fakeStatus(overrides: Partial<IslandShellStatus> = {}): IslandShellStat
 function validStatus(desiredCssFile: string | null): IslandShellStatus {
   return fakeStatus({
     registrationState: 'valid',
-    registered: true,
     desiredCssFile,
     managed: true,
     active: true,
@@ -699,7 +759,6 @@ function supervisedStatus(
 function writeAccess(blockedPaths: IslandShellWriteAccess['blockedPaths']): IslandShellWriteAccess {
   return {
     writable: blockedPaths.length === 0,
-    checkedPaths: [],
     blockedPaths,
     issues: blockedPaths.map(({ path }) => `Tyrian cannot write '${path}'.`),
   };
@@ -729,6 +788,10 @@ function typedIslandFailureResponse(
     facts: Parameters<typeof mutationFacts>[0];
   } = { code: 'blocked', facts: { physicalChanged: true, incompleteRecovery: true } }
 ): FakeProcessResponse {
+  const causes = [
+    { code: failure.code, reason },
+    { code: failure.code, reason: 'workbench checksum did not match' },
+  ];
   return {
     fakeProcessResponse: true,
     exitCode: 1,
@@ -736,11 +799,8 @@ function typedIslandFailureResponse(
     stderr: JSON.stringify({
       code: failure.code,
       ...mutationFacts(failure.facts),
-      reason,
-      causes: [
-        { code: failure.code, reason },
-        { code: failure.code, reason: 'workbench checksum did not match' },
-      ],
+      reason: causes.map((cause) => cause.reason).join(' | '),
+      causes,
     } satisfies IslandShellFailureDescription),
   };
 }

@@ -12,10 +12,16 @@ import { IslandProcessFailure, runIslandJsonProcess } from './islandProcess.js';
 import type { IslandShellStatus } from './islandShellContract.js';
 import type {
   IslandUiApplySupervisionResult,
+  IslandUiConvergeIntent,
   IslandUiConvergeResult,
   IslandUiRecommendedAction,
 } from './islandSupervisor.js';
-import type { IslandCliCommand, IslandCliResults } from './islandWire.js';
+import {
+  encodeIslandCliArgs,
+  type IslandCliArgs,
+  type IslandCliCommand,
+  type IslandCliResults,
+} from './islandWire.js';
 
 const OPEN_DOCTOR_ACTION = 'Open Doctor';
 const TRUST_DOCS_ACTION = 'Why This Is Needed';
@@ -31,7 +37,7 @@ const INCOMPLETE_RELOAD_MESSAGE =
   'Tyrian Night: Island UI changed app files but remains incomplete. Reload VS Code after resolving the reported failures.';
 
 type IslandApplyPresentation = {
-  interactive: boolean;
+  operation: string;
   notifyWhenUnchanged: boolean;
   reloadMessage: string;
 };
@@ -117,21 +123,13 @@ async function reconcileIslandUi(): Promise<void> {
     case 'restore':
       await promptForReloadIfRestored(convergence);
       return;
-    case 'apply': {
-      const { result } = convergence;
-      await presentApplyResult(result, {
-        interactive: false,
+    case 'apply':
+      await presentApplyResult(convergence.result, {
+        operation: 'startup reconciliation',
         notifyWhenUnchanged: false,
         reloadMessage: 'Tyrian Night: Island UI was updated. Reload VS Code to apply it.',
       });
-      switch (result.kind) {
-        case 'applied':
-        case 'already-current':
-          return;
-        default:
-          throw new Error(`Island UI startup reconciliation is ${result.kind}. ${result.reason}`);
-      }
-    }
+      return;
   }
 }
 
@@ -183,7 +181,7 @@ async function applyIslandUiCommand(): Promise<void> {
   }
 
   await applyIslandCssFile(cssFile, {
-    interactive: true,
+    operation: 'apply',
     notifyWhenUnchanged: true,
     reloadMessage: 'Tyrian Night: Island UI applied. Reload VS Code to apply it.',
   });
@@ -209,7 +207,7 @@ async function repairIslandUi(): Promise<void> {
       return;
     case 'apply':
       await presentApplyResult(convergence.result, {
-        interactive: true,
+        operation: 'repair',
         notifyWhenUnchanged: true,
         reloadMessage: 'Tyrian Night: Island UI repaired. Reload VS Code to apply it.',
       });
@@ -222,25 +220,13 @@ async function repairIslandUi(): Promise<void> {
  * state and acts on it under one Island lock, so another window's change
  * between the read and the mutation is impossible.
  */
-function convergeIslandUi(
-  intent: { kind: 'startup' } | { kind: 'repair'; fallbackCssFile: string | undefined }
-): Promise<IslandUiConvergeResult> {
-  return runIslandCli('converge', [
-    '--app-root',
-    vscode.env.appRoot,
-    '--island-dir',
-    islandDirectory(),
-    '--theme-version',
-    themeVersion(),
-    ...(intent.kind === 'repair'
-      ? [
-          '--repair',
-          ...(intent.fallbackCssFile === undefined
-            ? []
-            : ['--fallback-css', intent.fallbackCssFile]),
-        ]
-      : []),
-  ]);
+function convergeIslandUi(intent: IslandUiConvergeIntent): Promise<IslandUiConvergeResult> {
+  return runIslandCli('converge', {
+    'app-root': vscode.env.appRoot,
+    'island-dir': islandDirectory(),
+    'theme-version': themeVersion(),
+    ...(intent.kind === 'repair' ? { repair: true, 'fallback-css': intent.fallbackCssFile } : {}),
+  });
 }
 
 async function promptForReloadIfRestored(
@@ -257,14 +243,11 @@ async function applyIslandCssFile(
   cssFile: string,
   presentation: IslandApplyPresentation
 ): Promise<void> {
-  const result = await runIslandCli('apply-supervised', [
-    '--app-root',
-    vscode.env.appRoot,
-    '--css-source',
-    path.join(islandDirectory(), cssFile),
-    '--theme-version',
-    themeVersion(),
-  ]);
+  const result = await runIslandCli('apply-supervised', {
+    'app-root': vscode.env.appRoot,
+    'css-source': path.join(islandDirectory(), cssFile),
+    'theme-version': themeVersion(),
+  });
   await presentApplyResult(result, presentation);
 }
 
@@ -296,36 +279,30 @@ async function presentApplyResult(
       }
       return;
     case 'permission-required':
-      if (presentation.interactive) {
-        await showPermissionRequired(
-          'VS Code app files are not writable, usually after a package install or update. Fix their permissions outside Tyrian, then retry Island UI repair.',
-          'Blocked path',
-          result.writeAccess.blockedPaths.map(({ path: blockedPath }) => blockedPath)
-        );
-        await promptForReloadIfIncomplete(result.physicalChanged);
+      await showPermissionRequired(
+        'VS Code app files are not writable, usually after a package install or update. Fix their permissions outside Tyrian, then run Repair Island UI.',
+        'Blocked path',
+        result.writeAccess.blockedPaths.map(({ path: blockedPath }) => blockedPath)
+      );
+      break;
+    case 'unsupported': {
+      const action = await vscode.window.showWarningMessage(
+        `Tyrian Night: This VS Code workbench layout is not supported for Island UI yet. ${result.reason}`,
+        OPEN_DOCTOR_ACTION,
+        LATER_ACTION
+      );
+      if (action === OPEN_DOCTOR_ACTION) {
+        await doctorIslandUi();
       }
-      return;
-    case 'unsupported':
-      if (presentation.interactive) {
-        const action = await vscode.window.showWarningMessage(
-          `Tyrian Night: This VS Code workbench layout is not supported for Island UI yet. ${result.reason}`,
-          OPEN_DOCTOR_ACTION,
-          LATER_ACTION
-        );
-        if (action === OPEN_DOCTOR_ACTION) {
-          await doctorIslandUi();
-        }
-      }
-      return;
+      break;
+    }
     case 'blocked':
-      if (presentation.interactive) {
-        await vscode.window.showErrorMessage(
-          `Tyrian Night: Island UI repair is blocked. ${result.reason}`
-        );
-        await promptForReloadIfIncomplete(result.physicalChanged);
-      }
-      return;
+      await vscode.window.showErrorMessage(
+        `Tyrian Night: Island UI ${presentation.operation} is blocked. ${result.reason}`
+      );
+      break;
   }
+  await promptForReloadIfIncomplete(result.physicalChanged);
 }
 
 async function showPermissionRequired(
@@ -358,13 +335,9 @@ function isSelfHealable(action: IslandUiRecommendedAction): boolean {
 }
 
 async function doctorIslandUi(): Promise<void> {
-  const { statuses, registryDiagnostics } = await runIslandCli('status-all-supervised', [
-    '--app-root',
-    vscode.env.appRoot,
-  ]);
-  const currentStatus = statuses[0];
-  const desiredState = typeof currentStatus?.desiredCssFile === 'string' ? 'enabled' : 'disabled';
-
+  const { statuses, registryDiagnostics } = await runIslandCli('status-all-supervised', {
+    'app-root': vscode.env.appRoot,
+  });
   if (statuses.length === 0 && registryDiagnostics.length === 0) {
     vscode.window.showInformationMessage(
       'Tyrian Night Doctor: No managed VS Code app roots were found.'
@@ -376,7 +349,6 @@ async function doctorIslandUi(): Promise<void> {
     '# Tyrian Night Doctor',
     '',
     `VS Code: ${vscode.version}`,
-    `Desired Island UI state: ${desiredState}`,
     '',
     ...registryDiagnostics.flatMap((diagnostic) => [
       `Registry diagnostic: ${diagnostic.reason}`,
@@ -387,11 +359,11 @@ async function doctorIslandUi(): Promise<void> {
       const recommendedAction = status.recommendedAction;
       const detailLines = [
         `- \`${status.appRoot}\`: ${formatDoctorClassification(status.classification)}`,
-        `  Desired: ${status.desiredCssFile ? `enabled (${status.desiredCssFile})` : 'disabled'}`,
+        `  Desired: ${formatDesiredState(status)}`,
         `  Verification: ${status.verificationPassed ? 'passed' : 'failed'}`,
         `  Self-heal: ${isSelfHealable(recommendedAction) ? 'available via Restore Classic UI' : 'not available'}`,
         `  Recommended action: ${formatRecommendedAction(recommendedAction)}`,
-        `  Restore proof: ${formatRestoreProof(status.restoreProof)}`,
+        `  Restore plan: ${formatRestorePlan(status.restorePlan)}`,
       ];
 
       if (status.workbenchChecksum) {
@@ -456,7 +428,7 @@ async function doctorIslandUi(): Promise<void> {
 }
 
 async function restoreIslandUi(): Promise<void> {
-  const result = await runIslandCli('restore-supervised', ['--app-root', vscode.env.appRoot]);
+  const result = await runIslandCli('restore-supervised', { 'app-root': vscode.env.appRoot });
 
   if (result.kind === 'permission-required') {
     await showPermissionRequired(
@@ -486,12 +458,12 @@ async function restoreIslandUi(): Promise<void> {
 
 function runIslandCli<Command extends IslandCliCommand>(
   command: Command,
-  args: string[]
+  args: IslandCliArgs
 ): Promise<IslandCliResults[Command]> {
   const cliPath = path.join(extContext.extensionPath, 'out', 'islandCli.js');
 
   return runIslandJsonProcess<IslandCliResults[Command]>(
-    [process.execPath, cliPath, command, ...args],
+    [process.execPath, cliPath, command, ...encodeIslandCliArgs(args)],
     { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   );
 }
@@ -517,10 +489,23 @@ function formatDoctorClassification(classification: IslandShellStatus['classific
       return 'Missing';
     case 'permission-denied':
       return 'Permission denied';
+    case 'unsupported-layout':
+      return 'Unsupported VS Code layout';
     case 'broken-backup':
       return 'Broken backup';
     case 'checksum-mismatch':
       return 'Checksum mismatch';
+  }
+}
+
+function formatDesiredState(status: IslandShellStatus): string {
+  switch (status.registrationState) {
+    case 'corrupt':
+    case 'unreadable':
+      return `unknown (the desired-state record is ${status.registrationState})`;
+    case 'absent':
+    case 'valid':
+      return status.desiredCssFile ? `enabled (${status.desiredCssFile})` : 'disabled';
   }
 }
 
@@ -543,14 +528,18 @@ function formatRecommendedAction(action: IslandUiRecommendedAction): string {
   }
 }
 
-function formatRestoreProof(proof: IslandShellStatus['restoreProof']): string {
-  switch (proof) {
-    case 'none':
-      return 'None';
-    case 'manifest-backup-pair':
-      return 'Manifest backup pair';
+function formatRestorePlan(plan: IslandShellStatus['restorePlan']): string {
+  switch (plan) {
+    case 'noop':
+      return 'Nothing to restore';
+    case 'restore-from-backup':
+      return 'Restore the verified backup pair';
     case 'strip-tyrian-block':
-      return 'Strip Tyrian block only';
+      return 'Strip the Tyrian block and repair the checksum';
+    case 'remove-managed-state':
+      return 'Remove Tyrian files only';
+    case 'unknown':
+      return 'Unknown: the installation files could not be read';
   }
 }
 
@@ -558,12 +547,9 @@ async function showIslandProcessFailure(
   failure: IslandProcessFailure,
   operation: string
 ): Promise<void> {
-  const causeReasons = failure.causes
-    .map(({ reason }) => reason)
-    .filter((reason) => reason !== failure.message);
-  const causeDetail = causeReasons.length > 0 ? ` Causes: ${causeReasons.join(' | ')}` : '';
+  // The failure message already joins every actionable cause.
   await vscode.window.showErrorMessage(
-    `Tyrian Night: ${operation} failed (${failure.code}). ${failure.message}${causeDetail}`
+    `Tyrian Night: ${operation} failed (${failure.code}). ${failure.message}`
   );
 
   if (failure.incompleteRecovery) {

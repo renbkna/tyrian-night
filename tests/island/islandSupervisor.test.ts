@@ -5,7 +5,10 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 
-import { applyIslandShell } from '../../apps/vscode/src/islandShell.js';
+import {
+  applyIslandShell,
+  readIslandShellApplyReadiness,
+} from '../../apps/vscode/src/islandShell.js';
 import {
   describeIslandShellFailure,
   IslandPartialMutationError,
@@ -86,7 +89,8 @@ test('repair changes physical state while desired state is unchanged', async () 
     })
   ).resolves.toMatchObject({
     kind: 'applied',
-    changed: true,
+    desiredStateChanged: false,
+    physicalChanged: true,
   });
 });
 
@@ -94,11 +98,7 @@ test('already-disabled restore changes physical state without rewriting desired 
   const appRoot = await createAppRoot('restore-rollback-partial');
   const cssSource = await writeCssSource('restore-rollback.css');
   await applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome });
-  await fs.writeFile(
-    buildManagedRootRecordPath(appRoot, registryHome),
-    JSON.stringify({ appRoot, desiredCssFile: null }).concat('\n'),
-    'utf8'
-  );
+  await publishManagedRootRecord(appRoot, null, { registryHome });
 
   await expect(
     restoreIslandUiSupervised({
@@ -107,12 +107,13 @@ test('already-disabled restore changes physical state without rewriting desired 
     })
   ).resolves.toMatchObject({
     kind: 'restored',
-    changed: true,
+    desiredStateChanged: false,
+    physicalChanged: true,
     failedAppRoots: [],
   });
 });
 
-test('typed partial failures preserve supervisor changed classification', () => {
+test('mutation facts are read from every node of an error graph', () => {
   const partialFailure = new IslandPartialMutationError(
     'apply stopped',
     { physicalChanged: true },
@@ -125,6 +126,13 @@ test('typed partial failures preserve supervisor changed classification', () => 
     readIslandMutationFacts(
       new AggregateError([Object.assign(new Error('nested mutation'), { physicalChanged: true })])
     ).changed
+  ).toBe(true);
+  expect(
+    readIslandMutationFacts(
+      new Error('wrapper', {
+        cause: Object.assign(new Error('cause mutation'), { registryChanged: true }),
+      })
+    ).registryChanged
   ).toBe(true);
 });
 
@@ -152,6 +160,17 @@ test('public failure normalization preserves both actionable aggregate causes', 
       { code: 'blocked', reason: 'verification failed at workbench.backup.html' },
     ]),
   });
+});
+
+test('a failure is permission-owned only when every leaf cause is a permission error', () => {
+  const permission = () => Object.assign(new Error('EACCES: denied'), { code: 'EACCES' });
+
+  expect(describeIslandShellFailure(new AggregateError([permission(), permission()])).code).toBe(
+    'permission-required'
+  );
+  expect(
+    describeIslandShellFailure(new AggregateError([permission(), new Error('is a directory')])).code
+  ).toBe('blocked');
 });
 
 test('supervised apply converts a read-only app root into permission-required', async () => {
@@ -214,6 +233,70 @@ test('missing registered roots receive a typed prune recommendation before permi
   });
 });
 
+test('an existing root without workbench files recommends manual recovery, not pruning', async () => {
+  const appRoot = path.join(testRoot, 'existing-without-workbench');
+  await fs.mkdir(appRoot);
+  await publishManagedRootRecord(appRoot, null, { registryHome });
+
+  await expect(readIslandUiSupervisorStatuses({ registryHome })).resolves.toMatchObject({
+    statuses: [
+      { appRoot, classification: 'unsupported-layout', recommendedAction: 'manual-recovery' },
+    ],
+  });
+});
+
+test('a product.json without the workbench checksum is an unsupported layout, not a repair', async () => {
+  const appRoot = await createAppRoot('missing-checksum-key');
+  await fs.writeFile(buildIslandPatchPaths(appRoot).productJsonPath, '{ "checksums": {} }\n');
+  await publishManagedRootRecord(appRoot, 'tyrian-night.css', { registryHome });
+
+  await expect(
+    readIslandUiSupervisorStatuses({ preferredAppRoots: [appRoot], registryHome })
+  ).resolves.toMatchObject({
+    statuses: [{ classification: 'unsupported-layout', recommendedAction: 'manual-recovery' }],
+  });
+});
+
+test('an unreadable desired-state record recommends fixing permissions', async () => {
+  const appRoot = await createAppRoot('unreadable-record');
+  await publishManagedRootRecord(appRoot, null, { registryHome });
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+
+  try {
+    await fs.chmod(recordPath, 0o000);
+    await expect(
+      readIslandUiSupervisorStatuses({ preferredAppRoots: [appRoot], registryHome })
+    ).resolves.toMatchObject({
+      statuses: [
+        {
+          appRoot,
+          registrationState: 'unreadable',
+          classification: 'permission-denied',
+          recommendedAction: 'fix-permissions',
+        },
+      ],
+    });
+  } finally {
+    await fs.chmod(recordPath, 0o644);
+  }
+});
+
+test('apply readiness blocks a corrupt desired-state record', async () => {
+  const appRoot = await createAppRoot('corrupt-readiness');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, JSON.stringify({ appRoot }).concat('\n'), 'utf8');
+
+  await expect(
+    readIslandShellApplyReadiness({
+      appRoot,
+      cssSourcePath: await writeCssSource('corrupt-readiness.css'),
+      themeVersion: 'test',
+      registryHome,
+    })
+  ).resolves.toMatchObject({ kind: 'blocked', reason: expect.stringContaining('corrupt') });
+});
+
 test('corrupt registration records recommend Classic UI restore', async () => {
   const appRoot = await createAppRoot('corrupt-registration-remedy');
   const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
@@ -227,7 +310,6 @@ test('corrupt registration records recommend Classic UI restore', async () => {
       {
         appRoot,
         registrationState: 'corrupt',
-        registered: true,
         classification: 'broken-backup',
         recommendedAction: 'restore',
       },

@@ -4,10 +4,12 @@ import path from 'node:path';
 
 import { expect, test } from 'bun:test';
 
+import { buildManagedRootsDirectoryPath } from '../../apps/vscode/src/islandPatchContract.js';
 import { readIslandPlatformSupport } from '../../apps/vscode/src/islandPlatform.js';
 import {
   applyIslandShell,
   readIslandShellApplyReadiness,
+  restoreAllIslandShells,
   restoreIslandShell,
 } from '../../apps/vscode/src/islandShell.js';
 
@@ -59,6 +61,16 @@ test('every Island mutation is unsupported on other platforms before filesystem 
       });
     });
     await expect(fs.readdir(root)).resolves.toEqual([]);
+
+    const registryDirectory = buildManagedRootsDirectoryPath(registryHome);
+    await fs.mkdir(registryDirectory, { recursive: true });
+    await fs.writeFile(path.join(registryDirectory, 'unidentifiable-record'), '{}\n', 'utf8');
+    await withPlatform('freebsd', async () => {
+      await expect(restoreAllIslandShells({ registryHome })).rejects.toMatchObject({
+        code: 'unsupported',
+      });
+    });
+    await expect(fs.readdir(registryDirectory)).resolves.toEqual(['unidentifiable-record']);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

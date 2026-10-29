@@ -40,84 +40,132 @@ export type IslandShellEnvironment = {
   registryHome?: string;
 };
 
+/** A registry root that restore either prunes (its app root is gone) or restores. */
 export type IslandRegisteredRoot = {
   readonly appRoot: string;
-  removeMissing(): Promise<{ changed: boolean; quarantinePath?: string }>;
+  pruneIfMissing(): Promise<
+    { pruned: false } | { pruned: true; changed: boolean; quarantinePath?: string }
+  >;
 };
 
-type RootListing = {
-  roots: IslandRegisteredRoot[];
-  registryDiagnostics: string[];
-  registryChanged: boolean;
-  quarantinedRecords: string[];
-  enumerationFailure?: IslandShellFailureDescription;
-};
+type RegistryEntry =
+  | { kind: 'identified'; appRoot: string; corrupt: boolean; reason: string }
+  | { kind: 'unidentifiable'; recordPath: string; reason: string }
+  | { kind: 'unreadable'; recordPath: string; error: unknown };
 
-/**
- * Preferred roots plus every registered root. Doctor reads report unusable
- * registry entries as diagnostics; restore moves them to quarantine so bulk
- * cleanup is never blocked by data it cannot interpret.
- */
-export async function listIslandShellRoots(
-  options: { preferredAppRoots?: string[]; registryHome?: string } | undefined,
-  mode: 'diagnostic-read' | 'restore'
-): Promise<RootListing> {
+/** Doctor roots: preferred and registered roots, with unusable registry data as diagnostics. */
+export async function listIslandDoctorRoots(options?: {
+  preferredAppRoots?: string[];
+  registryHome?: string;
+}): Promise<{ appRoots: string[]; registryDiagnostics: string[] }> {
   const environment = { registryHome: options?.registryHome };
-  const candidates = new Map<string, { appRoot: string; corrupt: boolean }>();
-  for (const candidateRoot of options?.preferredAppRoots ?? []) {
-    const appRoot = await canonicalizeAppRoot(candidateRoot);
-    candidates.set(appRoot, { appRoot, corrupt: false });
-  }
-
+  const appRoots = await canonicalizeAppRoots(options?.preferredAppRoots);
   const registryDiagnostics: string[] = [];
-  const quarantinedRecords: string[] = [];
-  let enumerationFailure: IslandShellFailureDescription | undefined;
-  const directoryPath = buildManagedRootsDirectoryPath(environment.registryHome);
 
   try {
-    if (mode === 'restore') await removeStaleTemporaryFiles(directoryPath);
-    for (const entry of await readRegistryEntries(directoryPath)) {
-      if (isTemporaryFileName(entry)) continue;
-      const recordPath = path.join(directoryPath, entry);
-      try {
-        const identity = await identifyRecord(recordPath, environment);
-        if (identity.kind === 'unidentifiable') {
-          if (mode === 'restore') {
-            quarantinedRecords.push(await quarantineRecord(recordPath, environment));
-          } else {
-            registryDiagnostics.push(identity.reason);
-          }
-          continue;
-        }
-        if (identity.corrupt && mode === 'diagnostic-read') {
-          registryDiagnostics.push(identity.reason);
-        }
-        candidates.set(identity.appRoot, { appRoot: identity.appRoot, corrupt: identity.corrupt });
-      } catch (error) {
-        // Restore stops at data it can neither use nor safely move aside.
-        if (mode === 'restore') throw error;
-        registryDiagnostics.push(`${recordPath}: ${errorMessage(error)}`);
+    for (const entry of await scanRegistry(environment)) {
+      if (entry.kind === 'unreadable') {
+        registryDiagnostics.push(`${entry.recordPath}: ${errorMessage(entry.error)}`);
+        continue;
       }
+      if (entry.kind === 'unidentifiable' || entry.corrupt) registryDiagnostics.push(entry.reason);
+      if (entry.kind === 'identified') appRoots.add(entry.appRoot);
     }
   } catch (error) {
-    if (mode === 'restore') enumerationFailure = describeIslandShellFailure(error);
-    else registryDiagnostics.push(error instanceof Error ? error.message : String(error));
+    registryDiagnostics.push(errorMessage(error));
   }
 
   return {
-    roots: [...candidates.values()]
-      .toSorted((left, right) => left.appRoot.localeCompare(right.appRoot))
-      .map((candidate) =>
+    appRoots: [...appRoots].toSorted((left, right) => left.localeCompare(right)),
+    registryDiagnostics,
+  };
+}
+
+/**
+ * Restore roots: preferred and registered roots. Unidentifiable records move to
+ * quarantine so bulk cleanup is never blocked by data it cannot interpret;
+ * entries it can neither read nor move aside are the enumeration failure, and
+ * every other root is still returned.
+ */
+export async function listIslandRestoreRoots(options?: {
+  preferredAppRoots?: string[];
+  registryHome?: string;
+}): Promise<{
+  roots: IslandRegisteredRoot[];
+  registryChanged: boolean;
+  quarantinedRecords: string[];
+  enumerationFailure?: IslandShellFailureDescription;
+}> {
+  const environment = { registryHome: options?.registryHome };
+  const candidates = new Map<string, boolean>();
+  for (const appRoot of await canonicalizeAppRoots(options?.preferredAppRoots)) {
+    candidates.set(appRoot, false);
+  }
+  const quarantinedRecords: string[] = [];
+  const unreadable: unknown[] = [];
+  let enumerationFailure: IslandShellFailureDescription | undefined;
+
+  try {
+    await removeStaleTemporaryFiles(buildManagedRootsDirectoryPath(environment.registryHome));
+    for (const entry of await scanRegistry(environment)) {
+      if (entry.kind === 'unreadable') unreadable.push(entry.error);
+      else if (entry.kind === 'unidentifiable') {
+        try {
+          quarantinedRecords.push(await quarantineRecord(entry.recordPath, environment));
+        } catch (error) {
+          unreadable.push(error);
+        }
+      } else candidates.set(entry.appRoot, entry.corrupt);
+    }
+    if (unreadable.length > 0) {
+      throw unreadable.length === 1
+        ? unreadable[0]
+        : new AggregateError(unreadable, 'Tyrian could not read several registry entries.');
+    }
+  } catch (error) {
+    enumerationFailure = describeIslandShellFailure(error);
+  }
+
+  return {
+    roots: [...candidates]
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([appRoot, corrupt]) =>
         Object.freeze({
-          appRoot: candidate.appRoot,
-          removeMissing: () => removeMissingRecord(candidate, environment),
+          appRoot,
+          pruneIfMissing: () => pruneMissingRecord({ appRoot, corrupt }, environment),
         })
       ),
-    registryDiagnostics,
     registryChanged: quarantinedRecords.length > 0,
     quarantinedRecords,
     ...(enumerationFailure !== undefined ? { enumerationFailure } : {}),
   };
+}
+
+/** An app root is missing when nothing exists at its path; only then may its record be pruned. */
+export async function isAppRootMissing(appRoot: string): Promise<boolean> {
+  return (await lstatIfExists(appRoot)) === undefined;
+}
+
+async function canonicalizeAppRoots(appRoots: string[] | undefined): Promise<Set<string>> {
+  const canonical = new Set<string>();
+  for (const appRoot of appRoots ?? []) canonical.add(await canonicalizeAppRoot(appRoot));
+  return canonical;
+}
+
+/** Every registry entry, classified; a missing registry is empty. */
+async function scanRegistry(environment: IslandShellEnvironment): Promise<RegistryEntry[]> {
+  const directoryPath = buildManagedRootsDirectoryPath(environment.registryHome);
+  const entries: RegistryEntry[] = [];
+  for (const name of await readRegistryEntries(directoryPath)) {
+    if (isTemporaryFileName(name)) continue;
+    const recordPath = path.join(directoryPath, name);
+    try {
+      entries.push(await identifyRecord(recordPath, environment));
+    } catch (error) {
+      entries.push({ kind: 'unreadable', recordPath, error });
+    }
+  }
+  return entries;
 }
 
 export async function readManagedAppRootRegistration(
@@ -231,10 +279,14 @@ async function identifyRecord(
   recordPath: string,
   environment: IslandShellEnvironment
 ): Promise<
-  | { kind: 'unidentifiable'; reason: string }
+  | { kind: 'unidentifiable'; recordPath: string; reason: string }
   | { kind: 'identified'; appRoot: string; corrupt: boolean; reason: string }
 > {
-  const unidentifiable = (reason: string) => ({ kind: 'unidentifiable' as const, reason });
+  const unidentifiable = (reason: string) => ({
+    kind: 'unidentifiable' as const,
+    recordPath,
+    reason,
+  });
   if ((await fs.lstat(recordPath)).isDirectory()) {
     throw new Error(`Tyrian managed app root record is a directory at '${recordPath}'.`);
   }
@@ -276,22 +328,22 @@ async function identifyRecord(
   }
 }
 
-async function removeMissingRecord(
+async function pruneMissingRecord(
   candidate: { appRoot: string; corrupt: boolean },
   environment: IslandShellEnvironment
-): Promise<{ changed: boolean; quarantinePath?: string }> {
-  if ((await lstatIfExists(candidate.appRoot)) !== undefined) {
-    throw new Error(
-      `Tyrian cannot prune registry ownership for an existing app root at '${candidate.appRoot}'.`
-    );
-  }
+): Promise<{ pruned: false } | { pruned: true; changed: boolean; quarantinePath?: string }> {
+  if (!(await isAppRootMissing(candidate.appRoot))) return { pruned: false };
   const recordPath = buildManagedRootRecordPath(candidate.appRoot, environment.registryHome);
-  if ((await lstatIfExists(recordPath)) === undefined) return { changed: false };
+  if ((await lstatIfExists(recordPath)) === undefined) return { pruned: true, changed: false };
   if (candidate.corrupt) {
-    return { changed: true, quarantinePath: await quarantineRecord(recordPath, environment) };
+    return {
+      pruned: true,
+      changed: true,
+      quarantinePath: await quarantineRecord(recordPath, environment),
+    };
   }
   await removeFile(recordPath);
-  return { changed: true };
+  return { pruned: true, changed: true };
 }
 
 /** Move an unusable record aside without following it, preserving it for inspection. */

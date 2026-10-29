@@ -5,24 +5,27 @@ import {
   islandErrorGraph,
   readIslandMutationFacts,
 } from './islandMutationFacts.js';
+import type { RestorePlan } from './islandPatchPlan.js';
 
 export type IslandShellStatus = {
   appRoot: string;
+  /** The desired style, `null` when disabled, `undefined` without a valid record. */
   desiredCssFile: string | null | undefined;
-  registrationState: 'absent' | 'valid' | 'corrupt';
+  registrationState: 'absent' | 'valid' | 'corrupt' | 'unreadable';
   active: boolean;
   managed: boolean;
-  registered: boolean;
   classification:
     | 'clean'
     | 'patched'
     | 'managed-only'
     | 'missing'
     | 'permission-denied'
+    | 'unsupported-layout'
     | 'broken-backup'
     | 'checksum-mismatch';
   verificationPassed: boolean;
-  restoreProof: 'none' | 'manifest-backup-pair' | 'strip-tyrian-block';
+  /** What Restore Classic UI would do to this root now; unknown when its files could not be read. */
+  restorePlan: RestorePlan['kind'] | 'unknown';
   workbenchChecksum: string | undefined;
   productWorkbenchChecksum: string | undefined;
   receipt:
@@ -59,6 +62,14 @@ export class IslandShellFailure extends IslandMutationError {
   }
 }
 
+/** The one refusal for a desired-state record Tyrian cannot interpret. */
+export function corruptDesiredStateFailure(): IslandShellFailure {
+  return new IslandShellFailure(
+    'corrupt',
+    'Island UI desired-state record is corrupt. Run Restore Classic UI to replace it before changing Island UI.'
+  );
+}
+
 /** A root transition failed; carries the status observed after the failure, when readable. */
 export class IslandShellTransitionFailure extends Error {
   readonly status: IslandShellStatus | undefined;
@@ -91,13 +102,10 @@ export function describeIslandShellFailure(error: unknown): IslandShellFailureDe
   const reason =
     causes.map((cause) => cause.reason).join(' | ') ||
     (error instanceof Error ? error.message : String(error));
+  const leaves = [...islandErrorGraph(error)].filter((candidate) => !hasChildErrors(candidate));
   const code =
     typedFailure?.code ??
-    (findNestedError(error, (candidate) =>
-      isPermissionError(candidate) ? candidate : undefined
-    ) === undefined
-      ? 'blocked'
-      : 'permission-required');
+    (leaves.length > 0 && leaves.every(isPermissionError) ? 'permission-required' : 'blocked');
 
   return { code, ...readIslandMutationFacts(error), reason, causes };
 }
@@ -121,7 +129,6 @@ export type IslandShellCleanupSummary = IslandMutationResult & {
 
 export type IslandShellWriteAccess = {
   writable: boolean;
-  checkedPaths: string[];
   blockedPaths: Array<{ path: string; reason: string }>;
   issues: string[];
 };
@@ -162,6 +169,19 @@ export function isPermissionError(error: unknown): boolean {
   return isNodeError(error) && (error.code === 'EACCES' || error.code === 'EPERM');
 }
 
+function hasChildErrors(candidate: unknown): boolean {
+  return (
+    (candidate instanceof AggregateError && candidate.errors.length > 0) ||
+    (candidate instanceof Error && candidate.cause !== undefined)
+  );
+}
+
+/** The failure code one error asserts by itself. */
+function failureCodeOf(error: Error): IslandShellFailureCode {
+  if (error instanceof IslandShellFailure) return error.code;
+  return isPermissionError(error) ? 'permission-required' : 'blocked';
+}
+
 function findNestedError<T>(
   error: unknown,
   select: (candidate: unknown) => T | undefined
@@ -181,9 +201,7 @@ function collectIslandFailureCauses(
 
   for (const candidate of islandErrorGraph(error)) {
     if (causes.length >= 8) break;
-    const hasChildren =
-      (candidate instanceof AggregateError && candidate.errors.length > 0) ||
-      (candidate instanceof Error && candidate.cause !== undefined);
+    const hasChildren = hasChildErrors(candidate);
 
     if (!(candidate instanceof Error)) {
       const reason = String(candidate);
@@ -200,13 +218,7 @@ function collectIslandFailureCauses(
       !hasChildren;
     if (!ownsActionableContext || seen.has(candidate.message)) continue;
 
-    const code =
-      candidate instanceof IslandShellFailure
-        ? candidate.code
-        : isPermissionError(candidate)
-          ? 'permission-required'
-          : 'blocked';
-    causes.push({ code, reason: candidate.message });
+    causes.push({ code: failureCodeOf(candidate), reason: candidate.message });
     seen.add(candidate.message);
   }
 

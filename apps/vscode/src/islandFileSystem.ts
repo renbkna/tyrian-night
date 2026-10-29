@@ -173,7 +173,7 @@ export async function applyFileMutations(
   } catch (error) {
     if (!changed) throw error;
     throw new IslandPartialMutationError(
-      `Tyrian changed Island files before the operation failed; rerun it to complete: ${error instanceof Error ? error.message : String(error)}`,
+      'Tyrian changed Island files before the operation failed; rerun it to complete.',
       { physicalChanged: true, incompleteRecovery: true },
       { cause: error }
     );

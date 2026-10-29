@@ -14,10 +14,7 @@ import {
   restoreIslandShell,
 } from '../../apps/vscode/src/islandShell.js';
 import {
-  BACKUP_HTML_FILE_NAME,
-  BACKUP_PRODUCT_FILE_NAME,
   ISLAND_CSS_FILE_NAME,
-  ISLAND_MANIFEST_FILE_NAME,
   TYRIAN_MARKER_END,
   TYRIAN_MARKER_START,
   WORKBENCH_CHECKSUM_KEY,
@@ -41,6 +38,7 @@ import {
   buildRestoreMutations,
   buildRestorePlan,
   inspectIslandRoot,
+  type RestorePlan,
 } from '../../apps/vscode/src/islandPatchPlan.js';
 
 let previousHome: string | undefined;
@@ -165,14 +163,14 @@ test('status-all reports registered missing roots without mutating the registry'
     appRoot: missingAppRoot,
     classification: 'missing',
     managed: false,
-    registered: true,
+    registrationState: 'valid',
     verificationPassed: false,
   });
   expect(await fs.readFile(recordPath, 'utf8')).toBe(before);
 });
 
-// Sixteen durable apply/restore lifecycles may outlast the default five-second
-// test budget; each contended lock alone permits up to ten seconds to acquire.
+// Sixteen durable apply/restore lifecycles, each syncing files and directories,
+// may outlast the default five-second test budget.
 test('concurrent app roots register and unregister without overwriting each other', async () => {
   const appRoots = await Promise.all(
     Array.from({ length: 16 }, (_, index) => createAppRoot(`concurrent-${index}`))
@@ -211,14 +209,19 @@ test('registry enumeration observes stable snapshots during concurrent publicati
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
   await readStatuses({ registryHome });
 
-  const publications = appRoots.map((appRoot) =>
-    applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
-  );
-  const snapshots = await Promise.all(
-    Array.from({ length: 12 }, () => readStatuses({ registryHome }))
-  );
-  await Promise.all(publications);
+  let published = false;
+  const publications = Promise.all(
+    appRoots.map((appRoot) =>
+      applyIslandShell({ appRoot, cssSourcePath: cssSource, themeVersion: 'test', registryHome })
+    )
+  ).finally(() => {
+    published = true;
+  });
+  const snapshots: IslandShellStatus[][] = [];
+  while (!published) snapshots.push(await readStatuses({ registryHome }));
+  await publications;
 
+  expect(snapshots.some((statuses) => statuses.length > 0)).toBe(true);
   for (const statuses of snapshots) {
     expect(new Set(statuses.map(({ appRoot }) => appRoot)).size).toBe(statuses.length);
     expect(statuses.every(({ registrationState }) => registrationState === 'valid')).toBe(true);
@@ -419,16 +422,92 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
   await expect(readStatuses({ registryHome })).resolves.toEqual([]);
 });
 
-test('missing-root cleanup preserves desired state for an existing incomplete installation', async () => {
+test('restore-all keeps the desired state of an existing root without workbench files', async () => {
   const appRoot = path.join(testRoot, 'incomplete-existing-root');
   await fs.mkdir(appRoot);
   const recordPath = await writeManagedRootRecord(appRoot);
   const originalRecord = await fs.readFile(recordPath, 'utf8');
   const result = await restoreAllIslandShells({ registryHome });
   expect(result.failedAppRoots).toEqual([
-    expect.objectContaining({ appRoot, reason: expect.stringContaining('existing app root') }),
+    expect.objectContaining({ appRoot, code: 'unsupported' }),
   ]);
   expect(await fs.readFile(recordPath, 'utf8')).toBe(originalRecord);
+});
+
+test('restore of an untouched root with an unsupported product.json publishes Classic UI', async () => {
+  const appRoot = await createAppRoot('unsupported-product-untouched');
+  await fs.writeFile(buildIslandPatchPaths(appRoot).productJsonPath, '{ "checksums": {} }\n');
+  await publishManagedRootRecord(appRoot, 'theme.css', { registryHome });
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'unsupported-layout',
+    restorePlan: 'noop',
+  });
+  await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
+    physicalChanged: false,
+    desiredStateChanged: true,
+  });
+  await expect(readManagedAppRootRegistration(appRoot, { registryHome })).resolves.toEqual({
+    kind: 'valid',
+    desiredCssFile: null,
+  });
+});
+
+test('status reports the restore plan that restore executes', async () => {
+  const cssSource = path.join(testRoot, 'restore-plan.css');
+  await fs.writeFile(cssSource, '.monaco-workbench { color: plum; }\n', 'utf8');
+  const prepare: Record<RestorePlan['kind'], (appRoot: string) => Promise<void>> = {
+    noop: async () => {},
+    'remove-managed-state': async (appRoot) => {
+      await fs.writeFile(buildIslandPatchPaths(appRoot).islandCssPath, '.stray {}\n', 'utf8');
+    },
+    'restore-from-backup': async (appRoot) => {
+      await applyIslandShell({
+        appRoot,
+        cssSourcePath: cssSource,
+        themeVersion: 'test',
+        registryHome,
+      });
+    },
+    'strip-tyrian-block': async (appRoot) => {
+      await applyIslandShell({
+        appRoot,
+        cssSourcePath: cssSource,
+        themeVersion: 'test',
+        registryHome,
+      });
+      await fs.rm(buildIslandPatchPaths(appRoot).backupHtmlPath);
+    },
+  };
+
+  for (const kind of Object.keys(prepare) as Array<RestorePlan['kind']>) {
+    const setUp = prepare[kind];
+    const appRoot = await createAppRoot(`restore-plan-${kind}`);
+    await setUp(appRoot);
+    const registration = await readManagedAppRootRegistration(appRoot, { registryHome });
+    const state = await inspectIslandRoot(appRoot, registration);
+
+    expect(state.status.restorePlan).toBe(kind);
+    expect(buildRestorePlan(state).kind).toBe(kind);
+    await restoreIslandShell({ appRoot, registryHome });
+    await expectRestoredAppRoot(appRoot);
+  }
+});
+
+test('a partial-mutation failure names its cause once', async () => {
+  const appRoot = await createAppRoot('partial-reason');
+  const filePath = path.join(buildIslandPatchPaths(appRoot).workbenchDirPath, 'partial.txt');
+
+  const failure = await applyFileMutations(
+    [{ filePath, content: 'partial\n', expectedContent: undefined }],
+    async () => {
+      throw new Error('verification exploded');
+    }
+  ).catch((error: unknown) => error);
+
+  expect(describeIslandShellFailure(failure).reason.match(/verification exploded/gu)).toHaveLength(
+    1
+  );
 });
 
 test('Restore quarantines an identifiable corrupt record for a missing root by generation', async () => {
@@ -480,7 +559,6 @@ test('restore strips active Island UI when backup evidence is broken', async () 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registered: true,
     registrationState: 'valid',
     desiredCssFile: null,
   });
@@ -496,7 +574,7 @@ test('a patched root without its desired-state record is classified as repair st
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     active: true,
-    registered: false,
+    registrationState: 'absent',
     desiredCssFile: undefined,
     classification: 'broken-backup',
     verificationPassed: false,
@@ -559,7 +637,7 @@ test('restore removes malformed Island blocks without deleting proof before veri
     await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
       active: true,
       classification: 'broken-backup',
-      restoreProof: 'strip-tyrian-block',
+      restorePlan: 'strip-tyrian-block',
     });
     await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
       active: false,
@@ -641,7 +719,6 @@ test('restore repairs checksum when broken sidecars mask the mismatch classifica
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registered: true,
     desiredCssFile: null,
   });
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
@@ -673,7 +750,6 @@ test('status treats a stale Island manifest checksum as self-healable broken sta
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registered: true,
     desiredCssFile: null,
   });
 });
@@ -694,7 +770,7 @@ test('restore preserves post-apply workbench edits when the manifest no longer p
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'broken-backup',
-    restoreProof: 'strip-tyrian-block',
+    restorePlan: 'strip-tyrian-block',
   });
 
   await restoreIslandShell({ appRoot, registryHome });
@@ -723,7 +799,7 @@ test('restore rejects a replaced backup pair whose hashes do not match the manif
 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'broken-backup',
-    restoreProof: 'strip-tyrian-block',
+    restorePlan: 'strip-tyrian-block',
   });
 
   await restoreIslandShell({ appRoot, registryHome });
@@ -765,14 +841,14 @@ test('status rejects CSS and patched product drift from the manifest receipt', a
     readIslandShellStatus({ appRoot: cssDriftRoot, registryHome })
   ).resolves.toMatchObject({
     classification: 'broken-backup',
-    restoreProof: 'strip-tyrian-block',
+    restorePlan: 'strip-tyrian-block',
     issues: expect.arrayContaining(['Tyrian manifest checksum does not match the injected CSS.']),
   });
   await expect(
     readIslandShellStatus({ appRoot: productDriftRoot, registryHome })
   ).resolves.toMatchObject({
     classification: 'broken-backup',
-    restoreProof: 'strip-tyrian-block',
+    restorePlan: 'strip-tyrian-block',
     issues: expect.arrayContaining([
       'Tyrian manifest checksum does not match the current product.json.',
     ]),
@@ -802,7 +878,7 @@ test('status rejects drift between desired style and the physical manifest recei
   });
 });
 
-test('apply writes a manifest receipt that identifies the owned patch surface', async () => {
+test('apply writes a manifest receipt with exactly the receipt fields', async () => {
   const appRoot = await createAppRoot('manifest-receipt');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: greenyellow; }\n', 'utf8');
@@ -818,7 +894,6 @@ test('apply writes a manifest receipt that identifies the owned patch surface', 
     'cssChecksum',
     'desiredCssFile',
     'installedAt',
-    'ownedFiles',
     'patchedProductChecksum',
     'patchedWorkbenchChecksum',
     'themeVersion',
@@ -829,12 +904,6 @@ test('apply writes a manifest receipt that identifies the owned patch surface', 
     desiredCssFile: 'theme.css',
     themeVersion: 'test',
     appRoot,
-    ownedFiles: {
-      stylesheet: ISLAND_CSS_FILE_NAME,
-      manifest: ISLAND_MANIFEST_FILE_NAME,
-      workbenchBackup: BACKUP_HTML_FILE_NAME,
-      productBackup: BACKUP_PRODUCT_FILE_NAME,
-    },
   });
   await expect(
     fs.readFile(buildManagedRootRecordPath(appRoot, registryHome), 'utf8').then(JSON.parse)
@@ -863,7 +932,6 @@ test('restore validates and uses a complete backup pair before deleting managed 
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registered: true,
     desiredCssFile: null,
   });
 });
@@ -884,8 +952,8 @@ test('apply and restore preserve upstream workbench bytes outside the owned bloc
   expect(await fs.readFile(workbenchHtmlPath, 'utf8')).toBe(upstreamHtml);
 });
 
-test('restore refuses incomplete manifest ownership proof before trusting backup sidecars', async () => {
-  const appRoot = await createAppRoot('incomplete-restore-proof');
+test('restore refuses an invalid manifest receipt before trusting backup sidecars', async () => {
+  const appRoot = await createAppRoot('invalid-manifest-receipt');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: blue; }\n', 'utf8');
   const cleanHtml = await fs.readFile(buildIslandPatchPaths(appRoot).workbenchHtmlPath, 'utf8');
@@ -919,7 +987,6 @@ test('restore refuses incomplete manifest ownership proof before trusting backup
   await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
     classification: 'clean',
     managed: false,
-    registered: true,
     desiredCssFile: null,
   });
 });

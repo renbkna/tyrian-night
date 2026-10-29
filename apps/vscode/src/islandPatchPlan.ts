@@ -2,9 +2,7 @@ import {
   ISLAND_CSS_FILE_NAME,
   type IslandPatchPaths,
   buildIslandPatchPaths,
-  ISLAND_MANIFEST_FILE_NAME,
-  BACKUP_HTML_FILE_NAME,
-  BACKUP_PRODUCT_FILE_NAME,
+  islandSidecarPaths,
   TYRIAN_MARKER_START,
   TYRIAN_MARKER_END,
   WORKBENCH_CSS_LINK,
@@ -33,21 +31,15 @@ const TYRIAN_STYLESHEET_PATTERN = new RegExp(
   'gimu'
 );
 
-type ProductJson = {
-  checksums?: Record<string, string>;
-};
+type ProductJson = Record<string, unknown> & { checksums: Record<string, unknown> };
 
 export type IslandRootState = {
   paths: IslandPatchPaths;
   currentHtml: string;
   currentProductJson: string;
-  currentCss: string | undefined;
-  currentManifest: string | undefined;
-  backupHtml: string | undefined;
-  backupProductJson: string | undefined;
-  hasTyrianSidecars: boolean;
-  trustedBackup: { html: string; productJson: string } | undefined;
-  checksumMatches: boolean;
+  /** Each sidecar path with its content, `undefined` when absent. */
+  sidecars: ReadonlyMap<string, string | undefined>;
+  restore: RestoreDecision;
   status: IslandShellStatus;
 };
 
@@ -69,6 +61,17 @@ export type RestorePlan =
       productJson: string;
     };
 
+/** The restore decision; the stripped content is built only when restore runs. */
+type RestoreDecision =
+  | Exclude<RestorePlan, { kind: 'strip-tyrian-block' }>
+  | { kind: 'strip-tyrian-block' };
+
+/**
+ * Classify one app root. A missing workbench file is a VS Code layout Island UI
+ * cannot inspect and throws; a product.json without a readable workbench
+ * checksum is classified unsupported, and a restore that must rewrite it fails.
+ */
+
 export async function inspectIslandRoot(
   appRoot: string,
   registration: ManagedRootRegistration
@@ -76,25 +79,36 @@ export async function inspectIslandRoot(
   const registered = registration.kind !== 'absent';
   const desiredCssFile = readDesiredCssFile(registration);
   const paths = buildIslandPatchPaths(appRoot);
-  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-  const backupHtml = await readTextFileIfExists(paths.backupHtmlPath);
-  const backupProductJson = await readTextFileIfExists(paths.backupProductJsonPath);
+  const currentHtml = await readLayoutFile(paths.workbenchHtmlPath);
+  const currentProductJson = await readLayoutFile(paths.productJsonPath);
+  const productLayout = readProductLayout(currentProductJson);
+  const productWorkbenchChecksum =
+    productLayout.kind === 'supported' ? productLayout.checksum : undefined;
+  const sidecars = new Map(
+    await Promise.all(
+      islandSidecarPaths(paths).map(
+        async (filePath) => [filePath, await readTextFileIfExists(filePath)] as const
+      )
+    )
+  );
+  const cssContent = sidecars.get(paths.islandCssPath);
+  const manifestContent = sidecars.get(paths.manifestPath);
+  const backupHtml = sidecars.get(paths.backupHtmlPath);
+  const backupProductJson = sidecars.get(paths.backupProductJsonPath);
   const blockState = readTyrianBlockState(currentHtml);
   const active = blockState !== 'absent';
-  const cssContent = await readTextFileIfExists(paths.islandCssPath);
   const cssExists = cssContent !== undefined;
-  const manifestContent = await readTextFileIfExists(paths.manifestPath);
   const manifest = parseManifest(manifestContent);
   const manifestExists = manifestContent !== undefined;
   const manifestShapeValid = manifestExists && manifest !== undefined;
   const backupHtmlExists = backupHtml !== undefined;
   const backupProductExists = backupProductJson !== undefined;
-  const hasTyrianSidecars = cssExists || manifestExists || backupHtmlExists || backupProductExists;
+  const hasTyrianSidecars = [...sidecars.values()].some((content) => content !== undefined);
   const desiredEnabled = registration.kind === 'valid' && registration.desiredCssFile !== null;
   const managed = desiredEnabled || hasTyrianSidecars;
   const issues: string[] = [];
-  const checksumMatches = doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml);
+  const workbenchChecksum = sha256Base64(currentHtml);
+  const checksumMatches = productWorkbenchChecksum === workbenchChecksum;
   const backupMismatch = backupHtmlExists !== backupProductExists;
   const backupPairInvalid =
     backupHtml !== undefined &&
@@ -133,7 +147,6 @@ export async function inspectIslandRoot(
     (manifest !== undefined &&
       desiredCssFile !== undefined &&
       manifest.desiredCssFile !== desiredCssFile);
-  const hasTyrianEvidence = active || hasTyrianSidecars;
 
   if (active) {
     issues.push('Tyrian workbench patch evidence is present.');
@@ -167,7 +180,9 @@ export async function inspectIslandRoot(
     issues.push('Tyrian manifest style does not match the desired-state record.');
   }
 
-  if (!checksumMatches) {
+  if (productLayout.kind === 'unsupported') {
+    issues.push(productLayout.reason);
+  } else if (!checksumMatches) {
     issues.push('product.json checksum does not match the current workbench HTML.');
   }
 
@@ -191,7 +206,9 @@ export async function inspectIslandRoot(
 
   let classification: IslandShellStatus['classification'] = 'clean';
 
-  if (brokenBackup) {
+  if (productLayout.kind === 'unsupported') {
+    classification = 'unsupported-layout';
+  } else if (brokenBackup) {
     classification = 'broken-backup';
   } else if (!checksumMatches) {
     classification = 'checksum-mismatch';
@@ -202,14 +219,16 @@ export async function inspectIslandRoot(
   }
 
   const verificationPassed = classification === 'clean' || classification === 'patched';
-  const workbenchChecksum = sha256Base64(currentHtml);
-  const productWorkbenchChecksum = tryReadWorkbenchChecksum(currentProductJson);
-  const restoreProof =
-    active && trustedBackup !== undefined
-      ? 'manifest-backup-pair'
-      : hasTyrianEvidence
-        ? 'strip-tyrian-block'
-        : 'none';
+  // Restore must not leave a Tyrian-evidenced root in checksum-mismatch state,
+  // even when a higher-priority classification reports broken sidecars.
+  const restore: RestoreDecision =
+    !active && !hasTyrianSidecars
+      ? { kind: 'noop' }
+      : active && trustedBackup !== undefined
+        ? { kind: 'restore-from-backup', ...trustedBackup }
+        : active || !checksumMatches
+          ? { kind: 'strip-tyrian-block' }
+          : { kind: 'remove-managed-state' };
   const receipt =
     manifest === undefined
       ? undefined
@@ -226,23 +245,17 @@ export async function inspectIslandRoot(
     paths,
     currentHtml,
     currentProductJson,
-    currentCss: cssContent,
-    currentManifest: manifestContent,
-    backupHtml,
-    backupProductJson,
-    hasTyrianSidecars,
-    trustedBackup,
-    checksumMatches,
+    sidecars,
+    restore,
     status: {
       appRoot,
       desiredCssFile,
       registrationState: registration.kind,
       active,
       managed,
-      registered,
       classification,
       verificationPassed,
-      restoreProof,
+      restorePlan: restore.kind,
       workbenchChecksum,
       productWorkbenchChecksum,
       receipt,
@@ -309,12 +322,6 @@ export async function buildIslandApplyPlan(options: {
     cssChecksum: sha256Base64(cssSource),
     patchedWorkbenchChecksum: sha256Base64(patchedHtml),
     patchedProductChecksum: sha256Base64(patchedProductJson),
-    ownedFiles: {
-      stylesheet: ISLAND_CSS_FILE_NAME,
-      manifest: ISLAND_MANIFEST_FILE_NAME,
-      workbenchBackup: BACKUP_HTML_FILE_NAME,
-      productBackup: BACKUP_PRODUCT_FILE_NAME,
-    },
   });
   const mutations: FileMutation[] = [
     { filePath: paths.backupHtmlPath, content: baseHtml, expectedContent: currentBackupHtml },
@@ -337,133 +344,44 @@ export async function buildIslandApplyPlan(options: {
     desiredCssFile,
     mutations,
     changed: mutations.some(({ content, expectedContent }) => content !== expectedContent),
-    verify: () => verifyAppliedShell(paths, options.appRoot, desiredCssFile),
+    verify: () =>
+      verifyIslandClassification(options.appRoot, { kind: 'valid', desiredCssFile }, 'patched'),
   };
 }
 
 export function buildRestorePlan(state: IslandRootState): RestorePlan {
-  const hasTyrianEvidence = state.status.active || state.hasTyrianSidecars;
-
-  if (!hasTyrianEvidence) {
-    return {
-      kind: 'noop',
-    };
-  }
-
-  if (state.status.active && state.trustedBackup !== undefined) {
-    return {
-      kind: 'restore-from-backup',
-      html: state.trustedBackup.html,
-      productJson: state.trustedBackup.productJson,
-    };
-  }
-
-  // Restore must not leave a Tyrian-evidenced root in checksum-mismatch state,
-  // even when a higher-priority status classification reports broken sidecars.
-  if (state.status.active || !state.checksumMatches) {
-    const html = stripTyrianBlock(state.currentHtml);
-
-    return {
-      kind: 'strip-tyrian-block',
-      html,
-      productJson: setWorkbenchChecksum(state.currentProductJson, html),
-    };
-  }
-
+  if (state.restore.kind !== 'strip-tyrian-block') return state.restore;
+  const html = stripTyrianBlock(state.currentHtml);
   return {
-    kind: 'remove-managed-state',
+    kind: 'strip-tyrian-block',
+    html,
+    productJson: setWorkbenchChecksum(state.currentProductJson, html),
   };
 }
 
-async function verifyAppliedShell(
-  paths: IslandPatchPaths,
+/** Verify a converged root with the classifier Doctor reports. */
+export async function verifyIslandClassification(
   appRoot: string,
-  desiredCssFile: string
+  registration: ManagedRootRegistration,
+  expected: 'patched' | 'clean'
 ): Promise<void> {
-  const [currentHtml, currentProductJson, cssContent, backupHtml, backupProductJson] =
-    await Promise.all(
-      [
-        paths.workbenchHtmlPath,
-        paths.productJsonPath,
-        paths.islandCssPath,
-        paths.backupHtmlPath,
-        paths.backupProductJsonPath,
-      ].map((filePath) => fs.readFile(filePath, 'utf8'))
-    );
-
-  if (readTyrianBlockState(currentHtml) !== 'valid') {
+  const { status } = await inspectIslandRoot(appRoot, registration);
+  if (status.classification !== expected) {
     throw new Error(
-      'Tyrian Night verification failed: workbench.html does not contain one valid Island UI block after apply.'
-    );
-  }
-
-  const manifest = parseManifest(await fs.readFile(paths.manifestPath, 'utf8'));
-
-  if (!manifest) {
-    throw new Error(
-      'Tyrian Night verification failed: island manifest is missing or invalid after apply.'
-    );
-  }
-
-  if (manifest.desiredCssFile !== desiredCssFile) {
-    throw new Error(
-      'Tyrian Night verification failed: manifest style does not match desired style.'
-    );
-  }
-
-  const manifestIssues = collectManifestRestoreProofIssues({
-    appRoot,
-    manifest,
-    currentHtml,
-    currentProductJson,
-    cssContent,
-    backupHtml,
-    backupProductJson,
-  });
-
-  if (manifestIssues.length > 0) {
-    throw new Error(`Tyrian Night verification failed: ${manifestIssues.join(' ')}`);
-  }
-
-  if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
-    throw new Error(
-      'Tyrian Night verification failed: product.json checksum does not match the patched workbench after apply.'
+      `Tyrian Night verification failed: expected a ${expected} installation, found ${status.classification}. ${status.issues.join(' ')}`
     );
   }
 }
 
-export async function verifyRestoredShell(paths: IslandPatchPaths): Promise<void> {
-  const currentHtml = await fs.readFile(paths.workbenchHtmlPath, 'utf8');
-  const currentProductJson = await fs.readFile(paths.productJsonPath, 'utf8');
-
-  if (readTyrianBlockState(currentHtml) !== 'absent') {
-    throw new Error(
-      'Tyrian Night verification failed: workbench.html still contains Island UI patch evidence after restore.'
+async function readLayoutFile(filePath: string): Promise<string> {
+  const content = await readTextFileIfExists(filePath);
+  if (content === undefined) {
+    throw new IslandShellFailure(
+      'unsupported',
+      `Unsupported VS Code layout. Missing '${filePath}'.`
     );
   }
-
-  await verifyManagedStateRemoved(paths);
-
-  if (!doesWorkbenchChecksumValueMatch(currentProductJson, currentHtml)) {
-    throw new Error(
-      'Tyrian Night verification failed: product.json checksum does not match the restored workbench after restore.'
-    );
-  }
-}
-
-export async function verifyManagedStateRemoved(paths: IslandPatchPaths): Promise<void> {
-  for (const filePath of [
-    paths.islandCssPath,
-    paths.manifestPath,
-    paths.backupHtmlPath,
-    paths.backupProductJsonPath,
-  ]) {
-    if ((await readTextFileIfExists(filePath)) !== undefined) {
-      throw new Error(
-        `Tyrian Night verification failed: '${path.basename(filePath)}' still exists after restore.`
-      );
-    }
-  }
+  return content;
 }
 
 function stripTyrianBlock(html: string): string {
@@ -528,7 +446,7 @@ function injectIslandStylesheet(html: string, cacheBuster: string): string {
 
   const islandBlock =
     `${TYRIAN_MARKER_START}\n` +
-    `\t\t<link rel="stylesheet" href="./tyrian-night.island.css?v=${cacheBuster}">\n` +
+    `\t\t<link rel="stylesheet" href="./${ISLAND_CSS_FILE_NAME}?v=${cacheBuster}">\n` +
     `\t\t${TYRIAN_MARKER_END}\n\t\t`;
 
   return html.replace(WORKBENCH_CSS_LINK, `${islandBlock}${WORKBENCH_CSS_LINK}`);
@@ -552,39 +470,46 @@ function doesWorkbenchChecksumValueMatch(
   }
 }
 
-function readWorkbenchChecksum(productJsonContent: string): string {
-  const parsed = parseProductJson(productJsonContent);
-  return parsed.checksums[WORKBENCH_CHECKSUM_KEY];
-}
-
-function tryReadWorkbenchChecksum(productJsonContent: string): string | undefined {
+function readProductLayout(
+  productJsonContent: string
+): { kind: 'supported'; checksum: string } | { kind: 'unsupported'; reason: string } {
   try {
-    return readWorkbenchChecksum(productJsonContent);
-  } catch {
-    return undefined;
+    return { kind: 'supported', checksum: readWorkbenchChecksum(productJsonContent) };
+  } catch (error) {
+    if (!(error instanceof IslandShellFailure)) throw error;
+    return { kind: 'unsupported', reason: error.message };
   }
 }
 
-function parseProductJson(productJsonContent: string): ProductJson & {
-  checksums: Record<string, string>;
-} {
-  const parsed = JSON.parse(productJsonContent) as ProductJson;
+function readWorkbenchChecksum(productJsonContent: string): string {
+  return parseProductJson(productJsonContent).checksums[WORKBENCH_CHECKSUM_KEY] as string;
+}
 
-  if (!parsed.checksums) {
+/** product.json must hold a string checksum for the workbench HTML. */
+function parseProductJson(productJsonContent: string): ProductJson {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(productJsonContent);
+  } catch {
+    throw new IslandShellFailure('unsupported', 'Unsupported product.json layout. Invalid JSON.');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new IslandShellFailure('unsupported', 'Unsupported product.json layout. Not an object.');
+  }
+  const { checksums } = parsed as { checksums?: unknown };
+  if (typeof checksums !== 'object' || checksums === null || Array.isArray(checksums)) {
     throw new IslandShellFailure(
       'unsupported',
       'Unsupported product.json layout. Missing checksums object.'
     );
   }
-
-  if (!(WORKBENCH_CHECKSUM_KEY in parsed.checksums)) {
+  if (typeof (checksums as Record<string, unknown>)[WORKBENCH_CHECKSUM_KEY] !== 'string') {
     throw new IslandShellFailure(
       'unsupported',
       `Unsupported product.json layout. Missing checksum key '${WORKBENCH_CHECKSUM_KEY}'.`
     );
   }
-
-  return parsed as ProductJson & { checksums: Record<string, string> };
+  return parsed as ProductJson;
 }
 
 function serializeManifest(manifest: IslandManifest): string {
@@ -605,15 +530,6 @@ function collectManifestRestoreProofIssues(options: {
 
   if (manifest.appRoot !== options.appRoot) {
     issues.push('Tyrian manifest app root does not match this VS Code installation.');
-  }
-
-  if (
-    manifest.ownedFiles.stylesheet !== ISLAND_CSS_FILE_NAME ||
-    manifest.ownedFiles.manifest !== ISLAND_MANIFEST_FILE_NAME ||
-    manifest.ownedFiles.workbenchBackup !== BACKUP_HTML_FILE_NAME ||
-    manifest.ownedFiles.productBackup !== BACKUP_PRODUCT_FILE_NAME
-  ) {
-    issues.push('Tyrian manifest owned files do not match the Island patch contract.');
   }
 
   if (manifest.patchedWorkbenchChecksum !== sha256Base64(options.currentHtml)) {
@@ -666,43 +582,25 @@ function parseManifest(content: string | undefined): IslandManifest | undefined 
  * any sidecar is removed, so the HTML never references a missing stylesheet.
  */
 export function buildRestoreMutations(state: IslandRootState, plan: RestorePlan): FileMutation[] {
-  const mutations: FileMutation[] = [
-    {
-      filePath: state.paths.islandCssPath,
-      content: undefined,
-      expectedContent: state.currentCss,
-    },
-    {
-      filePath: state.paths.manifestPath,
-      content: undefined,
-      expectedContent: state.currentManifest,
-    },
-    {
-      filePath: state.paths.backupHtmlPath,
-      content: undefined,
-      expectedContent: state.backupHtml,
-    },
-    {
-      filePath: state.paths.backupProductJsonPath,
-      content: undefined,
-      expectedContent: state.backupProductJson,
-    },
-  ];
-
-  if (plan.kind === 'restore-from-backup' || plan.kind === 'strip-tyrian-block') {
-    mutations.unshift(
-      {
-        filePath: state.paths.workbenchHtmlPath,
-        content: plan.html,
-        expectedContent: state.currentHtml,
-      },
-      {
-        filePath: state.paths.productJsonPath,
-        content: plan.productJson,
-        expectedContent: state.currentProductJson,
-      }
-    );
+  const sidecarRemovals = [...state.sidecars].map(([filePath, expectedContent]) => ({
+    filePath,
+    content: undefined,
+    expectedContent,
+  }));
+  if (plan.kind !== 'restore-from-backup' && plan.kind !== 'strip-tyrian-block') {
+    return sidecarRemovals;
   }
-
-  return mutations;
+  return [
+    {
+      filePath: state.paths.workbenchHtmlPath,
+      content: plan.html,
+      expectedContent: state.currentHtml,
+    },
+    {
+      filePath: state.paths.productJsonPath,
+      content: plan.productJson,
+      expectedContent: state.currentProductJson,
+    },
+    ...sidecarRemovals,
+  ];
 }

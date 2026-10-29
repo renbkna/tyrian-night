@@ -13,27 +13,29 @@ import {
   mergeIslandMutationFacts,
   readIslandMutationFacts,
 } from './islandMutationFacts.js';
-import { buildIslandPatchPaths } from './islandPatchContract.js';
+import { buildIslandPatchPaths, islandSidecarPaths } from './islandPatchContract.js';
 import {
   buildIslandApplyPlan,
   buildRestoreMutations,
   buildRestorePlan,
   inspectIslandRoot,
-  verifyManagedStateRemoved,
-  verifyRestoredShell,
+  verifyIslandClassification,
 } from './islandPatchPlan.js';
 import { readIslandPlatformSupport } from './islandPlatform.js';
 import {
+  type IslandAccessRequirement,
   type ManagedRootRegistration,
+  isAppRootMissing,
   islandRegistryAccessRequirements,
-  listIslandShellRoots,
+  listIslandDoctorRoots,
+  listIslandRestoreRoots,
   publishManagedRootRecord,
   readDesiredCssFile,
   readManagedAppRootRegistration,
 } from './islandRegistry.js';
 import {
+  corruptDesiredStateFailure,
   describeIslandShellFailure,
-  isFileNotFoundError,
   isPermissionError,
   type IslandShellApplyReadiness,
   type IslandShellCleanupSummary,
@@ -69,10 +71,6 @@ export async function applyIslandShell(options: ApplyOptions): Promise<IslandShe
 
   return withTransitionStatus(canonicalOptions, async () => {
     await removeStaleTemporaryFilesOf(appRoot);
-    const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
-    if (registration.kind === 'corrupt') {
-      throw new IslandShellFailure('corrupt', registration.reason);
-    }
     const plan = await buildIslandApplyPlan(canonicalOptions);
     const recordChanged = await publishManagedRootRecord(
       appRoot,
@@ -120,6 +118,16 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
 
   try {
     status = await readIslandShellStatus(options);
+    if (status.classification === 'unsupported-layout') {
+      return { kind: 'unsupported', appRoot, status, writeAccess, reason: status.issues.join(' ') };
+    }
+    if (status.classification === 'missing') {
+      return { kind: 'blocked', appRoot, status, writeAccess, reason: status.issues.join(' ') };
+    }
+    if (status.registrationState === 'corrupt') {
+      const { message } = corruptDesiredStateFailure();
+      return { kind: 'blocked', appRoot, status, writeAccess, reason: message };
+    }
     writeAccess = await readIslandShellWriteAccess(options);
     const plan = await buildIslandApplyPlan(options);
     const changed =
@@ -179,12 +187,7 @@ export async function readIslandShellWriteAccess(options: {
 }): Promise<IslandShellWriteAccess> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const paths = buildIslandPatchPaths(appRoot);
-  const requirements: Array<{
-    path: string;
-    existingMode: number;
-    missingParentMode?: number;
-    optional?: boolean;
-  }> = [
+  const requirements: IslandAccessRequirement[] = [
     {
       path: paths.workbenchDirPath,
       existingMode: fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK,
@@ -207,18 +210,12 @@ export async function readIslandShellWriteAccess(options: {
       ? [{ path: options.cssSourcePath, existingMode: fsConstants.R_OK }]
       : []),
     ...islandRegistryAccessRequirements(appRoot, options),
-    ...[
-      paths.islandCssPath,
-      paths.manifestPath,
-      paths.backupHtmlPath,
-      paths.backupProductJsonPath,
-    ].map((filePath) => ({
+    ...islandSidecarPaths(paths).map((filePath) => ({
       path: filePath,
       existingMode: fsConstants.R_OK,
       optional: true,
     })),
   ];
-  const checkedPaths = requirements.map(({ path: checkedPath }) => checkedPath);
   const blockedPaths: IslandShellWriteAccess['blockedPaths'] = [];
 
   for (const requirement of requirements) {
@@ -239,7 +236,6 @@ export async function readIslandShellWriteAccess(options: {
 
   return {
     writable: blockedPaths.length === 0,
-    checkedPaths,
     blockedPaths,
     issues: blockedPaths.map(({ path: filePath }) => `Tyrian cannot write '${filePath}'.`),
   };
@@ -265,8 +261,6 @@ export async function restoreIslandShell(options: {
   assertIslandPlatformSupported();
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
-  const paths = buildIslandPatchPaths(appRoot);
-  await fs.access(paths.workbenchDirPath);
 
   return withTransitionStatus(canonicalOptions, async () => {
     await removeStaleTemporaryFilesOf(appRoot);
@@ -285,10 +279,9 @@ export async function restoreIslandShell(options: {
     const recordChanged = await publishManagedRootRecord(appRoot, null, canonicalOptions);
     const physicalChanged = await convergeAfterDesiredState(recordChanged, async () => {
       if (plan.kind === 'noop') return false;
-      return applyFileMutations(buildRestoreMutations(state, plan), async () => {
-        if (plan.kind === 'remove-managed-state') await verifyManagedStateRemoved(paths);
-        else await verifyRestoredShell(paths);
-      });
+      return applyFileMutations(buildRestoreMutations(state, plan), () =>
+        verifyIslandClassification(appRoot, { kind: 'valid', desiredCssFile: null }, 'clean')
+      );
     });
 
     return {
@@ -326,7 +319,7 @@ async function convergeAfterDesiredState(
   } catch (error) {
     if (!recordChanged) throw error;
     throw new IslandPartialMutationError(
-      `Tyrian desired state was published, but the app files did not converge: ${error instanceof Error ? error.message : String(error)}`,
+      'Tyrian desired state was published, but the app files did not converge.',
       { desiredStateChanged: true, registryChanged: true },
       { cause: error }
     );
@@ -355,7 +348,8 @@ export async function restoreAllIslandShells(options?: {
   preferredAppRoots?: string[];
   registryHome?: string;
 }): Promise<IslandShellCleanupSummary> {
-  const listing = await listIslandShellRoots(options, 'restore');
+  assertIslandPlatformSupported();
+  const listing = await listIslandRestoreRoots(options);
   let mutation = mergeIslandMutationFacts(
     { registryChanged: listing.registryChanged },
     listing.enumerationFailure
@@ -370,6 +364,14 @@ export async function restoreAllIslandShells(options?: {
 
   for (const root of listing.roots) {
     try {
+      const prune = await root.pruneIfMissing();
+      if (prune.pruned) {
+        mutation = mergeIslandMutationFacts(mutation, { registryChanged: prune.changed });
+        if (prune.quarantinePath !== undefined) {
+          listing.quarantinedRecords.push(prune.quarantinePath);
+        }
+        continue;
+      }
       const result = await restoreIslandShell({
         appRoot: root.appRoot,
         registryHome: options?.registryHome,
@@ -377,19 +379,7 @@ export async function restoreAllIslandShells(options?: {
       mutation = mergeIslandMutationFacts(mutation, result);
       restoredAppRoots.push(root.appRoot);
     } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        recordFailure(root.appRoot, error);
-        continue;
-      }
-      try {
-        const cleanup = await root.removeMissing();
-        mutation = mergeIslandMutationFacts(mutation, { registryChanged: cleanup.changed });
-        if (cleanup.quarantinePath !== undefined) {
-          listing.quarantinedRecords.push(cleanup.quarantinePath);
-        }
-      } catch (cleanupError) {
-        recordFailure(root.appRoot, cleanupError);
-      }
+      recordFailure(root.appRoot, error);
     }
   }
 
@@ -409,42 +399,58 @@ export async function readIslandShellStatus(options: {
   registryHome?: string;
 }): Promise<IslandShellStatus> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
-  let registration: ManagedRootRegistration = { kind: 'absent' };
+  let registration: ManagedRootRegistration;
 
   try {
     registration = await readManagedAppRootRegistration(appRoot, options);
+  } catch (error) {
+    if (!isPermissionError(error)) throw error;
+    return uninspectedStatus(appRoot, 'unreadable', 'permission-denied', [
+      'Tyrian could not read its desired-state record for this VS Code installation due to permissions.',
+    ]);
+  }
+
+  try {
+    if (await isAppRootMissing(appRoot)) {
+      return uninspectedStatus(appRoot, registration, 'missing', [
+        'Tyrian could not find this VS Code installation.',
+      ]);
+    }
     return (await inspectIslandRoot(appRoot, registration)).status;
   } catch (error) {
-    const unreadable = {
-      appRoot,
-      desiredCssFile: readDesiredCssFile(registration),
-      registrationState: registration.kind,
-      active: false,
-      managed: false,
-      registered: registration.kind !== 'absent',
-      verificationPassed: false,
-      restoreProof: 'none',
-      workbenchChecksum: undefined,
-      productWorkbenchChecksum: undefined,
-      receipt: undefined,
-    } satisfies Omit<IslandShellStatus, 'classification' | 'issues'>;
-
     if (isPermissionError(error)) {
-      return {
-        ...unreadable,
-        classification: 'permission-denied',
-        issues: ['Tyrian could not read the VS Code installation files due to permissions.'],
-      };
+      return uninspectedStatus(appRoot, registration, 'permission-denied', [
+        'Tyrian could not read the VS Code installation files due to permissions.',
+      ]);
     }
-    if (isFileNotFoundError(error)) {
-      return {
-        ...unreadable,
-        classification: 'missing',
-        issues: ['Tyrian could not find the registered VS Code installation files.'],
-      };
+    if (error instanceof IslandShellFailure && error.code === 'unsupported') {
+      return uninspectedStatus(appRoot, registration, 'unsupported-layout', [error.message]);
     }
     throw error;
   }
+}
+
+/** A root whose app files could not be inspected. */
+function uninspectedStatus(
+  appRoot: string,
+  registration: ManagedRootRegistration | 'unreadable',
+  classification: 'missing' | 'permission-denied' | 'unsupported-layout',
+  issues: string[]
+): IslandShellStatus {
+  return {
+    appRoot,
+    desiredCssFile: registration === 'unreadable' ? undefined : readDesiredCssFile(registration),
+    registrationState: registration === 'unreadable' ? 'unreadable' : registration.kind,
+    active: false,
+    managed: false,
+    classification,
+    verificationPassed: false,
+    restorePlan: 'unknown',
+    workbenchChecksum: undefined,
+    productWorkbenchChecksum: undefined,
+    receipt: undefined,
+    issues,
+  };
 }
 
 /** Doctor inventory: preferred and registered roots, with unreadable registry data as diagnostics. */
@@ -452,9 +458,9 @@ export async function readIslandShellInventory(options?: {
   preferredAppRoots?: string[];
   registryHome?: string;
 }): Promise<IslandShellInventory> {
-  const listing = await listIslandShellRoots(options, 'diagnostic-read');
+  const listing = await listIslandDoctorRoots(options);
   const statuses: IslandShellStatus[] = [];
-  for (const { appRoot } of listing.roots) {
+  for (const appRoot of listing.appRoots) {
     statuses.push(await readIslandShellStatus({ appRoot, registryHome: options?.registryHome }));
   }
   return { statuses, registryDiagnostics: listing.registryDiagnostics };

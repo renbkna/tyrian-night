@@ -50,12 +50,6 @@ export type IslandManifest = {
   cssChecksum: string;
   patchedWorkbenchChecksum: string;
   patchedProductChecksum: string;
-  ownedFiles: {
-    stylesheet: string;
-    manifest: string;
-    workbenchBackup: string;
-    productBackup: string;
-  };
 };
 
 export function buildIslandPatchPaths(appRoot: string): IslandPatchPaths {
@@ -70,6 +64,16 @@ export function buildIslandPatchPaths(appRoot: string): IslandPatchPaths {
     backupHtmlPath: path.join(workbenchDirPath, BACKUP_HTML_FILE_NAME),
     backupProductJsonPath: path.join(workbenchDirPath, BACKUP_PRODUCT_FILE_NAME),
   };
+}
+
+/** Every file Tyrian adds beside the workbench; Restore removes exactly these. */
+export function islandSidecarPaths(paths: IslandPatchPaths): string[] {
+  return [
+    paths.islandCssPath,
+    paths.manifestPath,
+    paths.backupHtmlPath,
+    paths.backupProductJsonPath,
+  ];
 }
 
 export function buildManagedRootsDirectoryPath(registryHome = os.homedir()): string {
@@ -101,7 +105,6 @@ const ISLAND_MANIFEST_FIELDS = [
   'cssChecksum',
   'desiredCssFile',
   'installedAt',
-  'ownedFiles',
   'patchedProductChecksum',
   'patchedWorkbenchChecksum',
   'themeVersion',
@@ -117,7 +120,7 @@ export function isIslandManifestShape(
     manifest !== null &&
     Object.keys(manifest).toSorted().join(',') === ISLAND_MANIFEST_FIELDS &&
     typeof manifest.desiredCssFile === 'string' &&
-    manifest.desiredCssFile.length > 0 &&
+    isIslandCssAssetName(manifest.desiredCssFile) &&
     typeof manifest.themeVersion === 'string' &&
     typeof manifest.installedAt === 'string' &&
     typeof manifest.appRoot === 'string' &&
@@ -125,12 +128,6 @@ export function isIslandManifestShape(
     typeof manifest.upstreamProductChecksum === 'string' &&
     typeof manifest.cssChecksum === 'string' &&
     typeof manifest.patchedWorkbenchChecksum === 'string' &&
-    typeof manifest.patchedProductChecksum === 'string' &&
-    typeof manifest.ownedFiles === 'object' &&
-    manifest.ownedFiles !== null &&
-    typeof manifest.ownedFiles.stylesheet === 'string' &&
-    typeof manifest.ownedFiles.manifest === 'string' &&
-    typeof manifest.ownedFiles.workbenchBackup === 'string' &&
-    typeof manifest.ownedFiles.productBackup === 'string'
+    typeof manifest.patchedProductChecksum === 'string'
   );
 }
