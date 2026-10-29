@@ -37,7 +37,7 @@ const STARSHIP_LANGUAGE_SYMBOLS = Object.freeze({
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
  * @typedef {import('./themeSources.mjs').ThemeSource} ThemeSource
- * @typedef {{ path: string; content: string }} GeneratedAsset
+ * @typedef {import('./generatedAssets.mjs').GeneratedTextAsset} GeneratedAsset
  */
 
 // Directories without a match (the theme directories and foot's csd/) are fully generated.
@@ -62,7 +62,7 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
   const repository = loadThemeRepository(repoRoot);
   const sourceThemes = repository.sources.map((source) => ({
     source,
-    theme: /** @type {ThemeDefinition} */ (readSourceTheme(source, repository)),
+    theme: readSourceTheme(source, repository),
   }));
 
   return [
@@ -104,11 +104,11 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
 }
 
 /**
- * @param {string} [repoRoot]
+ * @param {string} repoRoot
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncTerminalThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+export function syncTerminalThemeAssets(repoRoot, options = {}) {
   return syncGeneratedAssets(buildTerminalThemeAssets(repoRoot), repoRoot, {
     check: options.check,
     ownership: TERMINAL_GENERATED_OWNERSHIP,

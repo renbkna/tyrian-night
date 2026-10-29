@@ -18,22 +18,17 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
  * The generator registry. `tracked` outputs are committed because consumers
  * read them from the repository; the rest are build products.
  *
- * @type {ReadonlyArray<{ name: string; product: 'vscode' | 'zed' | 'desktop'; tracked: boolean; sync: (root: string, options: { check: boolean }) => string[] }>}
+ * @type {ReadonlyArray<{ product: 'vscode' | 'zed' | 'desktop'; tracked: boolean; sync: (root: string, options: { check: boolean }) => string[] }>}
  */
 const GENERATORS = [
-  { name: 'contracts', product: 'vscode', tracked: true, sync: syncGeneratedContracts },
-  { name: 'vscode-themes', product: 'vscode', tracked: true, sync: syncVscodeThemes },
-  { name: 'island-css', product: 'vscode', tracked: false, sync: syncIslandCss },
-  {
-    name: 'vscode-package-assets',
-    product: 'vscode',
-    tracked: false,
-    sync: syncVscodePackageAssets,
-  },
-  { name: 'theme-preview', product: 'vscode', tracked: true, sync: syncProductionFamilyPreview },
-  { name: 'zed-theme', product: 'zed', tracked: true, sync: syncZedThemeFamily },
-  { name: 'terminal-themes', product: 'desktop', tracked: true, sync: syncTerminalThemeAssets },
-  { name: 'desktop-themes', product: 'desktop', tracked: true, sync: syncDesktopThemeAssets },
+  { product: 'vscode', tracked: true, sync: syncGeneratedContracts },
+  { product: 'vscode', tracked: true, sync: syncVscodeThemes },
+  { product: 'vscode', tracked: false, sync: syncIslandCss },
+  { product: 'vscode', tracked: false, sync: syncVscodePackageAssets },
+  { product: 'vscode', tracked: true, sync: syncProductionFamilyPreview },
+  { product: 'zed', tracked: true, sync: syncZedThemeFamily },
+  { product: 'desktop', tracked: true, sync: syncTerminalThemeAssets },
+  { product: 'desktop', tracked: true, sync: syncDesktopThemeAssets },
 ];
 
 const { values } = parseArgs({
@@ -45,8 +40,9 @@ const { values } = parseArgs({
   },
   strict: true,
 });
+/** @type {Set<string>} */
 const productNames = new Set(GENERATORS.map(({ product }) => product));
-if (values.product !== undefined && !productNames.has(/** @type {any} */ (values.product))) {
+if (values.product !== undefined && !productNames.has(values.product)) {
   throw new Error(`Unknown product '${values.product}'. Use ${[...productNames].join(', ')}.`);
 }
 if (values.tracked && values.untracked) {

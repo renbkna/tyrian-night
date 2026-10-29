@@ -94,10 +94,7 @@ function formatThemeEntry(theme) {
     label: ${formatTsString(theme.label)},
     slug: ${formatTsString(theme.slug)},
     isDefault: ${theme.isDefault},
-    vscodeUiTheme: ${formatTsString(theme.vscodeUiTheme)},
     islandCssFile: ${formatTsString(theme.islandCssFile)},
-    paletteName: ${formatTsString(theme.paletteName)},
-    appearance: ${formatTsString(theme.appearance)},
   }`;
 }
 

@@ -15,13 +15,15 @@ import { readLintedUnionSourceCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
+/** The scheme family name Caelestia registers Tyrian under. */
+const CAELESTIA_SCHEME_NAME = 'tyrian';
 const UNION_SCHEME_NAME_PLACEHOLDER = '{{schemeName}}';
 // The source keeps the marker indented inside :root; the tokens replace the whole line.
 const UNION_TOKENS_PLACEHOLDER = '  /* TYRIAN_GENERATED_TOKENS */';
 
 /**
  * @typedef {import('./themeDefinition.mjs').ThemeDefinition} ThemeDefinition
- * @typedef {{ path: string; content: string }} GeneratedAsset
+ * @typedef {import('./generatedAssets.mjs').GeneratedTextAsset} GeneratedAsset
  * @typedef {{
  *   background: string;
  *   foreground: string;
@@ -61,7 +63,7 @@ const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/kde/color-schemes' },
   { directory: 'desktop/kde/plasma/desktoptheme' },
   { directory: 'desktop/kde/union/css/styles' },
-  { directory: 'desktop/caelestia/schemes/tyrian' },
+  { directory: `desktop/caelestia/schemes/${CAELESTIA_SCHEME_NAME}` },
   { directory: 'desktop/caelestia/hypr' },
   { directory: 'desktop/caelestia/state' },
   { directory: 'desktop/dms/themes' },
@@ -100,12 +102,12 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const unionCssTemplate = readLintedUnionSourceCss(repoRoot);
 
   return repository.sources.flatMap((source) => {
-    const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repository));
+    const theme = readSourceTheme(source, repository);
     const palette = buildDesktopPalette(theme);
     const kdeFileName = kdeThemeId(source.slug);
     const plasmaDesktopTheme = `desktop/kde/plasma/desktoptheme/${kdeFileName}`;
     const flavour = caelestiaFlavour(source.slug);
-    const mode = source.appearance === 'light' ? 'light' : 'dark';
+    const mode = source.appearance;
     const caelestiaColours = buildCaelestiaColours(theme, palette);
 
     return [
@@ -124,7 +126,7 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildUnionCssStyle(unionCssTemplate, theme.name, palette),
       },
       {
-        path: `desktop/caelestia/schemes/tyrian/${flavour}/${mode}.txt`,
+        path: `desktop/caelestia/schemes/${CAELESTIA_SCHEME_NAME}/${flavour}/${mode}.txt`,
         content: buildCaelestiaSchemeText(caelestiaColours),
       },
       {
@@ -143,7 +145,7 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
         path: `desktop/caelestia/state/${source.slug}.scheme.json`,
         content: `${JSON.stringify(
           {
-            name: 'tyrian',
+            name: CAELESTIA_SCHEME_NAME,
             flavour,
             mode,
             variant: 'fidelity',
@@ -162,11 +164,11 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
 }
 
 /**
- * @param {string} [repoRoot]
+ * @param {string} repoRoot
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncDesktopThemeAssets(repoRoot = defaultRepoRoot, options = {}) {
+export function syncDesktopThemeAssets(repoRoot, options = {}) {
   return syncGeneratedAssets(buildDesktopThemeAssets(repoRoot), repoRoot, {
     check: options.check,
     ownership: DESKTOP_GENERATED_OWNERSHIP,
@@ -212,7 +214,7 @@ function buildDesktopPalette(theme) {
     brightYellow: desktopColor(theme, 'terminal:ansi.brightYellow'),
     brightRed: desktopColor(theme, 'terminal:ansi.brightRed'),
     brightWhite: desktopColor(theme, 'terminal:ansi.brightWhite'),
-    ansi: TERMINAL_ANSI_ROLES.map((role) => desktopColor(theme, role, background)),
+    ansi: TERMINAL_ANSI_ROLES.map((role) => desktopColor(theme, role)),
   };
 }
 
@@ -1178,14 +1180,11 @@ function contrastText(color) {
 }
 
 /**
+ * A role's color as rendered over the canvas.
  * @param {ThemeDefinition} theme
  * @param {string} qualifiedRole
- * @param {string} [background]
  * @returns {string}
  */
-function desktopColor(theme, qualifiedRole, background) {
-  return opaqueHex(
-    readThemeColor(theme, qualifiedRole),
-    background ?? readThemeColor(theme, CANVAS_ROLE)
-  );
+function desktopColor(theme, qualifiedRole) {
+  return opaqueHex(readThemeColor(theme, qualifiedRole), readThemeColor(theme, CANVAS_ROLE));
 }

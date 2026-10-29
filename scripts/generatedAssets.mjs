@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** @typedef {{ path: string; content: string | Uint8Array }} GeneratedAsset */
+/** @typedef {GeneratedAsset & { content: string }} GeneratedTextAsset */
 
 /**
  * A generator owns whole files, or the files of a directory that `match` accepts
@@ -221,7 +222,8 @@ function walkOwnedDirectory(absoluteDirectory, relativeDirectory, match, visit) 
   for (const entry of entries) {
     const relativePath = path.posix.join(relativeDirectory.replaceAll('\\', '/'), entry.name);
 
-    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+    // A Dirent describes the link itself, so a symlinked directory is not walked.
+    if (entry.isDirectory()) {
       walkOwnedDirectory(absoluteDirectory, relativePath, match, visit);
       continue;
     }
@@ -244,7 +246,7 @@ function removeEmptyDirectories(directory) {
   }
 
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+    if (entry.isDirectory()) {
       removeEmptyDirectories(path.join(directory, entry.name));
     }
   }
@@ -294,7 +296,7 @@ function requireRelativePath(filePath) {
     throw new Error(`Generated path must stay inside the repository: '${filePath}'`);
   }
 
-  return normalized.replaceAll('\\', '/');
+  return normalized.replaceAll('\\', '/').replace(/\/+$/u, '');
 }
 
 /**

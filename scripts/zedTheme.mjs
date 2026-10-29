@@ -20,7 +20,6 @@ const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
 /**
  * @param {string} [repoRoot]
- * @returns {{ $schema: string; name: string; author: string; themes: unknown[] }}
  */
 export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
   const repository = loadThemeRepository(repoRoot);
@@ -31,7 +30,7 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
     author: 'renbkna',
     themes: repository.sources.map((source) =>
       buildZedTheme(
-        /** @type {ThemeDefinition} */ (readSourceTheme(source, repository)),
+        readSourceTheme(source, repository),
         repository.definition.requiredThemeRoles.brackets
       )
     ),
@@ -39,11 +38,11 @@ export function buildZedThemeFamily(repoRoot = defaultRepoRoot) {
 }
 
 /**
- * @param {string} [repoRoot]
+ * @param {string} repoRoot
  * @param {{ check?: boolean }} [options]
  * @returns {string[]}
  */
-export function syncZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
+export function syncZedThemeFamily(repoRoot, options = {}) {
   return syncGeneratedAssets(
     [
       {
@@ -63,9 +62,8 @@ export function syncZedThemeFamily(repoRoot = defaultRepoRoot, options = {}) {
 /**
  * @param {ThemeDefinition} theme
  * @param {readonly string[]} bracketRoles
- * @returns {unknown}
  */
-export function buildZedTheme(theme, bracketRoles) {
+function buildZedTheme(theme, bracketRoles) {
   /** @param {string} role */
   const ui = (role) => themeColor(theme, `ui:${role}`);
   /** @param {string} role */

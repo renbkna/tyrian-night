@@ -28,7 +28,10 @@ import {
   errorMessage,
 } from './islandShellContract.js';
 
-type ManagedRootRecord = {
+/** The record's keys, sorted. */
+const MANAGED_ROOT_RECORD_FIELDS = ['appRoot', 'desiredCssFile'] as const;
+
+type ManagedRootRecord = Record<(typeof MANAGED_ROOT_RECORD_FIELDS)[number], unknown> & {
   appRoot: string;
   desiredCssFile: string | null;
 };
@@ -380,7 +383,7 @@ function parseManagedRootRecord(content: string, recordPath: string): ManagedRoo
   if (
     typeof parsed !== 'object' ||
     parsed === null ||
-    Object.keys(parsed).toSorted().join(',') !== 'appRoot,desiredCssFile' ||
+    Object.keys(parsed).toSorted().join(',') !== MANAGED_ROOT_RECORD_FIELDS.join(',') ||
     typeof parsed.appRoot !== 'string' ||
     !path.isAbsolute(parsed.appRoot)
   ) {
