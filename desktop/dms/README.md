@@ -1,5 +1,6 @@
-# DankMaterialShell
+# Tyrian Night for DankMaterialShell
 
-Generated custom themes for [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) in `themes/`, one file per Tyrian variant. They carry the same Material roles as the Caelestia schemes.
-
-Select one in DMS under **Settings → Theme & Colors → Custom** and choose the `.json` file. DMS colors its shell from these roles directly and derives app themes (GTK, Qt, terminals) from `primary` with matugen (`scheme-fidelity`), so app themes approximate rather than copy the Tyrian palettes.
+`themes/` holds one [DMS](https://github.com/AvengeMedia/DankMaterialShell) custom theme per
+variant, with the same Material roles as the Caelestia schemes. Pick one under
+**Settings → Theme & Colors → Custom**. DMS derives app themes from `primary` through matugen, so
+those approximate the Tyrian palettes.

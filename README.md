@@ -17,7 +17,7 @@ The root `package.json` owns the workspace's Bun version (`packageManager`) and 
 
 - Installing or selecting the VS Code and Zed color themes uses the editors' normal extension mechanisms. It does not patch application or desktop files.
 - Island UI is a separate, opt-in feature that modifies VS Code application files on Linux, macOS, and Windows. Doctor and the restore-before-uninstall warning are part of its product contract.
-- Nothing in the repository writes terminal or desktop configuration. Those files are committed so they can be used from the checkout, and their READMEs give the link or copy steps.
+- Nothing here writes terminal or desktop configuration; you link or copy those files yourself.
 
 ## Family
 
@@ -61,15 +61,13 @@ The VS Code projection maps these states explicitly for toolbar actions, checkbo
 
 ## Editor Installation
 
-Install **Tyrian Night** from the VS Code Extensions panel, then select a variant with **Preferences: Color Theme**. Tyrian Abyss is the repository and companion-settings default; VS Code still requires the user to select a theme. Island UI is a separate opt-in feature; installing a color theme does not patch VS Code.
-
-There is one VS Code extension download. It contains the color themes and the optional Island UI feature; Island is not a second extension.
+Install **Tyrian Night** from the VS Code Extensions panel and pick a variant with **Preferences: Color Theme** (Tyrian Abyss is the default). The one extension also carries the opt-in Island UI.
 
 For Zed, install the extension from `apps/zed/` or follow its product README.
 
 ## Terminal and Desktop Files
 
-Each target has its own README: [Ghostty](terminal/ghostty/README.md), [foot](terminal/foot/README.md), [fish](terminal/fish/README.md), [Starship](terminal/starship/README.md), [KDE Plasma](desktop/kde/README.md), [Caelestia](desktop/caelestia/README.md), and [DMS](desktop/dms/README.md). Symlinked files follow the checkout, so `git pull` updates them.
+See [Ghostty](terminal/ghostty/README.md), [foot](terminal/foot/README.md), [fish](terminal/fish/README.md), [Starship](terminal/starship/README.md), [KDE Plasma](desktop/kde/README.md), [Caelestia](desktop/caelestia/README.md) and [DMS](desktop/dms/README.md). Linked files follow the checkout, so `git pull` updates them.
 
 ## Authority and Repository Layout
 
@@ -108,7 +106,7 @@ bun run package:vscode
 
 `color:audit` reports accessibility and brand-policy failures separately. The opt-in diagnostics expose contrast, OKLCH, richness, and normal/simulated state distances without assigning them a quality score. Use the real-editor preview scenes for atmosphere, hierarchy, glare, and comfort; those judgments cannot be reduced to a repository score.
 
-CI packages the VS Code product on Linux, macOS, and Windows, and runs the shipped Island CLI bundle end to end on each. Linux additionally runs the full repository gate, including the Island mutation proofs. The fish startup test needs `fish` on `PATH`.
+CI packages the VS Code product and runs the shipped Island CLI on Linux, macOS and Windows; Linux also runs the full gate. The fish tests need `fish` on `PATH`.
 
 ## Contributing
 
