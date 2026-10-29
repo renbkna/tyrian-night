@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 
-import { extractCssRules, selectorElementNames } from './extractSelectors.mjs';
+import { blankCssComments, extractCssRules, selectorElementNames } from './extractSelectors.mjs';
 import { flattenCssFile } from './flattenCss.mjs';
 import { isDirectRun } from '../cli.mjs';
 
@@ -31,7 +31,7 @@ const REQUIRED_CHECKED_TARGETS = [
 ];
 
 /**
- * @typedef {{ severity: 'error' | 'warning'; message: string; line?: number }} UnionCssIssue
+ * @typedef {{ message: string; line?: number }} UnionCssIssue
  */
 
 /**
@@ -43,6 +43,27 @@ export function readUnionSourceCss(repoRoot = process.cwd()) {
 }
 
 /**
+ * The Union source, flattened; throws when it fails the generation lint.
+ * @param {string} repoRoot
+ * @returns {string}
+ */
+export function readLintedUnionSourceCss(repoRoot) {
+  const css = readUnionSourceCss(repoRoot);
+  const issues = lintUnionCss(css, { generated: true });
+  if (issues.length > 0) {
+    throw new Error(
+      [
+        'Union CSS source failed generation lint:',
+        ...issues.map(
+          ({ message, line }) => `- ${line === undefined ? '' : `line ${line}: `}${message}`
+        ),
+      ].join('\n')
+    );
+  }
+  return css;
+}
+
+/**
  * @param {string} css
  * @param {{ generated?: boolean }} [options]
  * @returns {UnionCssIssue[]}
@@ -50,6 +71,7 @@ export function readUnionSourceCss(repoRoot = process.cwd()) {
 export function lintUnionCss(css, options = {}) {
   const issues = /** @type {UnionCssIssue[]} */ ([]);
   const rules = extractCssRules(css);
+  const code = blankCssComments(css);
   const selectors = new Set(
     rules.flatMap((rule) => rule.selectors.map((selector) => normalizeSelector(selector)))
   );
@@ -57,24 +79,24 @@ export function lintUnionCss(css, options = {}) {
   if (options.generated) {
     for (const forbidden of GENERATED_FORBIDDEN_TEXT) {
       if (css.includes(forbidden)) {
-        issues.push({ severity: 'error', message: `Generated Union CSS contains '${forbidden}'` });
+        issues.push({ message: `Generated Union CSS contains '${forbidden}'` });
       }
     }
   }
 
   for (const { pattern, label } of UNSUPPORTED_TEXT) {
-    if (pattern.test(css)) {
-      issues.push({ severity: 'error', message: `Union CSS uses unsupported construct ${label}` });
+    if (pattern.test(code)) {
+      issues.push({ message: `Union CSS uses unsupported construct ${label}` });
     }
   }
 
-  if (/progressbar\s*>\s*fill/u.test(css)) {
-    issues.push({ severity: 'error', message: 'ProgressBar fill must target progressbar > track' });
+  if (/progressbar\s*>\s*fill/u.test(code)) {
+    issues.push({ message: 'ProgressBar fill must target progressbar > track' });
   }
 
   for (const target of REQUIRED_CHECKED_TARGETS) {
     if (!selectors.has(normalizeSelector(target))) {
-      issues.push({ severity: 'error', message: `Missing checked-state target '${target}'` });
+      issues.push({ message: `Missing checked-state target '${target}'` });
     }
   }
 
@@ -99,7 +121,6 @@ function lintRule(rule, issues) {
 
     if (combinatorCount > 3) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Selector exceeds specificity budget: '${selector}'`,
       });
@@ -107,7 +128,6 @@ function lintRule(rule, issues) {
 
     if (selector.includes('#')) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Union source CSS must not use ID selectors: '${selector}'`,
       });
@@ -115,7 +135,6 @@ function lintRule(rule, issues) {
 
     if (selector.includes('*') && selector !== '*') {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Universal selectors are only allowed as the base reset: '${selector}'`,
       });
@@ -134,7 +153,6 @@ function lintRule(rule, issues) {
       checkedRowBody
     ) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Checked ${checkedRowElement} row styling must target indicator or handle`,
       });
@@ -152,7 +170,6 @@ function lintRule(rule, issues) {
 
     if (UNSUPPORTED_PROPERTIES.has(name)) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Union CSS property '${name}' is unsupported`,
       });
@@ -160,15 +177,13 @@ function lintRule(rule, issues) {
 
     if (/^(?:flex|grid)$/u.test(value)) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Union CSS declaration uses unsupported layout value '${value}'`,
       });
     }
 
-    if (/\b\d+(?:\.\d+)?(?:em|rem|vh|vw|%)\b/u.test(value)) {
+    if (/\b\d+(?:\.\d+)?(?:(?:em|rem|vh|vw)\b|%)/u.test(value)) {
       issues.push({
-        severity: 'error',
         line: rule.line,
         message: `Union CSS lengths should use px/custom properties, not '${value}'`,
       });
@@ -188,16 +203,10 @@ function normalizeSelector(selector) {
 }
 
 if (isDirectRun(import.meta)) {
-  const repoRoot = process.cwd();
-  const css = readUnionSourceCss(repoRoot);
-  const issues = lintUnionCss(css, { generated: true });
-
-  if (issues.length > 0) {
-    for (const issue of issues) {
-      const location = issue.line === undefined ? '' : `:${issue.line}`;
-      console.error(`${issue.severity.toUpperCase()}${location} ${issue.message}`);
-    }
-
+  try {
+    readLintedUnionSourceCss(process.cwd());
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

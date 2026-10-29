@@ -141,11 +141,9 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
     const schemeId = kdeThemeId(source.slug);
     const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
 
-    expect(unionStyle).toStartWith(
-      `/*
- * ${theme.name} Union CSS style.
- * Static rice controls live in source/union-css/index.css and parts/.
- * Palette and shape tokens are generated from the family contract and neutral source-theme roles by scripts/desktopThemes.mjs.
+    expect(unionStyle).toStartWith(`/*\n * ${theme.name} Union CSS style.\n`);
+    expect(unionStyle).toContain(
+      `
  */
 
 :root {

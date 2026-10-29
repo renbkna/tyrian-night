@@ -8,21 +8,9 @@ menuitem {
   border-radius: var(--tyrian-radius-medium);
 }
 
-menuitem:hovered,
+/* An open submenu's parent keeps the hover surface, not the selection surface. */
 menuitem.with-submenu:highlighted {
   background-color: var(--tyrian-row-hover-bg);
-}
-
-menuitem:highlighted {
-  background-color: var(--tyrian-row-selected-bg);
-}
-
-menuitem:pressed {
-  background-color: var(--tyrian-control-active-bg);
-}
-
-menuitem:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 menuitem > indicator,
@@ -47,7 +35,6 @@ popup.combobox {
 }
 
 popup.combobox itemdelegate:highlighted,
-popup.combobox itemdelegate:highlight,
 popup.combobox menuitem:highlighted {
   background-color: var(--tyrian-row-selected-bg);
 }

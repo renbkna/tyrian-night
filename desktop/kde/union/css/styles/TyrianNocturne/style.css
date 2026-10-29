@@ -1,7 +1,7 @@
 /*
  * Tyrian Nocturne Union CSS style.
  * Static rice controls live in source/union-css/index.css and parts/.
- * Palette and shape tokens are generated from the family contract and neutral source-theme roles by scripts/desktopThemes.mjs.
+ * scripts/desktopThemes.mjs generates the tokens: colors from the theme roles, sizes and radii from its own scale.
  */
 
 :root {
@@ -498,13 +498,20 @@ swipedelegate.inside-list {
   inset: 0px;
 }
 
+/* Menu-item indicators take the menu icon size (70-menus-popups.css). */
+checkbox > indicator,
+checkdelegate > indicator,
+radiobutton > indicator,
+radiodelegate > indicator {
+  width: 18px;
+  height: 18px;
+}
+
 checkbox > indicator,
 checkdelegate > indicator,
 radiobutton > indicator,
 radiodelegate > indicator,
 menuitem > indicator {
-  width: 18px;
-  height: 18px;
   background-color: var(--tyrian-indicator-bg);
   border: 1px solid var(--tyrian-border-color);
   border-radius: var(--tyrian-radius-small);
@@ -621,21 +628,9 @@ menuitem {
   border-radius: var(--tyrian-radius-medium);
 }
 
-menuitem:hovered,
+/* An open submenu's parent keeps the hover surface, not the selection surface. */
 menuitem.with-submenu:highlighted {
   background-color: var(--tyrian-row-hover-bg);
-}
-
-menuitem:highlighted {
-  background-color: var(--tyrian-row-selected-bg);
-}
-
-menuitem:pressed {
-  background-color: var(--tyrian-control-active-bg);
-}
-
-menuitem:visual-focus {
-  outline: 2px solid var(--tyrian-focus-ring);
 }
 
 menuitem > indicator,
@@ -660,7 +655,6 @@ popup.combobox {
 }
 
 popup.combobox itemdelegate:highlighted,
-popup.combobox itemdelegate:highlight,
 popup.combobox menuitem:highlighted {
   background-color: var(--tyrian-row-selected-bg);
 }

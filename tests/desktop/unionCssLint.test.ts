@@ -61,6 +61,25 @@ menuitem:checked > indicator
   ]);
 });
 
+test('Union CSS lint reports source lines and ignores constructs inside comments', () => {
+  const css = `/* a comment {
+spanning lines with calc( and :first-child } */
+button {
+  width: 50%;
+  margin: 2em;
+}
+`;
+
+  expect(
+    lintUnionCss(css)
+      .filter((issue) => issue.message.startsWith('Union CSS'))
+      .map(({ line, message }) => ({ line, message }))
+  ).toEqual([
+    { line: 3, message: "Union CSS lengths should use px/custom properties, not '50%'" },
+    { line: 3, message: "Union CSS lengths should use px/custom properties, not '2em'" },
+  ]);
+});
+
 test('Union CSS lint rejects unsupported CSS and specificity arms races', () => {
   const brokenCss = `
 button:first-child {

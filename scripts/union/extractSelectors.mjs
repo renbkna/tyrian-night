@@ -9,9 +9,7 @@
  * @returns {CssRule[]}
  */
 export function extractCssRules(css) {
-  const withoutComments = css
-    .replace(/\/\*[\s\S]*?\*\//gu, '')
-    .replace(/@property\s+[^{]+\{[^{}]*\}/gu, '');
+  const withoutComments = blankCssComments(css).replace(/@property\s+[^{]+\{[^{}]*\}/gu, blank);
   const rules = [];
   const ruleRe = /([^{}@]+)\{([^{}]*)\}/gu;
   let match;
@@ -30,11 +28,29 @@ export function extractCssRules(css) {
         .map((selector) => selector.trim().replace(/\s+/gu, ' '))
         .filter(Boolean),
       body: match[2],
-      line: lineNumberAt(withoutComments, match.index),
+      line: lineNumberAt(
+        withoutComments,
+        match.index + match[1].length - match[1].trimStart().length
+      ),
     });
   }
 
   return rules;
+}
+
+/**
+ * Replaces each comment with spaces, keeping its newlines so offsets and line
+ * numbers still match the source.
+ * @param {string} css
+ * @returns {string}
+ */
+export function blankCssComments(css) {
+  return css.replace(/\/\*[\s\S]*?\*\//gu, blank);
+}
+
+/** @param {string} text */
+function blank(text) {
+  return text.replace(/[^\n]/gu, ' ');
 }
 
 /**

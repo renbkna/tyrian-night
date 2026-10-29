@@ -89,13 +89,20 @@ swipedelegate.inside-list {
   inset: 0px;
 }
 
+/* Menu-item indicators take the menu icon size (70-menus-popups.css). */
+checkbox > indicator,
+checkdelegate > indicator,
+radiobutton > indicator,
+radiodelegate > indicator {
+  width: 18px;
+  height: 18px;
+}
+
 checkbox > indicator,
 checkdelegate > indicator,
 radiobutton > indicator,
 radiodelegate > indicator,
 menuitem > indicator {
-  width: 18px;
-  height: 18px;
   background-color: var(--tyrian-indicator-bg);
   border: 1px solid var(--tyrian-border-color);
   border-radius: var(--tyrian-radius-small);

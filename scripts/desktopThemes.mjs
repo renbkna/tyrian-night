@@ -7,8 +7,7 @@ import { opaqueHex, parseHexColor } from './colorUtils.mjs';
 import { syncGeneratedAssets } from './generatedAssets.mjs';
 import { TERMINAL_ANSI_ROLES, themeColor as readThemeColor } from './themeDefinition.mjs';
 import { loadThemeRepository, readSourceTheme } from './themeSources.mjs';
-import { flattenCssFile } from './union/flattenCss.mjs';
-import { lintUnionCss } from './union/lintUnionCss.mjs';
+import { readLintedUnionSourceCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -213,7 +212,7 @@ export function caelestiaFlavour(slug) {
  */
 export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
   const repository = loadThemeRepository(repoRoot);
-  const unionCssTemplate = readUnionCssTemplate(repoRoot);
+  const unionCssTemplate = readLintedUnionSourceCss(repoRoot);
 
   return repository.sources.flatMap((source) => {
     const theme = /** @type {ThemeDefinition} */ (readSourceTheme(source, repository));
@@ -523,28 +522,6 @@ function buildUnionCssStyle(cssTemplate, schemeName, palette) {
   return cssTemplate
     .replaceAll('{{schemeName}}', schemeName)
     .replaceAll('  /* TYRIAN_GENERATED_TOKENS */', buildUnionCssTokens(palette));
-}
-
-/**
- * @param {string} repoRoot
- * @returns {string}
- */
-function readUnionCssTemplate(repoRoot) {
-  const css = flattenCssFile(path.join(repoRoot, 'source/union-css/index.css'));
-  const issues = lintUnionCss(css, { generated: true }).filter(
-    (issue) => issue.severity === 'error'
-  );
-
-  if (issues.length > 0) {
-    throw new Error(
-      [
-        'Union CSS source failed generation lint:',
-        ...issues.map(({ message, line }) => `- ${message}${line === undefined ? '' : `:${line}`}`),
-      ].join('\n')
-    );
-  }
-
-  return css;
 }
 
 /**
