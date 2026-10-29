@@ -1,0 +1,10 @@
+{
+  "input-type": "css",
+  "name": "Tyrian Pastel",
+  "description": "Tyrian Pastel application style with generated Tyrian colors.",
+  "license": "Apache-2.0",
+  "url": "https://github.com/renbkna/tyrian-night",
+  "authors": [
+    "renbkna"
+  ]
+}

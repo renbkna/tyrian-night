@@ -140,7 +140,10 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
     const schemeId = kdeThemeId(source.slug);
-    const unionStyle = requiredAsset(`desktop/kde/union/css/styles/${schemeId}/style.css`);
+    const unionStyle = requiredAsset(`desktop/kde/union/styles/${schemeId}/contents/css/style.css`);
+    expect(
+      JSON.parse(requiredAsset(`desktop/kde/union/styles/${schemeId}/metadata.json`))
+    ).toMatchObject({ 'input-type': 'css', name: theme.name });
 
     expect(unionStyle).toStartWith(`/*\n * ${theme.name} Union CSS style.\n`);
     expect(unionStyle).toContain(

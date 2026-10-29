@@ -4,7 +4,7 @@ Generated from `source/themes/`, with no third-party base theme:
 
 - `color-schemes/<Variant>.colors`: colour schemes.
 - `plasma/desktoptheme/<Variant>/`: Plasma desktop themes.
-- `union/css/styles/<Variant>/`: Union application styles (Plasma 6.7 tech preview), built from
+- `union/styles/<Variant>/`: Union application style packages (Union 6.8), built from
   `source/union-css/`.
 
 The colour scheme and Plasma theme carry colours only. Install by copying or linking, then apply:
@@ -17,8 +17,14 @@ cp -r desktop/kde/plasma/desktoptheme/TyrianNight ~/.local/share/plasma/desktopt
 plasma-apply-desktoptheme TyrianNight
 ```
 
-To try Union, install `union`, put its `defaults` and the `breeze`, `breeze-mobile` and
-`breeze-rtl` styles from `/usr/share/union/css/` under `~/.local/share/union/css/`, add
-`union/css/styles/TyrianNight` next to them, and opt into Union in a test session.
-`bun run union:smoke` opens the controls offscreen under Union for a few hundred milliseconds
-and exits; it needs `qml6` and Union installed and makes no assertions.
+Union reads style packages from `union/styles/` in each data directory. Install `union`, copy or
+link a style, then pick it under System Settings > Application Style, or start one application
+with `UNION_STYLE_NAME=TyrianNight`:
+
+```sh
+mkdir -p ~/.local/share/union/styles
+cp -r desktop/kde/union/styles/TyrianNight ~/.local/share/union/styles/
+```
+
+`bun run union:smoke` opens the controls offscreen with the installed `TyrianNight` style for a
+few hundred milliseconds and exits; it needs `qml6` and Union and makes no assertions.

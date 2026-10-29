@@ -312,7 +312,11 @@ function recommendIslandUiAction(
   return hasIslandEvidence(status) ? 'restore' : 'none';
 }
 
-/** Whether Tyrian is known to have enabled, patched or left files on this root. */
+/**
+ * Whether Tyrian is known to have enabled, patched or left files on this root.
+ * Unreadable app files give no evidence either way; the registry is then the
+ * record of what Tyrian manages, so an unregistered root needs no action.
+ */
 function hasIslandEvidence(status: IslandShellStatus): boolean {
   return status.managed === true || status.active === true;
 }

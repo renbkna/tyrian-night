@@ -8,7 +8,7 @@ for controls and rows, `--tyrian-radius-large` for cards, dialogs and popups, an
 `--tyrian-pill-radius` for fully rounded parts, such as round buttons, indicators, switches, chips,
 sliders, dials, progress bars and scrollbar handles.
 
-`scripts/desktopThemes.mjs` injects Tyrian palette tokens into `/* TYRIAN_GENERATED_TOKENS */` for each theme and writes generated styles under `desktop/kde/union/css/styles/*/style.css`.
+`scripts/desktopThemes.mjs` injects Tyrian palette tokens into `/* TYRIAN_GENERATED_TOKENS */` for each theme and writes each generated style as a Union style package, `desktop/kde/union/styles/<Variant>/` with `metadata.json` and `contents/css/style.css`.
 
 Keep generated color values out of this template. Use `--tyrian-*` variables so hues continue to come from `source/themeFamilyContract.cjs`, per-variant lightness and chroma from `source/themes/`, aliases from `source/themeColorBindings.cjs`, and derived alpha from `source/themeOpacityContract.cjs`; role membership is owned by `source/themeRoleContract.cjs`.
 

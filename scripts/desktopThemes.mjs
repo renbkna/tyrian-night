@@ -15,6 +15,14 @@ import { readLintedUnionSourceCss } from './union/lintUnionCss.mjs';
 
 const defaultRepoRoot = path.resolve(import.meta.dirname, '..');
 
+/** What every generated KDE package (Plasma theme, Union style) says about itself. */
+const KDE_PACKAGE = Object.freeze({
+  author: 'renbkna',
+  license: 'Apache-2.0',
+  website: 'https://github.com/renbkna/tyrian-night',
+});
+/** Union 6.8 finds styles at `<data dir>/union/styles/<id>/`; this tree mirrors a data dir. */
+const UNION_STYLES_DIRECTORY = 'desktop/kde/union/styles';
 /** The scheme family name Caelestia registers Tyrian under. */
 const CAELESTIA_SCHEME_NAME = 'tyrian';
 const UNION_SCHEME_NAME_PLACEHOLDER = '{{schemeName}}';
@@ -62,7 +70,7 @@ const UNION_TOKENS_PLACEHOLDER = '  /* TYRIAN_GENERATED_TOKENS */';
 const DESKTOP_GENERATED_OWNERSHIP = [
   { directory: 'desktop/kde/color-schemes' },
   { directory: 'desktop/kde/plasma/desktoptheme' },
-  { directory: 'desktop/kde/union/css/styles' },
+  { directory: UNION_STYLES_DIRECTORY },
   { directory: `desktop/caelestia/schemes/${CAELESTIA_SCHEME_NAME}` },
   { directory: 'desktop/caelestia/hypr' },
   { directory: 'desktop/caelestia/state' },
@@ -122,7 +130,11 @@ export function buildDesktopThemeAssets(repoRoot = defaultRepoRoot) {
       ...buildPlasmaDesktopThemePackageAssets(plasmaDesktopTheme, kdeFileName, theme.name),
       ...buildPlasmaWidgetSkinAssets(plasmaDesktopTheme, palette),
       {
-        path: `desktop/kde/union/css/styles/${kdeFileName}/style.css`,
+        path: `${UNION_STYLES_DIRECTORY}/${kdeFileName}/metadata.json`,
+        content: buildUnionStyleMetadata(theme.name),
+      },
+      {
+        path: `${UNION_STYLES_DIRECTORY}/${kdeFileName}/contents/css/style.css`,
         content: buildUnionCssStyle(unionCssTemplate, theme.name, palette),
       },
       {
@@ -370,15 +382,15 @@ function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName) {
       path: `${themeRoot}/metadata.json`,
       content: `${formatJson({
         KPlugin: {
-          Authors: [{ Name: 'renbkna' }],
+          Authors: [{ Name: KDE_PACKAGE.author }],
           Category: '',
           Description: `${schemeName} Plasma desktop theme with generated Tyrian colors, launcher surfaces, taskbar states, and edge glow.`,
           EnabledByDefault: true,
           Id: schemeId,
-          License: 'Apache-2.0',
+          License: KDE_PACKAGE.license,
           Name: schemeName,
           ServiceTypes: ['Plasma/Theme'],
-          Website: 'https://github.com/renbkna/tyrian-night',
+          Website: KDE_PACKAGE.website,
         },
         'X-Plasma-API': '5.0',
       })}\n`,
@@ -390,13 +402,29 @@ function buildPlasmaDesktopThemePackageAssets(themeRoot, schemeId, schemeName) {
         `Name=${schemeName}`,
         `Comment=${schemeName} Plasma desktop theme`,
         `X-KDE-PluginInfo-Name=${schemeId}`,
-        'X-KDE-PluginInfo-Author=renbkna',
-        'X-KDE-PluginInfo-License=Apache-2.0',
+        `X-KDE-PluginInfo-Author=${KDE_PACKAGE.author}`,
+        `X-KDE-PluginInfo-License=${KDE_PACKAGE.license}`,
         'X-KDE-ServiceTypes=Plasma/Theme',
         '',
       ].join('\n'),
     },
   ];
+}
+
+/**
+ * A Union style package's metadata, with the keys `union-styletool create` writes.
+ * @param {string} schemeName
+ * @returns {string}
+ */
+function buildUnionStyleMetadata(schemeName) {
+  return `${formatJson({
+    'input-type': 'css',
+    name: schemeName,
+    description: `${schemeName} application style with generated Tyrian colors.`,
+    license: KDE_PACKAGE.license,
+    url: KDE_PACKAGE.website,
+    authors: [KDE_PACKAGE.author],
+  })}\n`;
 }
 
 /**
