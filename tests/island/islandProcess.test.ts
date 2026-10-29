@@ -14,7 +14,6 @@ const failure: IslandShellFailureDescription = {
   registryChanged: true,
   physicalChanged: false,
   externalDrift: false,
-  incompleteRecovery: true,
   reason: 'registry publication changed before permission failure',
   causes: [
     { code: 'blocked', reason: 'registry publish path' },
@@ -33,7 +32,6 @@ test('Island CLI failures preserve semantic code and mutation facts', () => {
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,
-    incompleteRecovery: true,
     causes: failure.causes,
     message: failure.reason,
   });

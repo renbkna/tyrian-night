@@ -248,7 +248,7 @@ test('unsupported platforms skip startup reconciliation and every Island command
   ).toBe(true);
 });
 
-test('typed nonzero apply failure preserves causes, recovery guidance, and reload', async () => {
+test('a partial apply failure names its causes once and says to rerun, then reload', async () => {
   globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   const repairCommand = await activateAndGetCommand('tyrianNight.repairIslandUi');
   resetObservations();
@@ -264,15 +264,15 @@ test('typed nonzero apply failure preserves causes, recovery guidance, and reloa
   expect(
     errorMessages.some(([message]) => String(message).includes('workbench checksum did not match'))
   ).toBe(true);
-  expect(warningMessages.some(([message]) => String(message).includes('manual recovery'))).toBe(
-    true
-  );
-  expect(
-    informationMessages.some(([message]) => String(message).includes('changed app files'))
-  ).toBe(true);
+  expect(warningMessages).toEqual([]);
+  expect(informationMessages).toContainEqual([
+    expect.stringContaining('Run the same command again to finish'),
+    'Reload Window',
+    'Later',
+  ]);
 });
 
-test('typed nonzero supervised restore failure retains recovery and reload guidance', async () => {
+test('a partial restore failure says to rerun, then reload', async () => {
   const { activate } = await import('../../apps/vscode/src/extension.js');
   await activate(createExtensionContext());
   const restoreCommand = registeredCommands.get('tyrianNight.restoreClassicUi');
@@ -287,12 +287,12 @@ test('typed nonzero supervised restore failure retains recovery and reload guida
   expect(
     errorMessages.some(([message]) => String(message).includes('restore verification failed'))
   ).toBe(true);
-  expect(warningMessages.some(([message]) => String(message).includes('manual recovery'))).toBe(
-    true
-  );
-  expect(
-    informationMessages.some(([message]) => String(message).includes('changed app files'))
-  ).toBe(true);
+  expect(warningMessages).toEqual([]);
+  expect(informationMessages).toContainEqual([
+    expect.stringContaining('Run the same command again to finish'),
+    'Reload Window',
+    'Later',
+  ]);
 });
 
 test('activation converges through the CLI and offers reload after a restore', async () => {
@@ -377,7 +377,7 @@ test('activation reports a blocked startup apply', async () => {
     action: 'apply',
     result: {
       kind: 'blocked',
-      ...mutationFacts({ incompleteRecovery: true }),
+      ...mutationFacts({}),
       status: fakeStatus({ classification: 'broken-backup' }),
       reason: 'Island target changed after planning',
     },
@@ -393,7 +393,7 @@ test('activation reports a blocked startup apply', async () => {
 
 for (const kind of ['blocked', 'permission-required'] as const) {
   test(`a ${kind} startup apply that changed app files offers reload`, async () => {
-    const facts = mutationFacts({ physicalChanged: true, incompleteRecovery: true });
+    const facts = mutationFacts({ physicalChanged: true });
     const status = fakeStatus({ classification: 'broken-backup' });
     const reason = 'Island target changed after planning';
     queuedSpawnResponses.push({
@@ -786,7 +786,7 @@ function typedIslandFailureResponse(
   failure: {
     code: IslandShellFailureDescription['code'];
     facts: Parameters<typeof mutationFacts>[0];
-  } = { code: 'blocked', facts: { physicalChanged: true, incompleteRecovery: true } }
+  } = { code: 'blocked', facts: { physicalChanged: true } }
 ): FakeProcessResponse {
   const causes = [
     { code: failure.code, reason },

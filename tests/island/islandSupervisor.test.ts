@@ -140,7 +140,7 @@ test('public failure normalization preserves both actionable aggregate causes', 
   const message = 'Tyrian changed Island files before the operation failed.';
   const failure = new IslandPartialMutationError(
     message,
-    { physicalChanged: true, incompleteRecovery: true },
+    { physicalChanged: true },
     {
       cause: new AggregateError(
         [
@@ -154,7 +154,6 @@ test('public failure normalization preserves both actionable aggregate causes', 
 
   expect(describeIslandShellFailure(failure)).toMatchObject({
     physicalChanged: true,
-    incompleteRecovery: true,
     causes: expect.arrayContaining([
       { code: 'blocked', reason: 'rename failed at workbench.html' },
       { code: 'blocked', reason: 'verification failed at workbench.backup.html' },

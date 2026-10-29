@@ -3,8 +3,10 @@
 import path from 'node:path';
 
 import { blankCssComments, extractCssRules, selectorElementNames } from './extractSelectors.mjs';
-import { flattenCssFile } from './flattenCss.mjs';
+import { flattenCssFile, flattenCssLines } from './flattenCss.mjs';
 import { isDirectRun } from '../cli.mjs';
+
+const UNION_SOURCE_ENTRY = 'source/union-css/index.css';
 
 const GENERATED_FORBIDDEN_TEXT = [
   '@import',
@@ -39,7 +41,7 @@ const REQUIRED_CHECKED_TARGETS = [
  * @returns {string}
  */
 export function readUnionSourceCss(repoRoot = process.cwd()) {
-  return flattenCssFile(path.join(repoRoot, 'source/union-css/index.css'));
+  return flattenCssFile(path.join(repoRoot, UNION_SOURCE_ENTRY));
 }
 
 /**
@@ -48,14 +50,20 @@ export function readUnionSourceCss(repoRoot = process.cwd()) {
  * @returns {string}
  */
 export function readLintedUnionSourceCss(repoRoot) {
-  const css = readUnionSourceCss(repoRoot);
+  const lines = flattenCssLines(path.join(repoRoot, UNION_SOURCE_ENTRY));
+  const css = lines.map(({ text }) => text).join('\n');
   const issues = lintUnionCss(css, { generated: true });
   if (issues.length > 0) {
+    /** @param {number} line */
+    const location = (line) => {
+      const origin = /** @type {import('./flattenCss.mjs').FlattenedCssLine} */ (lines[line - 1]);
+      return `${path.relative(repoRoot, origin.file)}:${origin.line}`;
+    };
     throw new Error(
       [
         'Union CSS source failed generation lint:',
         ...issues.map(
-          ({ message, line }) => `- ${line === undefined ? '' : `line ${line}: `}${message}`
+          ({ message, line }) => `- ${line === undefined ? '' : `${location(line)}: `}${message}`
         ),
       ].join('\n')
     );

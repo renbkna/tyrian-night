@@ -3,7 +3,6 @@ const ISLAND_MUTATION_FACT_KEYS = [
   'registryChanged',
   'physicalChanged',
   'externalDrift',
-  'incompleteRecovery',
 ] as const;
 
 /** What an Island operation durably changed or left unresolved. */
@@ -39,7 +38,6 @@ export class IslandMutationError extends Error implements IslandMutationResult {
   readonly registryChanged: boolean;
   readonly physicalChanged: boolean;
   readonly externalDrift: boolean;
-  readonly incompleteRecovery: boolean;
   readonly changed: boolean;
 
   constructor(message: string, facts: Partial<IslandMutationFacts>, options?: ErrorOptions) {
@@ -49,7 +47,6 @@ export class IslandMutationError extends Error implements IslandMutationResult {
     this.registryChanged = own.registryChanged;
     this.physicalChanged = own.physicalChanged;
     this.externalDrift = own.externalDrift;
-    this.incompleteRecovery = own.incompleteRecovery;
     this.changed = own.changed;
   }
 }

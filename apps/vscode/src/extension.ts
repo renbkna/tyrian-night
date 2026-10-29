@@ -552,20 +552,10 @@ async function showIslandProcessFailure(
     `Tyrian Night: ${operation} failed (${failure.code}). ${failure.message}`
   );
 
-  if (failure.incompleteRecovery) {
-    const action = await vscode.window.showWarningMessage(
-      'Tyrian Night: Island UI recovery is incomplete and requires explicit inspection or manual recovery. Open Doctor before retrying.',
-      OPEN_DOCTOR_ACTION,
-      LATER_ACTION
-    );
-    if (action === OPEN_DOCTOR_ACTION) {
-      await doctorIslandUi();
-    }
-  }
-
+  // Every prefix of a planned change leaves VS Code loadable, and rerunning converges.
   if (failure.physicalChanged) {
     await promptForReload(
-      'Tyrian Night: Island UI changed app files before the operation failed. Reload after reviewing the recovery guidance.'
+      'Tyrian Night: Island UI changed app files before the operation failed. Run the same command again to finish, then reload VS Code.'
     );
   }
 }

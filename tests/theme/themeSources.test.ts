@@ -394,6 +394,25 @@ test('color audit rejects an empty theme selection instead of auditing every the
   expect(audit.stderr).toContain('Color audit --theme must not be empty.');
 });
 
+test('a color binding may target a role that derives an alpha from its own pigment', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-color-binding-self-derived-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const bindingsPath = path.join(root, 'source/themeColorBindings.cjs');
+    const opacityPath = path.join(root, 'source/themeOpacityContract.cjs');
+    const bindings = readSourceData<any>(bindingsPath);
+    const opacity = readSourceData<any>(opacityPath);
+    bindings.derived['ui:accent.primary'] = 'ui:accent.primary';
+    opacity.opacities['ui:accent.primary'] = 'FF';
+    writeSourceData(bindingsPath, bindings);
+    writeSourceData(opacityPath, opacity);
+
+    expect(() => loadThemeRepository(root)).not.toThrow();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('production snapshots reject every duplicate bracket depth, including non-adjacent depths', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-bracket-gate-'));
   try {
@@ -439,14 +458,27 @@ test('production snapshots reject pigment-reservation violations while inspectio
     const inspection = loadThemeInspectionRepository(root);
     const source = inspection.sources.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const policy = readThemePigmentPolicy(inspection.definition);
-    expect(
-      auditThemePigmentPolicy(inspection.themes.get(source.slug)!, policy, inspection.definition)
-    ).toContainEqual(
+    expect(auditThemePigmentPolicy(inspection.themes.get(source.slug)!, policy)).toContainEqual(
       expect.objectContaining({
         reservation: 'green-cyan-reserved',
         role: 'syntax:comment',
       })
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the hue reservation judges roles, so rebinding a role onto a reserved pigment is rejected', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-pigment-rebind-'));
+  try {
+    fs.cpSync('source', path.join(root, 'source'), { recursive: true });
+    const bindingsPath = path.join(root, 'source/themeColorBindings.cjs');
+    const bindings = readSourceData<any>(bindingsPath);
+    bindings.aliases['vscode:text.subtle'] = 'ui:status.success';
+    writeSourceData(bindingsPath, bindings);
+
+    expect(() => loadThemeRepository(root)).toThrow('"role":"vscode:text.subtle"');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

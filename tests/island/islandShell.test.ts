@@ -274,7 +274,6 @@ test('clean roots with semantically correct checksum are not rewritten during re
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,
-    incompleteRecovery: false,
   });
   expect(result.failedAppRoots).toEqual([]);
   expect(await fs.readFile(productPath, 'utf8')).toBe(before);
@@ -414,7 +413,6 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,
-    incompleteRecovery: false,
     restoredAppRoots: [],
     failedAppRoots: [],
     quarantinedRecords: [],
@@ -1146,7 +1144,6 @@ test('a mutation stops at a target changed after planning and reports external d
   expect(describeIslandShellFailure(failure)).toMatchObject({
     physicalChanged: true,
     externalDrift: true,
-    incompleteRecovery: true,
   });
   expect(await fs.readFile(workbenchHtmlPath, 'utf8')).toBe(externalHtml);
 });

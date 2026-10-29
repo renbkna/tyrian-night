@@ -6,7 +6,11 @@ import { expect, test } from 'bun:test';
 
 import { buildDesktopThemeAssets } from '../../scripts/desktopThemes.mjs';
 import { flattenCssFile } from '../../scripts/union/flattenCss.mjs';
-import { lintUnionCss, readUnionSourceCss } from '../../scripts/union/lintUnionCss.mjs';
+import {
+  lintUnionCss,
+  readLintedUnionSourceCss,
+  readUnionSourceCss,
+} from '../../scripts/union/lintUnionCss.mjs';
 
 const sourceCss = readUnionSourceCss();
 
@@ -78,6 +82,29 @@ button {
     { line: 3, message: "Union CSS lengths should use px/custom properties, not '50%'" },
     { line: 3, message: "Union CSS lengths should use px/custom properties, not '2em'" },
   ]);
+});
+
+test('Union CSS generation lint reports the source file and line of each issue', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-union-lint-origin-'));
+  try {
+    const unionRoot = path.join(root, 'source/union-css');
+    fs.mkdirSync(path.join(unionRoot, 'parts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(unionRoot, 'index.css'),
+      '/* entry */\n\n\n\n@import "./parts/first.css";\n@import "./parts/second.css";\n'
+    );
+    fs.writeFileSync(path.join(unionRoot, 'parts/first.css'), 'label {\n  color: red;\n}\n\n\n');
+    fs.writeFileSync(
+      path.join(unionRoot, 'parts/second.css'),
+      '/* a\ncomment */\n\nbutton {\n  width: 50%;\n}\n'
+    );
+
+    expect(() => readLintedUnionSourceCss(root)).toThrow(
+      "- source/union-css/parts/second.css:4: Union CSS lengths should use px/custom properties, not '50%'"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('Union CSS lint rejects unsupported CSS and specificity arms races', () => {

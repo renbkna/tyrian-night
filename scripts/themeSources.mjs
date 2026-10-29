@@ -111,7 +111,7 @@ export function auditThemeSnapshot(snapshot) {
     return {
       slug,
       safety: auditThemeSafety(theme, safetyContract),
-      pigment: auditThemePigmentPolicy(theme, pigmentPolicy, snapshot.definition),
+      pigment: auditThemePigmentPolicy(theme, pigmentPolicy),
     };
   });
 }

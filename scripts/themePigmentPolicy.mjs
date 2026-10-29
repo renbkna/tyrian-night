@@ -11,15 +11,16 @@ import {
 import { loadSourceModule } from './sourceModule.mjs';
 
 /**
- * A hue range only the listed pigments may occupy; a role is judged by the
- * pigment it is bound to, so aliases and alpha derivations follow their pigment.
- * @typedef {{ allowedPigments: string[]; id: string; maximum: number; minimum: number }} PigmentReservation
+ * A hue range only the listed roles may render in. Each entry is a decision about
+ * what a role means (a string, a success state, a hint), so roles bound to the same
+ * pigment are listed separately and rebinding a role onto a reserved pigment fails.
+ * @typedef {{ allowedRoles: string[]; id: string; maximum: number; minimum: number }} PigmentReservation
  */
 /** @typedef {{ reservations: PigmentReservation[] }} ThemePigmentPolicy */
 
 /**
  * Reads the type-checked pigment policy and validates what types cannot:
- * identifier uniqueness, hue bounds, and pigment references into the role contract.
+ * identifier uniqueness, hue bounds, and role references into the role contract.
  *
  * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
  * @returns {ThemePigmentPolicy}
@@ -44,17 +45,17 @@ export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()
       );
     }
     invariant(
-      reservation.allowedPigments.length > 0,
-      `reservation ${reservation.id} allowedPigments must not be empty`
+      reservation.allowedRoles.length > 0,
+      `reservation ${reservation.id} allowedRoles must not be empty`
     );
     invariant(
-      new Set(reservation.allowedPigments).size === reservation.allowedPigments.length,
-      `reservation ${reservation.id} allowedPigments contains duplicates`
+      new Set(reservation.allowedRoles).size === reservation.allowedRoles.length,
+      `reservation ${reservation.id} allowedRoles contains duplicates`
     );
-    for (const pigment of reservation.allowedPigments) {
+    for (const role of reservation.allowedRoles) {
       invariant(
-        isKnownThemeRole(pigment, definition.requiredThemeRoles),
-        `reservation ${reservation.id} references unknown pigment ${pigment}`
+        isKnownThemeRole(role, definition.requiredThemeRoles),
+        `reservation ${reservation.id} references unknown role ${role}`
       );
     }
   }
@@ -63,28 +64,21 @@ export function readThemePigmentPolicy(definition = loadThemeDefinitionContext()
 
 /**
  * @param {import('./themeDefinition.mjs').ThemeDefinition} theme
- * @param {ThemePigmentPolicy} [policy]
- * @param {import('./themeDefinition.mjs').ThemeDefinitionContext} [definition]
+ * @param {ThemePigmentPolicy} policy
  */
-export function auditThemePigmentPolicy(
-  theme,
-  policy = readThemePigmentPolicy(),
-  definition = loadThemeDefinitionContext()
-) {
+export function auditThemePigmentPolicy(theme, policy) {
   const violations = [];
   for (const namespace of THEME_ROLE_NAMESPACES) {
     for (const [name, color] of Object.entries(theme[namespace])) {
       const role = `${namespace}:${name}`;
-      const binding = definition.colorBindings.bindings[namespace][name];
-      const pigment = typeof binding === 'object' ? binding.pigment : (binding ?? role);
       const hue = hexToOklch(color.slice(0, 7)).h;
       if (!Number.isFinite(hue)) continue;
       for (const reservation of policy.reservations) {
         if (
           hueInsideRange(hue, reservation.minimum, reservation.maximum) &&
-          !reservation.allowedPigments.includes(pigment)
+          !reservation.allowedRoles.includes(role)
         ) {
-          violations.push({ hue, pigment, reservation: reservation.id, role });
+          violations.push({ hue, reservation: reservation.id, role });
         }
       }
     }

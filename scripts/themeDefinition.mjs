@@ -746,12 +746,14 @@ function validateThemeColorBindingContract(contract, requiredThemeRoles) {
     }
     configuredRoles.add(qualifiedRole);
   }
-  // Bindings resolve one hop, so a target must own its pigment.
+  // Bindings resolve one hop, so a target must own its pigment: be unbound, or
+  // derive an alpha from its own pigment.
   for (const [qualifiedRole, pigment] of [
     ...Object.entries(aliasPigments),
     ...Object.entries(derivedPigments),
   ]) {
-    if (pigment !== qualifiedRole && configuredRoles.has(pigment)) {
+    const ownsPigment = !configuredRoles.has(pigment) || derivedPigments[pigment] === pigment;
+    if (pigment !== qualifiedRole && !ownsPigment) {
       throw new Error(
         `Theme color binding '${qualifiedRole}' targets '${pigment}', which is bound itself; target its pigment directly.`
       );
