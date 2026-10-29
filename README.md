@@ -11,16 +11,14 @@ Tyrian Night is one visual system exported to independently supported editor, te
 | Zed themes | Systems supported by Zed | Standard theme extension | [`apps/zed/README.md`](apps/zed/README.md) |
 | Terminal and desktop files | Wherever each target accepts them | User-selected files | Component README files |
 | Live desktop installer | Linux with GNU `mv --exchange` and util-linux `flock` | Replaces user configuration atomically, with backups | [`apps/desktop/README.md`](apps/desktop/README.md) |
-| Full rice installer | Linux, KDE Plasma 6, and declared commands/widgets | Replaces Plasma layout and restarts Plasma | [`apps/desktop/README.md#full-rice`](apps/desktop/README.md#full-rice) |
 
-The workspace requires Bun 1.3.11 and Node.js 22.19 or newer. Product manifests own narrower runtime requirements.
+The root `package.json` owns the workspace's Bun version (`packageManager`) and Node.js floor (`engines`); CI reads both from it. Product manifests own narrower runtime requirements.
 
 ### Safety Before Apply
 
 - Installing or selecting the VS Code and Zed color themes uses the editors' normal extension mechanisms. It does not patch application or desktop files.
 - Island UI is a separate, opt-in feature that modifies VS Code application files on Linux, macOS, and Windows. Doctor and the restore-before-uninstall warning are part of its product contract.
-- Desktop preview commands are read-only. Desktop apply commands are Linux-only, user-scoped, atomic replacements of the paths listed by the preview; each apply is backed up first and `desktop:recover` / `rice:recover` restore the latest backup. They never request administrator privileges.
-- The full rice is the high-impact path: it is KDE Plasma 6-only and replaces panel, wallpaper, and shell state. Do not run it on another desktop or operating system.
+- Desktop preview commands are read-only. Desktop apply commands are Linux-only, user-scoped, atomic replacements of the paths listed by the preview; each apply is backed up first and `desktop:recover` restores the latest backup. They never request administrator privileges.
 
 ## Family
 
@@ -82,12 +80,9 @@ bun run desktop:caelestia:preview
 bun run desktop:caelestia:apply
 
 bun run desktop:recover
-bun run rice
-bun run rice:apply
-bun run rice:recover
 ```
 
-Read the desktop product contract before applying it. The full rice is not a generic theme installer.
+Read the desktop product contract before applying it.
 
 ## Authority and Repository Layout
 
@@ -109,11 +104,11 @@ Read the desktop product contract before applying it. The full rice is not a gen
 - `apps/vscode/` owns the VS Code manifest, build, runtime, package contents, and support contract.
 - `apps/zed/` owns the Zed extension.
 - `apps/desktop/` owns the Linux installers (`apps/desktop/src`), their version, and support contract.
-- `terminal/`, `desktop/`, and `rice/` contain generated or captured product assets.
+- `terminal/` and `desktop/` contain generated product assets.
 
 Generated consumers never become palette inputs.
 
-Installation has separate owners from theme generation. `apps/desktop/src/installOps.mjs` owns the desktop filesystem primitives: atomic file and directory publication, backups and their restore, and the per-user `flock`. `installLiveTyrian.mjs` owns the style install and its ownership record; `rice.mjs` owns the Plasma layout, its lifecycle record, and capture.
+Installation has separate owners from theme generation. `apps/desktop/src/installOps.mjs` owns the desktop filesystem primitives: atomic file and directory publication, backups and their restore, and the per-user `flock`. `installLiveTyrian.mjs` owns the style install and its ownership record.
 
 Island command orchestration stays in `islandShell.ts`. `islandPatchPlan.ts` derives the ordered file changes and verifies patch invariants; `islandFileSystem.ts` applies them with atomic writes; `islandRegistry.ts` owns desired state, discovery, and quarantine. The Island CLI owns serialization (`islandLock.ts`): every mutating command holds one per-user operating-system lock. Each command publishes desired intent, then converges the app files, so rerunning an interrupted command completes it. Decisions that depend on the saved desired style (startup reconciliation and Repair) run as the one `converge` command, so they read and act on that style under the same lock.
 

@@ -35,15 +35,12 @@ import {
 } from './installOps.mjs';
 import {
   FASTFETCH_IMAGE_ASSET_PATH,
-  PLASMA_LIFECYCLE_PATH,
   TYRIAN_INSTALL_HOME,
   TYRIAN_STATE_HOME,
   WALLPAPER_ASSET_PATH,
 } from './installPaths.mjs';
 import {
   buildFishStartupConfig,
-  buildFootConfig,
-  buildGhosttyConfig,
   buildTerminalThemeAssets,
   syncTerminalThemeAssets,
 } from '../../../scripts/terminalThemes.mjs';
@@ -57,7 +54,7 @@ import { isDirectRun } from '../../../scripts/cli.mjs';
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const home = os.homedir();
 export const LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH = `${TYRIAN_STATE_HOME}/live-owned-paths.json`;
-export const LIVE_INSTALL_BACKUP_OWNER = 'live-tyrian-apply';
+const LIVE_INSTALL_BACKUP_OWNER = 'live-tyrian-apply';
 const LIVE_INSTALL_TARGETS = new Set(['plasma', 'caelestia']);
 const HYPRLAND_MODES = new Set(['lua', 'legacy']);
 /**
@@ -93,8 +90,6 @@ const HYPRLAND_MODES = new Set(['lua', 'legacy']);
  * }} LiveInstallPlan
  * @typedef {{
  *   fishStartupConfig: string;
- *   footConfig: string;
- *   ghosttyConfig: string;
  * }} PreparedCommonInstall
  * @typedef {{ target: 'plasma'; screenLockerConfig: string; kdeglobals: string; plasmarc: string }} PreparedPlasmaInstall
  * @typedef {{ target: 'caelestia' }} PreparedCaelestiaInstall
@@ -392,7 +387,6 @@ export function installLiveTyrian(options) {
     resolveLiveInstallScope(plan);
 
   if (plan.apply) {
-    assertNoUnfinishedPlasmaLifecycle(plan.home);
     assertAtomicDirectoryExchangeAvailable();
     removeStaleTemporaries(targetPaths);
     removeStaleStagingRoots(plan.installRoot);
@@ -419,15 +413,14 @@ export function installLiveTyrian(options) {
 }
 
 /**
- * Undo the most recent style install by restoring its backup. A Plasma layout
- * backup is restored by `rice:recover`, which owns the Plasma shell.
+ * Undo the most recent style install by restoring its backup. Refuses, changing
+ * nothing, when the newest backup was written by another owner.
  *
  * @param {{ home?: string }} [options]
  * @returns {string | undefined} the restored backup, if any
  */
 export function recoverLiveTyrian(options = {}) {
   const userHome = resolvePathIdentity(options.home ?? home);
-  assertNoUnfinishedPlasmaLifecycle(userHome);
   const latest = findLatestBackup(userHome);
 
   if (latest === undefined) {
@@ -436,7 +429,7 @@ export function recoverLiveTyrian(options = {}) {
   }
   if (latest.manifest.owner !== LIVE_INSTALL_BACKUP_OWNER) {
     throw new Error(
-      `The latest Tyrian backup belongs to '${latest.manifest.owner}'; restore it with bun run rice:recover.`
+      `The latest Tyrian backup at ${latest.backupRoot} belongs to '${latest.manifest.owner}', not the live installer; remove it to recover an earlier style install.`
     );
   }
 
@@ -444,16 +437,6 @@ export function recoverLiveTyrian(options = {}) {
   discardBackup(latest.backupRoot);
   console.log(`Restored Tyrian backup from ${latest.manifest.createdAt}.`);
   return latest.backupRoot;
-}
-
-/**
- * @param {string} userHome
- * @returns {void}
- */
-export function assertNoUnfinishedPlasmaLifecycle(userHome) {
-  if (exists(path.join(userHome, PLASMA_LIFECYCLE_PATH))) {
-    throw new Error('An unfinished Plasma lifecycle requires recovery through the rice command');
-  }
 }
 
 /**
@@ -677,7 +660,9 @@ function assertLiveOwnedRegistry(plan, registry, roots) {
   for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
     const [leftProfile, leftPath] = entries[leftIndex];
     if (classifyLiveOwnedPath(plan, leftPath, roots[leftProfile]) !== leftProfile) {
-      throw new Error(`Live install ownership registry contains an invalid ${leftProfile} path`);
+      throw new Error(
+        `Live install ownership registry contains an invalid ${leftProfile} path: ${path.relative(plan.home, leftPath)}`
+      );
     }
 
     for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
@@ -702,14 +687,7 @@ function classifyLiveOwnedPath(plan, ownedPath, roots) {
   const livePaths = buildLivePaths(roots, undefined, plan.desktopThemeId);
 
   if (isSameOrDescendant(plan.installRoot, ownedPath)) return 'common';
-  if (
-    [
-      livePaths.ghosttyConfig,
-      livePaths.footConfig,
-      livePaths.fishStartupConfig,
-      livePaths.fishGreeting,
-    ].includes(ownedPath)
-  ) {
+  if ([livePaths.fishStartupConfig, livePaths.fishGreeting].includes(ownedPath)) {
     return 'common';
   }
   const ghosttyRelative = path.relative(livePaths.ghosttyThemes, ownedPath);
@@ -881,9 +859,7 @@ function buildLivePaths(xdgRoots, hyprlandMode, desktopThemeId) {
   const hyprCurrentLegacy = path.join(configRoot, 'hypr/scheme/current.conf');
 
   return {
-    ghosttyConfig: path.join(configRoot, 'ghostty/config'),
     ghosttyThemes: path.join(configRoot, 'ghostty/themes'),
-    footConfig: path.join(configRoot, 'foot/foot.ini'),
     footThemes: path.join(configRoot, 'foot/themes'),
     fishStartupConfig: path.join(configRoot, 'fish/conf.d/tyrian-night.fish'),
     fishGreeting: path.join(configRoot, 'fish/functions/fish_greeting.fish'),
@@ -940,9 +916,7 @@ function buildCommonOwnedPaths(livePaths, themeSlugs, installRoot) {
   return [
     ...new Set([
       installRoot,
-      livePaths.ghosttyConfig,
       ...themeSlugs.map((slug) => path.join(livePaths.ghosttyThemes, slug)),
-      livePaths.footConfig,
       ...themeSlugs.map((slug) => path.join(livePaths.footThemes, `${slug}.ini`)),
       livePaths.fishStartupConfig,
       livePaths.fishGreeting,
@@ -1133,8 +1107,6 @@ function prepareLiveInstall(plan) {
   const repository = loadThemeRepository(plan.repoRoot);
   const common = {
     fishStartupConfig: buildFishStartupConfig({ repository, tyrianRoot: plan.sourceRoot }),
-    footConfig: buildFootConfig({ repository, themeDirectory: plan.livePaths.footThemes }),
-    ghosttyConfig: buildGhosttyConfig({ repository }),
   };
 
   if (plan.target === 'caelestia') {
@@ -1196,8 +1168,6 @@ function prepareLiveInstallPreview(plan) {
 
   const common = {
     fishStartupConfig: '',
-    footConfig: '',
-    ghosttyConfig: '',
   };
 
   return plan.target === 'plasma'
@@ -1250,9 +1220,6 @@ function installTerminalLayer(plan, prepared) {
       path.join(plan.livePaths.footThemes, `${slug}.ini`)
     );
   }
-
-  writeFile(plan, plan.livePaths.ghosttyConfig, prepared.ghosttyConfig);
-  writeFile(plan, plan.livePaths.footConfig, prepared.footConfig);
 
   writeFile(plan, plan.livePaths.fishStartupConfig, prepared.fishStartupConfig);
   installManagedPath(plan, plan.sourcePaths.fishGreeting, plan.livePaths.fishGreeting);

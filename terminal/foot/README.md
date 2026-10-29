@@ -19,11 +19,11 @@ Generated themes live in `terminal/foot/themes/`:
 Install by copying or symlinking those files into `~/.config/foot/themes/`, then include the default dark and light themes from `~/.config/foot/foot.ini`:
 
 ```ini
-include=~/.config/foot/themes/tyrian-nocturne.ini
+include=~/.config/foot/themes/tyrian-abyss.ini
 include=~/.config/foot/themes/tyrian-dawn.ini
 
 [main]
 initial-color-theme=dark
 ```
 
-Dark source themes populate Foot's `[colors-dark]` section and Dawn populates `[colors-light]`. `foot.ini` is the full Tyrian foot config template. The live installer writes this config with the installed Foot theme paths.
+Dark source themes populate Foot's `[colors-dark]` section and Dawn populates `[colors-light]`. The live installer installs these theme files; `foot.ini` stays yours.

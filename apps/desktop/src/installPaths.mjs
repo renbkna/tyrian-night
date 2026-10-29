@@ -8,7 +8,6 @@ export const FASTFETCH_IMAGE_ASSET_PATH = 'assets/tyrian-fetch.webp';
 export const TYRIAN_INSTALL_HOME = '.local/share/tyrian-night';
 export const TYRIAN_STATE_HOME = '.local/state/tyrian-night';
 export const TYRIAN_BACKUP_HOME = `${TYRIAN_STATE_HOME}/backups`;
-export const PLASMA_LIFECYCLE_PATH = `${TYRIAN_STATE_HOME}/plasma-lifecycle.json`;
 export const FASTFETCH_IMAGE_CONFIG_PATH = `~/${TYRIAN_INSTALL_HOME}/${FASTFETCH_IMAGE_ASSET_PATH}`;
 
 /**

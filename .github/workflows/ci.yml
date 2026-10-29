@@ -13,12 +13,12 @@ jobs:
   vscode-linux:
     name: VS Code package (Linux)
     runs-on: ubuntu-latest
-    container: node:22.19.0-trixie
+    container: node:26-trixie
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.11
+          bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run package:vscode
 
@@ -32,13 +32,13 @@ jobs:
           - macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22.19.0
+          node-version-file: package.json
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.11
+          bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run verify:vscode-portable
       - run: bun run --cwd apps/vscode package:artifact
@@ -46,12 +46,12 @@ jobs:
   desktop-linux:
     name: Desktop installer (Linux)
     runs-on: ubuntu-latest
-    container: node:22.19.0-trixie
+    container: node:26-trixie
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.11
+          bun-version-file: package.json
       - run: bun install --frozen-lockfile
       # This is the authoritative repository gate. It checks tracked generated
       # files before rebuilding anything, then runs every repository check and

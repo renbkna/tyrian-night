@@ -154,14 +154,14 @@ test('only complete backups are restorable and the newest one is latest', () => 
     fs.writeFileSync(target, 'first\n');
     const first = createBackup(home, 'live-tyrian-apply', [target]);
     writeFileAtomic(target, 'second\n');
-    const second = createBackup(home, 'rice-layout-apply', [target]);
+    const second = createBackup(home, 'other-owner', [target]);
     fs.rmSync(path.join(second, 'manifest.json'));
     expect(findLatestBackup(home)?.backupRoot).toBe(first);
 
-    const third = createBackup(home, 'rice-layout-apply', [target]);
+    const third = createBackup(home, 'other-owner', [target]);
     expect(findLatestBackup(home)).toMatchObject({
       backupRoot: third,
-      manifest: { owner: 'rice-layout-apply' },
+      manifest: { owner: 'other-owner' },
     });
   });
 });
@@ -181,12 +181,12 @@ test('a backup manifest with fields outside its format is rejected', () => {
 
 test('stale temporaries beside targets are removed and unrelated files kept', () => {
   withTempHome('tyrian-stale-temporaries-', (home) => {
-    const target = path.join(home, '.config/foot/foot.ini');
+    const target = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
     const stale = path.join(
       home,
-      '.config/foot/.foot.ini.tyrian-0f0e0d0c-0b0a-4908-8706-050403020100.tmp'
+      '.config/fish/conf.d/.tyrian-night.fish.tyrian-0f0e0d0c-0b0a-4908-8706-050403020100.tmp'
     );
-    const unrelated = path.join(home, '.config/foot/.foot.ini.bak');
+    const unrelated = path.join(home, '.config/fish/conf.d/.tyrian-night.fish.bak');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.mkdirSync(stale);
     fs.writeFileSync(unrelated, 'keep\n');

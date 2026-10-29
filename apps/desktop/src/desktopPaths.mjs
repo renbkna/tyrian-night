@@ -51,32 +51,3 @@ export function resolveDesktopXdgRoots(userHome, environment) {
     stateRoot: resolveRoot('XDG_STATE_HOME', '.local/state'),
   };
 }
-
-/**
- * Resolve one logical path inside the destination's XDG config root. The
- * containment check is repeated after physical path resolution so a symlinked
- * suffix cannot turn a config-key into authority outside that root.
- *
- * @param {DesktopXdgRoots} xdgRoots
- * @param {string} configRelativePath
- * @returns {string}
- */
-export function resolveDesktopXdgConfigPath(xdgRoots, configRelativePath) {
-  if (
-    path.isAbsolute(configRelativePath) ||
-    configRelativePath.length === 0 ||
-    configRelativePath
-      .split(/[\\/]/u)
-      .some((segment) => segment === '' || segment === '.' || segment === '..')
-  ) {
-    throw new Error(`XDG config path must be a non-empty relative path: ${configRelativePath}`);
-  }
-
-  const configPath = resolvePathIdentity(path.join(xdgRoots.configRoot, configRelativePath));
-
-  if (!isSameOrDescendant(xdgRoots.configRoot, configPath)) {
-    throw new Error(`XDG config path escapes XDG_CONFIG_HOME: ${configRelativePath}`);
-  }
-
-  return configPath;
-}

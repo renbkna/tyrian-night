@@ -10,7 +10,7 @@ import { buildTyrianBackupRoot, TYRIAN_BACKUP_HOME, TYRIAN_STATE_HOME } from './
 /**
  * @typedef {'copy' | 'link'} ManagedPathMode
  * @typedef {{ target: string; existed: boolean }} BackupEntry
- * @typedef {{ owner: string; createdAt: string; entries: BackupEntry[]; details?: unknown }} BackupManifest
+ * @typedef {{ owner: string; createdAt: string; entries: BackupEntry[] }} BackupManifest
  */
 
 const BACKUP_MANIFEST_NAME = 'manifest.json';
@@ -446,10 +446,9 @@ export function removeStaleTemporaries(targetPaths) {
  * @param {string} userHome
  * @param {string} owner
  * @param {string[]} targetPaths
- * @param {unknown} [details]
  * @returns {string}
  */
-export function createBackup(userHome, owner, targetPaths, details) {
+export function createBackup(userHome, owner, targetPaths) {
   const backupRoot = buildTyrianBackupRoot(userHome, owner);
   const filesRoot = path.join(backupRoot, 'files');
   makeDirectoryDurably(filesRoot);
@@ -471,7 +470,6 @@ export function createBackup(userHome, owner, targetPaths, details) {
     owner,
     createdAt: new Date().toISOString(),
     entries,
-    ...(details === undefined ? {} : { details }),
   };
   writeFileAtomic(
     path.join(backupRoot, BACKUP_MANIFEST_NAME),
@@ -485,13 +483,13 @@ export function createBackup(userHome, owner, targetPaths, details) {
  * @param {string} backupRoot
  * @returns {BackupManifest}
  */
-export function readBackupManifest(userHome, backupRoot) {
+function readBackupManifest(userHome, backupRoot) {
   const manifest = /** @type {Partial<BackupManifest>} */ (
     JSON.parse(fs.readFileSync(path.join(backupRoot, BACKUP_MANIFEST_NAME), 'utf8'))
   );
   const fields =
     manifest !== null && typeof manifest === 'object' && !Array.isArray(manifest)
-      ? Object.keys(manifest).filter((field) => field !== 'details')
+      ? Object.keys(manifest)
       : [];
   if (
     fields.toSorted().join(',') !== 'createdAt,entries,owner' ||
@@ -517,8 +515,7 @@ export function readBackupManifest(userHome, backupRoot) {
 /**
  * Return every target to its backed-up state. Restore is atomic per target and
  * keeps the backup, so a failed or interrupted restore is repeated from the
- * same backup; the caller discards it once everything that depends on it,
- * such as recorded runtime state, is restored too.
+ * same backup; the caller discards it once the restore is complete.
  *
  * @param {string} userHome
  * @param {string} backupRoot

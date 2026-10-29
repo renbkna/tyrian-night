@@ -41,9 +41,6 @@ terminal/fish/config.example.fish
 terminal/fish/conf.d/tyrian-night.fish
 terminal/fish/functions/fish_greeting.fish
 terminal/fish/themes/
-terminal/foot/foot.ini
 terminal/foot/themes/
-terminal/ghostty/config.example
-terminal/ghostty/ghostty.css
 terminal/ghostty/themes/
 terminal/starship/tyrian-night.toml

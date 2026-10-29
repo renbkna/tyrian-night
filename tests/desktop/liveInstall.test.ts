@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { oklchToHex } from '../../scripts/colorScience.mjs';
-import { isExecutable } from '../../apps/desktop/src/commandChecks.mjs';
 import {
   buildLiveInstallPlan,
   installLiveTyrian,
@@ -14,17 +13,13 @@ import {
   prepareLiveInstallRepository,
   recoverLiveTyrian,
 } from '../../apps/desktop/src/installLiveTyrian.mjs';
-import { exists } from '../../apps/desktop/src/installOps.mjs';
+import { createBackup, exists } from '../../apps/desktop/src/installOps.mjs';
 import {
   TYRIAN_BACKUP_HOME,
   TYRIAN_INSTALL_HOME,
   WALLPAPER_ASSET_PATH,
 } from '../../apps/desktop/src/installPaths.mjs';
-import {
-  buildFishStartupConfig,
-  buildFootConfig,
-  buildGhosttyConfig,
-} from '../../scripts/terminalThemes.mjs';
+import { buildFishStartupConfig } from '../../scripts/terminalThemes.mjs';
 import { loadThemeDefinitionContext } from '../../scripts/themeDefinition.mjs';
 
 const FIXTURE_HOME = '/home/example';
@@ -308,7 +303,7 @@ test('live desktop selection removes a retired Plasma theme without touching unr
   }
 });
 
-test('live installer materializes full Tyrian rice targets without claiming historical paths', () => {
+test('live installer materializes Tyrian theme targets and leaves user terminal configs alone', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-install-test-'));
 
   try {
@@ -388,23 +383,21 @@ test('live installer materializes full Tyrian rice targets without claiming hist
     expect(fs.readFileSync(fishGreeting, 'utf8')).toContain(
       'fastfetch --config $tyrian_night_root/terminal/fastfetch/tyrian-night.jsonc'
     );
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe(
-      buildGhosttyConfig({ repository: THEME_REPOSITORY })
-    );
     expect(fs.readFileSync(ghosttyCss, 'utf8')).toBe('/* obsolete static dark chrome */\n');
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toContain('gtk-custom-css');
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toContain('window-titlebar-background');
     expect(
       fs.readFileSync(path.join(home, '.config/ghostty/themes/tyrian-dawn'), 'utf8')
     ).toContain('window-titlebar-background');
-    expect(fs.readFileSync(footConfig, 'utf8')).toBe(
-      buildFootConfig({ repository: THEME_REPOSITORY, themeDirectory: path.dirname(footTheme) })
-    );
     expect(fs.existsSync(footTheme)).toBe(true);
     expect(fs.readFileSync(fishConfig, 'utf8')).not.toContain('custom-greeting');
     expect(fs.readFileSync(fishGreeting, 'utf8')).not.toContain('custom-greeting');
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).not.toContain('font-size = 99');
-    expect(fs.readFileSync(footConfig, 'utf8')).not.toContain('font=stale:size=99');
+    // Terminal configs belong to the user: only theme files are installed beside them.
+    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('font-size = 99\n');
+    expect(fs.readFileSync(footConfig, 'utf8')).toBe('font=stale:size=99\n');
+    const ownedCommonPaths = JSON.parse(
+      fs.readFileSync(path.join(home, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH), 'utf8')
+    ).profiles.common.paths;
+    expect(ownedCommonPaths).not.toContain('.config/ghostty/config');
+    expect(ownedCommonPaths).not.toContain('.config/foot/foot.ini');
     expect(fs.readFileSync(kdeglobals, 'utf8')).toContain(
       '[KDE]\nLookAndFeelPackage=TyrianAbyss\nwidgetStyle=Breeze'
     );
@@ -751,9 +744,9 @@ test('profile ownership relocates across XDG roots without losing the unselected
       'profiles',
     ]);
 
-    const oldCommon = path.join(environmentA.XDG_CONFIG_HOME, 'ghostty/config');
+    const oldCommon = path.join(environmentA.XDG_CONFIG_HOME, 'fish/conf.d/tyrian-night.fish');
     const oldPlasma = path.join(environmentA.XDG_CONFIG_HOME, 'kdeglobals');
-    const newCommon = path.join(environmentB.XDG_CONFIG_HOME, 'ghostty/config');
+    const newCommon = path.join(environmentB.XDG_CONFIG_HOME, 'fish/conf.d/tyrian-night.fish');
     const newPlasma = path.join(environmentB.XDG_CONFIG_HOME, 'kdeglobals');
     const oldPlasmaContent = fs.readFileSync(oldPlasma, 'utf8');
 
@@ -795,14 +788,14 @@ test('profile ownership relocates across XDG roots without losing the unselected
 test('live installer validates repo sources before touching live config', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-preflight-home-'));
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-preflight-repo-'));
-  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  const fishStartup = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
 
   try {
     fs.cpSync(path.join(process.cwd(), 'source'), path.join(repoRoot, 'source'), {
       recursive: true,
     });
-    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
-    fs.writeFileSync(ghosttyConfig, 'font-size = 99\n');
+    fs.mkdirSync(path.dirname(fishStartup), { recursive: true });
+    fs.writeFileSync(fishStartup, 'echo before\n');
 
     expect(() =>
       installLiveTyrian({
@@ -812,7 +805,7 @@ test('live installer validates repo sources before touching live config', () => 
         target: 'plasma',
       })
     ).toThrow('Missing Tyrian install source: assets/tyrian-fetch.webp');
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('font-size = 99\n');
+    expect(fs.readFileSync(fishStartup, 'utf8')).toBe('echo before\n');
     expect(fs.existsSync(path.join(home, TYRIAN_BACKUP_HOME))).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -857,9 +850,6 @@ test('live installer renders from its injected repo and materializes only declar
     });
 
     const installRoot = path.join(home, TYRIAN_INSTALL_HOME);
-    const ghosttyConfig = fs.readFileSync(path.join(home, '.config/ghostty/config'), 'utf8');
-
-    expect(ghosttyConfig).not.toContain('window-titlebar-background');
     const installedAbyss = fs.readFileSync(
       path.join(home, '.config/ghostty/themes/tyrian-abyss'),
       'utf8'
@@ -881,13 +871,13 @@ test('live installer renders from its injected repo and materializes only declar
 test('live installer validates generated content before backup or mutation', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-content-home-'));
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-content-repo-'));
-  const ghosttyConfig = path.join(home, '.config/ghostty/config');
+  const fishStartup = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
 
   try {
     copyLiveInstallRepoFixture(repoRoot);
     fs.rmSync(path.join(repoRoot, 'desktop/caelestia/state/tyrian-abyss.sequences.txt'));
-    fs.mkdirSync(path.dirname(ghosttyConfig), { recursive: true });
-    fs.writeFileSync(ghosttyConfig, 'font-size = 99\n');
+    fs.mkdirSync(path.dirname(fishStartup), { recursive: true });
+    fs.writeFileSync(fishStartup, 'echo before\n');
 
     expect(() =>
       installLiveTyrian({
@@ -898,7 +888,7 @@ test('live installer validates generated content before backup or mutation', () 
         hyprlandMode: 'lua',
       })
     ).toThrow();
-    expect(fs.readFileSync(ghosttyConfig, 'utf8')).toBe('font-size = 99\n');
+    expect(fs.readFileSync(fishStartup, 'utf8')).toBe('echo before\n');
     expect(fs.existsSync(path.join(home, TYRIAN_BACKUP_HOME))).toBe(false);
     expect(fs.existsSync(path.join(home, TYRIAN_INSTALL_HOME))).toBe(false);
   } finally {
@@ -1115,7 +1105,7 @@ test('live installer rejects recursive source symlinks before mutation', () => {
     root,
     'desktop/kde/plasma/desktoptheme/TyrianAbyss/dialogs/background.svg'
   );
-  const liveConfig = path.join(home, '.config/ghostty/config');
+  const liveConfig = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
 
   try {
     copyLiveInstallRepoFixture(root);
@@ -1143,16 +1133,14 @@ test('live installer rejects recursive source symlinks before mutation', () => {
 test('a failed apply is completed by rerunning it and undone exactly by recovery', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-rollback-home-'));
   const installMarker = path.join(home, TYRIAN_INSTALL_HOME, 'existing.txt');
-  const liveConfig = path.join(home, '.config/ghostty/config');
-  const externalConfig = path.join(home, 'external-ghostty.conf');
-  const legacyConfig = path.join(home, '.local/share/caelestia/fish/config.fish');
+  const liveConfig = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
+  const externalConfig = path.join(home, 'external-tyrian-night.fish');
+  const footTheme = path.join(home, '.config/foot/themes/tyrian-abyss.ini');
   const caelestiaSchemeState = path.join(home, '.local/state/caelestia/scheme.json');
 
   try {
-    for (const filePath of [installMarker, legacyConfig]) {
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, `original:${path.basename(filePath)}\n`);
-    }
+    fs.mkdirSync(path.dirname(installMarker), { recursive: true });
+    fs.writeFileSync(installMarker, 'original:existing.txt\n');
     fs.writeFileSync(externalConfig, 'external config must remain untouched\n');
     fs.mkdirSync(path.dirname(liveConfig), { recursive: true });
     fs.symlinkSync(path.relative(path.dirname(liveConfig), externalConfig), liveConfig);
@@ -1164,7 +1152,7 @@ test('a failed apply is completed by rerunning it and undone exactly by recovery
       const destination = resolveMutationPath(newPath);
       if (!liveConfigPublicationObserved && destination === liveConfig) {
         expect(fs.lstatSync(liveConfig).isSymbolicLink()).toBe(true);
-        expect(fs.readFileSync(oldPath, 'utf8')).toContain('theme = dark:');
+        expect(fs.readFileSync(oldPath, 'utf8')).toContain('set -gx TYRIAN_NIGHT_ROOT');
         liveConfigPublicationObserved = true;
         const result = originalRename(oldPath, newPath);
         expect(fs.lstatSync(liveConfig).isFile()).toBe(true);
@@ -1205,7 +1193,7 @@ test('a failed apply is completed by rerunning it and undone exactly by recovery
       hyprlandMode: 'legacy',
     });
     expect(fs.existsSync(caelestiaSchemeState)).toBe(true);
-    expect(fs.existsSync(path.join(home, '.config/foot/foot.ini'))).toBe(true);
+    expect(fs.existsSync(footTheme)).toBe(true);
 
     // The rerun's backup holds the partial state; recovery undoes one step at a time.
     expect(recoverLiveTyrian({ home })).toBe(rerunReceipt?.backupRoot);
@@ -1216,9 +1204,8 @@ test('a failed apply is completed by rerunning it and undone exactly by recovery
     expect(fs.lstatSync(liveConfig).isSymbolicLink()).toBe(true);
     expect(fs.realpathSync(liveConfig)).toBe(externalConfig);
     expect(fs.readFileSync(externalConfig, 'utf8')).toBe('external config must remain untouched\n');
-    expect(fs.readFileSync(legacyConfig, 'utf8')).toBe('original:config.fish\n');
     expect(fs.existsSync(caelestiaSchemeState)).toBe(false);
-    expect(fs.existsSync(path.join(home, '.config/foot/foot.ini'))).toBe(false);
+    expect(fs.existsSync(footTheme)).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1359,25 +1346,51 @@ for (const mode of ['copy', 'link'] as const) {
   });
 }
 
-test('live preview observes an unfinished Plasma lifecycle while apply refuses to bypass it', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-plasma-journal-'));
-  const journalPath = path.join(home, '.local/state/tyrian-night/plasma-lifecycle.json');
+test('live apply refuses an ownership manifest that still claims user terminal configs', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-relinquished-config-'));
+  const manifestPath = path.join(home, LIVE_INSTALL_OWNERSHIP_RELATIVE_PATH);
+  const backupParent = path.join(home, TYRIAN_BACKUP_HOME);
 
   try {
-    fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-    fs.writeFileSync(
-      journalPath,
-      `${JSON.stringify({ owner: 'layout', backupRoot: path.join(home, 'backup') })}\n`
-    );
-    const interruptedState = snapshotTree(home);
+    installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' });
+    const currentManifest = fs.readFileSync(manifestPath, 'utf8');
 
-    installLiveTyrian({ repoRoot: process.cwd(), home, apply: false, target: 'plasma' });
-    expect(snapshotTree(home)).toEqual(interruptedState);
+    for (const userConfig of ['.config/ghostty/config', '.config/foot/foot.ini']) {
+      const manifest = JSON.parse(currentManifest);
+      manifest.profiles.common.paths.push(userConfig);
+      const claimingManifest = `${JSON.stringify(manifest, null, 2)}\n`;
+      fs.writeFileSync(manifestPath, claimingManifest);
+      const configPath = path.join(home, userConfig);
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, 'user config\n');
+      const backups = fs.readdirSync(backupParent);
 
-    expect(() =>
-      installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' })
-    ).toThrow('requires recovery through the rice command');
-    expect(snapshotTree(home)).toEqual(interruptedState);
+      // Refused while reading the manifest: before any backup, stale cleanup or write.
+      expect(() =>
+        installLiveTyrian({ repoRoot: process.cwd(), home, apply: true, target: 'plasma' })
+      ).toThrow('invalid common path');
+      expect(fs.readFileSync(configPath, 'utf8')).toBe('user config\n');
+      expect(fs.readFileSync(manifestPath, 'utf8')).toBe(claimingManifest);
+      expect(fs.readdirSync(backupParent)).toEqual(backups);
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('live recovery refuses a newest backup owned by another tool and changes nothing', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-foreign-backup-'));
+  const target = path.join(home, '.config/ghostty/config');
+
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'before\n');
+    createBackup(home, 'other-owner', [target]);
+    fs.writeFileSync(target, 'after\n');
+    const state = snapshotTree(home);
+
+    expect(() => recoverLiveTyrian({ home })).toThrow("belongs to 'other-owner'");
+    expect(snapshotTree(home)).toEqual(state);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -1385,7 +1398,7 @@ test('live preview observes an unfinished Plasma lifecycle while apply refuses t
 
 test('live installer aborts on snapshot failure before changing owned paths', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-live-backup-failure-home-'));
-  const liveConfig = path.join(home, '.config/ghostty/config');
+  const liveConfig = path.join(home, '.config/fish/conf.d/tyrian-night.fish');
   const backupParent = path.join(home, TYRIAN_BACKUP_HOME);
 
   try {
@@ -1448,22 +1461,6 @@ test('live apply rejects missing directory exchange before backup or target muta
     expect(fs.existsSync(path.join(home, TYRIAN_INSTALL_HOME))).toBe(false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test('command discovery requires a regular file executable by the current process', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-command-permission-'));
-  const candidate = path.join(root, 'candidate');
-
-  try {
-    fs.writeFileSync(candidate, '#!/bin/sh\n');
-    fs.chmodSync(candidate, 0o644);
-    expect(isExecutable(candidate)).toBe(false);
-    fs.chmodSync(candidate, 0o755);
-    expect(isExecutable(candidate)).toBe(true);
-    expect(isExecutable(root)).toBe(false);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

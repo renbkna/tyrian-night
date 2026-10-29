@@ -1,6 +1,6 @@
 # Tyrian Night for KDE Plasma
 
-KDE uses these generated files for the Tyrian rice:
+KDE uses these generated files:
 
 - `color-schemes/*.colors` are KDE color schemes.
 - `plasma/desktoptheme/*/` are complete Tyrian Plasma desktop-theme packages.
@@ -40,8 +40,7 @@ Install the look-and-feel package by copying (Plasma 6 does not load global
 themes through symlinks)
 `desktop/kde/plasma/look-and-feel/TyrianNight` into
 `~/.local/share/plasma/look-and-feel/`. The explicit Plasma live profile
-(`bun run desktop:plasma:apply`) and the Plasma-only rice command do these
-package installs automatically.
+(`bun run desktop:plasma:apply`) does these package installs automatically.
 
 Union CSS packages are kept as Plasma 6.7 tech-preview assets only. The live Plasma
 profile leaves KDE on Breeze application style and does not mutate the live

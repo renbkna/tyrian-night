@@ -26,9 +26,7 @@ const TERMINAL_GENERATED_OWNERSHIP = [
   { directory: 'terminal/fish/conf.d', match: /^tyrian-night\.fish$/u },
   { directory: 'terminal/foot/themes' },
   { directory: 'terminal/fastfetch', match: /^tyrian-night\.jsonc$/u },
-  { directory: 'terminal/ghostty', match: /^(?:config\.example|ghostty\.css)$/u },
   { directory: 'terminal/fish', match: /^config\.example\.fish$/u },
-  { directory: 'terminal/foot', match: /^foot\.ini$/u },
   { directory: 'terminal/starship', match: /^tyrian-night\.toml$/u },
 ];
 
@@ -59,14 +57,6 @@ export function buildTerminalThemeAssets(repoRoot = defaultRepoRoot) {
         content: buildFishTheme(theme),
       },
     ]),
-    {
-      path: 'terminal/ghostty/config.example',
-      content: buildGhosttyConfig({ repository }),
-    },
-    {
-      path: 'terminal/foot/foot.ini',
-      content: buildFootConfig({ repository }),
-    },
     {
       path: 'terminal/fish/config.example.fish',
       content: buildFishConfig({ repository }),
@@ -226,84 +216,10 @@ function buildFishTheme(theme) {
  * @param {{ repository: import('./themeSources.mjs').ThemeRepository }} options
  * @returns {string}
  */
-export function buildGhosttyConfig({ repository }) {
-  const darkSource = getTerminalDefaultThemeSource('dark', repository.sources);
-  const lightSource = getTerminalDefaultThemeSource('light', repository.sources);
-  const lines = [
-    `theme = dark:${darkSource.slug},light:${lightSource.slug}`,
-    'background-opacity = 0.82',
-    'background-blur = true',
-    'font-family = Monaspace Neon',
-    'font-family-bold = Monaspace Neon',
-    'font-family-italic = Monaspace Radon',
-    'font-family-bold-italic = Monaspace Radon',
-    'font-size = 13',
-    'font-thicken = false',
-    'cursor-style = bar',
-    'cursor-style-blink = true',
-    'window-decoration = client',
-    'window-theme = ghostty',
-    'window-vsync = true',
-    'gtk-titlebar = true',
-    'gtk-titlebar-style = tabs',
-    'window-show-tab-bar = auto',
-    'gtk-tabs-location = top',
-    'gtk-wide-tabs = false',
-    'gtk-toolbar-style = flat',
-    'window-padding-x = 10',
-    'window-padding-y = 8',
-    'minimum-contrast = 1',
-    'mouse-scroll-multiplier = discrete:1,precision:1',
-    'copy-on-select = clipboard',
-  ];
-
-  return `${lines.join('\n')}\n`;
-}
-
-/**
- * @param {{ repository: import('./themeSources.mjs').ThemeRepository; themeDirectory?: string }} options
- * @returns {string}
- */
-export function buildFootConfig({
-  repository,
-  themeDirectory = '/path/to/tyrian-night/terminal/foot/themes',
-}) {
-  const defaultDarkSource = getTerminalDefaultThemeSource('dark', repository.sources);
-  const defaultLightSource = getTerminalDefaultThemeSource('light', repository.sources);
-
-  return [
-    `include=${themeDirectory}/${defaultDarkSource.slug}.ini`,
-    `include=${themeDirectory}/${defaultLightSource.slug}.ini`,
-    '',
-    '[main]',
-    'initial-color-theme=dark',
-    'font=Monaspace Neon:size=13',
-    'font-bold=Monaspace Neon:size=13',
-    'font-italic=Monaspace Radon:size=13',
-    'font-bold-italic=Monaspace Radon:size=13',
-    'pad=10x8',
-    'selection-target=clipboard',
-    '',
-    '[csd]',
-    'preferred=client',
-    'font=Monaspace Neon',
-    'hide-when-maximized=yes',
-    '',
-    '[cursor]',
-    'style=beam',
-    'blink=yes',
-    '',
-  ].join('\n');
-}
-
-/**
- * @param {{ repository: import('./themeSources.mjs').ThemeRepository; tyrianRoot?: string }} options
- * @returns {string}
- */
-export function buildFishConfig({ repository, tyrianRoot = '/path/to/tyrian-night' }) {
+function buildFishConfig({ repository }) {
   return [
     'if status is-interactive',
-    ...buildFishStartupConfig({ repository, tyrianRoot })
+    ...buildFishStartupConfig({ repository })
       .trimEnd()
       .split('\n')
       .map((line) => `    ${line}`),

@@ -12,13 +12,15 @@ import {
 } from '../../apps/desktop/src/installPaths.mjs';
 import {
   buildFishStartupConfig,
-  buildFootConfig,
-  buildGhosttyConfig,
   buildTerminalThemeAssets,
   syncTerminalThemeAssets,
 } from '../../scripts/terminalThemes.mjs';
 import { themeColor } from '../../scripts/themeDefinition.mjs';
-import { loadThemeInspectionRepository, loadThemeRepository } from '../../scripts/themeSources.mjs';
+import {
+  getTerminalDefaultThemeSource,
+  loadThemeInspectionRepository,
+  loadThemeRepository,
+} from '../../scripts/themeSources.mjs';
 
 const assets = new Map(buildTerminalThemeAssets().map((asset) => [asset.path, asset.content]));
 
@@ -46,12 +48,6 @@ test('terminal generation resolves validated default roles from the injected cat
 
     const injectedAssets = new Map(
       buildTerminalThemeAssets(root).map((asset) => [asset.path, asset.content])
-    );
-    expect(injectedAssets.get('terminal/ghostty/config.example')).toContain(
-      'theme = dark:tyrian-night,light:tyrian-dawn'
-    );
-    expect(injectedAssets.get('terminal/foot/foot.ini')).toContain(
-      'terminal/foot/themes/tyrian-night.ini'
     );
     expect(injectedAssets.get('terminal/fish/config.example.fish')).toContain(
       'terminal/fish/themes/tyrian-night.fish'
@@ -85,8 +81,6 @@ test('terminal config generators require an admitted repository snapshot', () =>
     writeSourceData(themePath, recipe);
     const inspection = loadThemeInspectionRepository(root);
 
-    expect(buildGhosttyConfig({ repository: admitted })).toContain('theme = dark:');
-    expect(buildFootConfig({ repository: admitted })).toContain('initial-color-theme=dark');
     expect(buildFishStartupConfig({ repository: admitted })).toContain('terminal/fish/themes/');
     expect(() => loadThemeRepository(root)).toThrow('violates theme safety policy');
 
@@ -94,7 +88,7 @@ test('terminal config generators require an admitted repository snapshot', () =>
     // accept only admitted repositories. The call is never made.
     const rejectsInspection = () =>
       // @ts-expect-error an inspection repository is not an admitted ThemeRepository
-      buildGhosttyConfig({ repository: inspection });
+      buildFishStartupConfig({ repository: inspection });
     void rejectsInspection;
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -190,14 +184,27 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
   }
 });
 
-test('Ghostty mode-aware native themes are the only chrome color authority', () => {
-  expect(assets.has('terminal/ghostty/ghostty.css')).toBe(false);
-  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
-  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain(
-    'window-titlebar-background'
+test('Ghostty and Foot outputs are theme files only, never user configs', () => {
+  const terminalConfigOutputs = [...assets.keys()].filter(
+    (assetPath) =>
+      /^terminal\/(?:ghostty|foot)\//u.test(assetPath) &&
+      !/^terminal\/(?:ghostty|foot)\/themes\//u.test(assetPath)
   );
-  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain(
-    'window-titlebar-foreground'
+  expect(terminalConfigOutputs).toEqual([]);
+});
+
+test('terminal READMEs name the catalog terminal defaults', () => {
+  const dark = getTerminalDefaultThemeSource('dark', THEME_REPOSITORY.sources).slug;
+  const light = getTerminalDefaultThemeSource('light', THEME_REPOSITORY.sources).slug;
+
+  expect(fs.readFileSync('terminal/ghostty/README.md', 'utf8')).toContain(
+    `theme = dark:${dark},light:${light}`
+  );
+  const footReadme = fs.readFileSync('terminal/foot/README.md', 'utf8');
+  expect(footReadme).toContain(`include=~/.config/foot/themes/${dark}.ini`);
+  expect(footReadme).toContain(`include=~/.config/foot/themes/${light}.ini`);
+  expect(fs.readFileSync('terminal/fish/README.md', 'utf8')).toContain(
+    `terminal/fish/themes/${dark}.fish`
   );
 });
 
@@ -287,58 +294,7 @@ test('Fastfetch startup config uses the default Tyrian terminal palette with the
   ]);
 });
 
-test('example configs point each terminal layer at the right owner', () => {
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'theme = dark:tyrian-abyss,light:tyrian-dawn'
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('background-opacity = 0.82');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'font-family = Monaspace Neon'
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'font-family-italic = Monaspace Radon'
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'font-family-bold-italic = Monaspace Radon'
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('cursor-style = bar');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-decoration = client');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-theme = ghostty');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-vsync = true');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar = true');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-titlebar-style = tabs');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('window-show-tab-bar = auto');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-tabs-location = top');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-wide-tabs = false');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('gtk-toolbar-style = flat');
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain(
-    'mouse-scroll-multiplier = discrete:1,precision:1'
-  );
-  expect(requiredAsset('terminal/ghostty/config.example')).toContain('copy-on-select = clipboard');
-  expect(requiredAsset('terminal/ghostty/config.example')).not.toContain('gtk-custom-css');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain(
-    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-abyss.ini'
-  );
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain(
-    'include=/path/to/tyrian-night/terminal/foot/themes/tyrian-dawn.ini'
-  );
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('initial-color-theme=dark');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('font=Monaspace Neon:size=13');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('font-italic=Monaspace Radon:size=13');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('selection-target=clipboard');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('[csd]');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('preferred=client');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('hide-when-maximized=yes');
-  expect(requiredAsset('terminal/foot/foot.ini')).toContain('style=beam');
-  expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'set -gx TYRIAN_NIGHT_ROOT "/path/to/tyrian-night"'
-  );
-  expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'source $TYRIAN_NIGHT_ROOT/terminal/fish/themes/tyrian-abyss.fish'
-  );
-  expect(requiredAsset('terminal/fish/config.example.fish')).toContain(
-    'set -gx STARSHIP_CONFIG $TYRIAN_NIGHT_ROOT/terminal/starship/tyrian-night.toml'
-  );
+test('Fish example, startup snippet and greeting point each layer at the Tyrian root', () => {
   expect(requiredAsset('terminal/fish/config.example.fish')).not.toContain(
     'function fish_greeting'
   );

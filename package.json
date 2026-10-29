@@ -2,19 +2,19 @@
   "name": "tyrian-night-workspace",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.3.11",
+  "packageManager": "bun@1.4.4",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=26.13.0"
   },
   "workspaces": [
     "apps/desktop",
     "apps/vscode"
   ],
   "scripts": {
-    "verify": "bun run check:tracked-generated && bun run generate && bun run check && bun run lint && bun run test:isolated ./tests && bun run format:check && bun run check:union-css && bun run check:rice",
+    "verify": "bun run check:tracked-generated && bun run generate && bun run check && bun run lint && bun run test:isolated ./tests && bun run format:check && bun run check:union-css",
     "verify:vscode": "bun run generate --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode ./tests/island && bun run --cwd apps/vscode bundle",
     "verify:vscode-portable": "bun run generate --product=vscode && bun run check && bun run lint && bun run test:isolated ./tests/theme ./tests/vscode && bun run --cwd apps/vscode bundle",
-    "verify:desktop": "bun run generate --product=desktop && bun run check && bun run test:isolated ./tests/theme ./tests/desktop && bun run check:union-css && bun run check:rice",
+    "verify:desktop": "bun run generate --product=desktop && bun run check && bun run test:isolated ./tests/theme ./tests/desktop && bun run check:union-css",
     "package:vscode": "bun run verify:vscode && bun run --cwd apps/vscode package:artifact",
     "generate": "node scripts/generate.mjs",
     "check:generated": "node scripts/generate.mjs --check",
@@ -27,10 +27,6 @@
     "desktop:caelestia:preview": "node apps/desktop/src/installLiveTyrian.mjs --target=caelestia",
     "desktop:caelestia:apply": "node apps/desktop/src/installLiveTyrian.mjs --target=caelestia --apply",
     "desktop:recover": "node apps/desktop/src/installLiveTyrian.mjs --recover",
-    "rice": "node apps/desktop/src/rice.mjs",
-    "rice:apply": "node apps/desktop/src/rice.mjs --apply",
-    "rice:recover": "node apps/desktop/src/rice.mjs --recover",
-    "check:rice": "node apps/desktop/src/rice.mjs --check",
     "build": "bun run generate && bun run --cwd apps/vscode bundle",
     "watch": "bun run --cwd apps/vscode watch",
     "check": "tsc --noEmit && tsc --project tests/tsconfig.json",
@@ -43,11 +39,11 @@
     "package": "bun run package:vscode"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.14",
-    "@types/bun": "1.3.11",
-    "@types/node": "^22.19.17",
-    "oxlint": "^1.63.0",
-    "typescript": "^6.0.3"
+    "@biomejs/biome": "^2.6.4",
+    "@types/bun": "1.4.4",
+    "@types/node": "^26.6.6",
+    "oxlint": "^1.90.0",
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "picomatch": "^4.0.4"
