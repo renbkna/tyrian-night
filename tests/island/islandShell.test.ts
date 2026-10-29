@@ -270,7 +270,6 @@ test('clean roots with semantically correct checksum are not rewritten during re
 
   expect(result.changed).toBe(true);
   expect(result).toMatchObject({
-    desiredStateChanged: true,
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,
@@ -297,7 +296,6 @@ test('restore-all retains a current disabled desired record without touching wor
 
   expect(result.changed).toBe(false);
   expect(result).toMatchObject({
-    desiredStateChanged: false,
     registryChanged: false,
     physicalChanged: false,
   });
@@ -407,7 +405,6 @@ test('restore-all prunes registered missing roots as an explicit cleanup action'
 
   expect(result).toEqual({
     changed: true,
-    desiredStateChanged: false,
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,
@@ -441,7 +438,6 @@ test('restore of an untouched root with an unsupported product.json publishes Cl
   });
   await expect(restoreIslandShell({ appRoot, registryHome })).resolves.toMatchObject({
     physicalChanged: false,
-    desiredStateChanged: true,
   });
   await expect(readManagedAppRootRegistration(appRoot, { registryHome })).resolves.toEqual({
     kind: 'valid',
@@ -1050,7 +1046,6 @@ test('apply readiness reports permission-required without mutating a read-only a
 
     expect(readiness).toMatchObject({
       kind: 'permission-required',
-      changed: true,
       writeAccess: {
         writable: false,
       },
@@ -1065,7 +1060,7 @@ test('apply readiness reports permission-required without mutating a read-only a
   }
 });
 
-test('apply readiness reports no change after a verified apply', async () => {
+test('apply readiness is ready after a verified apply', async () => {
   const appRoot = await createAppRoot('already-current-readiness');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
@@ -1080,7 +1075,6 @@ test('apply readiness reports no change after a verified apply', async () => {
     })
   ).resolves.toMatchObject({
     kind: 'ready',
-    changed: false,
     status: {
       classification: 'patched',
     },

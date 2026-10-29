@@ -437,7 +437,7 @@ test('a restore that only cleans up records says so and requests no reload', asy
   resetObservations();
   queuedSpawnResponses.push({
     kind: 'restored',
-    ...mutationFacts({ desiredStateChanged: true, registryChanged: true }),
+    ...mutationFacts({ registryChanged: true }),
     restoredAppRoots: ['/test-vscode-app-root'],
     failedAppRoots: [],
     quarantinedRecords: [],

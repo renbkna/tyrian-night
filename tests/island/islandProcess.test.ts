@@ -10,7 +10,6 @@ import type { IslandShellFailureDescription } from '../../apps/vscode/src/island
 const failure: IslandShellFailureDescription = {
   code: 'permission-required',
   changed: true,
-  desiredStateChanged: true,
   registryChanged: true,
   physicalChanged: false,
   externalDrift: false,
@@ -28,7 +27,6 @@ test('Island CLI failures preserve semantic code and mutation facts', () => {
   expect(error).toMatchObject({
     code: 'permission-required',
     changed: true,
-    desiredStateChanged: true,
     registryChanged: true,
     physicalChanged: false,
     externalDrift: false,

@@ -47,7 +47,7 @@ type IslandRegisteredRoot = {
 };
 
 type RegistryEntry =
-  | { kind: 'identified'; appRoot: string; corrupt: boolean; reason: string }
+  | { kind: 'identified'; appRoot: string; corruptReason: string | undefined }
   | { kind: 'unidentifiable'; recordPath: string; reason: string }
   | { kind: 'unreadable'; recordPath: string; error: unknown };
 
@@ -67,8 +67,12 @@ export async function listIslandDoctorRoots(
         registryDiagnostics.push(`${entry.recordPath}: ${errorMessage(entry.error)}`);
         continue;
       }
-      if (entry.kind === 'unidentifiable' || entry.corrupt) registryDiagnostics.push(entry.reason);
-      if (entry.kind === 'identified') appRoots.add(entry.appRoot);
+      if (entry.kind === 'unidentifiable') {
+        registryDiagnostics.push(entry.reason);
+        continue;
+      }
+      if (entry.corruptReason !== undefined) registryDiagnostics.push(entry.corruptReason);
+      appRoots.add(entry.appRoot);
     }
   } catch (error) {
     registryDiagnostics.push(errorMessage(error));
@@ -115,7 +119,7 @@ export async function listIslandRestoreRoots(
         } catch (error) {
           unreadable.push(error);
         }
-      } else candidates.set(entry.appRoot, entry.corrupt);
+      } else candidates.set(entry.appRoot, entry.corruptReason !== undefined);
     }
     if (unreadable.length > 0) {
       throw unreadable.length === 1
@@ -284,7 +288,7 @@ async function identifyRecord(
   environment: IslandShellEnvironment
 ): Promise<
   | { kind: 'unidentifiable'; recordPath: string; reason: string }
-  | { kind: 'identified'; appRoot: string; corrupt: boolean; reason: string }
+  | { kind: 'identified'; appRoot: string; corruptReason: string | undefined }
 > {
   const unidentifiable = (reason: string) => ({
     kind: 'unidentifiable' as const,
@@ -326,9 +330,9 @@ async function identifyRecord(
 
   try {
     parseManagedRootRecord(content, recordPath);
-    return { kind: 'identified', appRoot, corrupt: false, reason: '' };
+    return { kind: 'identified', appRoot, corruptReason: undefined };
   } catch (error) {
-    return { kind: 'identified', appRoot, corrupt: true, reason: errorMessage(error) };
+    return { kind: 'identified', appRoot, corruptReason: errorMessage(error) };
   }
 }
 

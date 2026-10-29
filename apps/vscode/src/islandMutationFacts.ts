@@ -1,9 +1,5 @@
-const ISLAND_MUTATION_FACT_KEYS = [
-  'desiredStateChanged',
-  'registryChanged',
-  'physicalChanged',
-  'externalDrift',
-] as const;
+/** `registryChanged` covers the desired-state records, which live in the registry. */
+const ISLAND_MUTATION_FACT_KEYS = ['registryChanged', 'physicalChanged', 'externalDrift'] as const;
 
 /** What an Island operation durably changed or left unresolved. */
 export type IslandMutationFacts = Record<(typeof ISLAND_MUTATION_FACT_KEYS)[number], boolean>;
@@ -24,7 +20,7 @@ export function mergeIslandMutationFacts(
   ) as IslandMutationFacts;
   return {
     ...merged,
-    changed: merged.desiredStateChanged || merged.registryChanged || merged.physicalChanged,
+    changed: merged.registryChanged || merged.physicalChanged,
   };
 }
 
@@ -34,7 +30,6 @@ export function mergeIslandMutationFacts(
  * error graph.
  */
 export class IslandMutationError extends Error implements IslandMutationResult {
-  readonly desiredStateChanged: boolean;
   readonly registryChanged: boolean;
   readonly physicalChanged: boolean;
   readonly externalDrift: boolean;
@@ -43,7 +38,6 @@ export class IslandMutationError extends Error implements IslandMutationResult {
   constructor(message: string, facts: Partial<IslandMutationFacts>, options?: ErrorOptions) {
     super(message, options);
     const own = islandMutationFacts(facts);
-    this.desiredStateChanged = own.desiredStateChanged;
     this.registryChanged = own.registryChanged;
     this.physicalChanged = own.physicalChanged;
     this.externalDrift = own.externalDrift;
@@ -51,7 +45,15 @@ export class IslandMutationError extends Error implements IslandMutationResult {
   }
 }
 
-/** Breadth-first walk of an error and its `AggregateError.errors` and `cause` links. */
+/** The errors one error wraps: its `AggregateError.errors` and its `cause`. */
+export function childErrors(candidate: unknown): unknown[] {
+  return [
+    ...(candidate instanceof AggregateError ? candidate.errors : []),
+    ...(candidate instanceof Error && candidate.cause !== undefined ? [candidate.cause] : []),
+  ];
+}
+
+/** Breadth-first walk of an error and every error it wraps. */
 export function* islandErrorGraph(root: unknown): Generator<unknown> {
   const pending = [root];
   const visited = new Set<unknown>();
@@ -62,8 +64,7 @@ export function* islandErrorGraph(root: unknown): Generator<unknown> {
     visited.add(candidate);
     yield candidate;
 
-    if (candidate instanceof AggregateError) pending.push(...candidate.errors);
-    if (candidate instanceof Error && candidate.cause !== undefined) pending.push(candidate.cause);
+    pending.push(...childErrors(candidate));
   }
 }
 

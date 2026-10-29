@@ -2,6 +2,7 @@ import {
   type IslandMutationFacts,
   type IslandMutationResult,
   IslandMutationError,
+  childErrors,
   islandErrorGraph,
   readIslandMutationFacts,
 } from './islandMutationFacts.js';
@@ -39,8 +40,6 @@ export type IslandShellStatus = {
         installedAt: string;
         desiredCssFile: string;
         themeVersion: string;
-        upstreamWorkbenchChecksum: string;
-        patchedWorkbenchChecksum: string;
         cssChecksum: string;
       }
     | undefined;
@@ -140,22 +139,17 @@ export type IslandShellWriteAccess = {
 export type IslandShellApplyReadiness =
   | {
       kind: 'ready';
-      appRoot: string;
-      changed: boolean;
       status: IslandShellStatus;
       writeAccess: IslandShellWriteAccess;
     }
   | {
       kind: 'permission-required';
-      appRoot: string;
-      changed: boolean;
       status: IslandShellStatus;
       writeAccess: IslandShellWriteAccess;
       reason: string;
     }
   | {
       kind: 'unsupported' | 'blocked';
-      appRoot: string;
       status: IslandShellStatus | undefined;
       writeAccess: IslandShellWriteAccess | undefined;
       reason: string;
@@ -179,10 +173,7 @@ export function isPermissionError(error: unknown): boolean {
 }
 
 function hasChildErrors(candidate: unknown): boolean {
-  return (
-    (candidate instanceof AggregateError && candidate.errors.length > 0) ||
-    (candidate instanceof Error && candidate.cause !== undefined)
-  );
+  return childErrors(candidate).length > 0;
 }
 
 /**

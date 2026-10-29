@@ -51,7 +51,7 @@ test('every Island mutation is unsupported on other platforms before filesystem 
           themeVersion: 'test',
           registryHome,
         })
-      ).resolves.toMatchObject({ kind: 'unsupported', appRoot });
+      ).resolves.toMatchObject({ kind: 'unsupported', status: undefined });
       await expect(
         applyIslandShell({ appRoot, cssSourcePath, themeVersion: 'test', registryHome })
       ).rejects.toMatchObject({ code: 'unsupported', changed: false });

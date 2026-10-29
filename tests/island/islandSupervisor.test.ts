@@ -89,7 +89,6 @@ test('repair changes physical state while desired state is unchanged', async () 
     })
   ).resolves.toMatchObject({
     kind: 'applied',
-    desiredStateChanged: false,
     physicalChanged: true,
   });
 });
@@ -107,7 +106,6 @@ test('already-disabled restore changes physical state without rewriting desired 
     })
   ).resolves.toMatchObject({
     kind: 'restored',
-    desiredStateChanged: false,
     physicalChanged: true,
     failedAppRoots: [],
   });

@@ -33,7 +33,9 @@ const TYRIAN_STYLESHEET_PATTERN = new RegExp(
   'gimu'
 );
 
-type ProductJson = Record<string, unknown> & { checksums: Record<string, unknown> };
+type ProductJson = Record<string, unknown> & {
+  checksums: Record<string, unknown> & { [WORKBENCH_CHECKSUM_KEY]: string };
+};
 
 type IslandRootState = {
   paths: IslandPatchPaths;
@@ -103,7 +105,6 @@ export async function inspectIslandRoot(
   const hasTyrianSidecars = [...sidecars.values()].some((content) => content !== undefined);
   const desiredEnabled = registration.kind === 'valid' && registration.desiredCssFile !== null;
   const managed = desiredEnabled || hasTyrianSidecars;
-  const issues: string[] = [];
   const workbenchChecksum = sha256Base64(currentHtml);
   const checksumMatches = productWorkbenchChecksum === workbenchChecksum;
   const backupMismatch = backupHtmlExists !== backupProductExists;
@@ -132,74 +133,37 @@ export async function inspectIslandRoot(
     backupProductJson !== undefined
       ? { html: backupHtml, productJson: backupProductJson }
       : undefined;
-  const brokenBackup =
-    backupMismatch ||
-    backupPairInvalid ||
-    (manifestExists && !manifestShapeValid) ||
-    manifestProofIssues.length > 0 ||
-    (active && (!cssExists || !manifestExists)) ||
-    blockState === 'malformed' ||
-    (active && !registered) ||
-    registration.kind === 'corrupt' ||
-    (manifest !== undefined &&
-      recordedCssFile !== undefined &&
-      manifest.desiredCssFile !== recordedCssFile);
-
-  if (active) {
-    issues.push('Tyrian workbench patch evidence is present.');
-  }
-
-  if (blockState === 'malformed') {
-    issues.push('Tyrian workbench patch markers or stylesheet link are malformed.');
-  }
-
-  if (hasTyrianSidecars) {
-    issues.push('Tyrian-managed sidecar files are present.');
-  }
-
-  if (registered) {
-    issues.push('Tyrian registry contains this app root.');
-  }
-
-  if (registration.kind === 'corrupt') {
-    issues.push(registration.reason);
-  }
-
-  if (active && !registered) {
-    issues.push('Tyrian patch evidence exists without its required desired-state record.');
-  }
-
-  if (
+  // Each condition that makes the Tyrian evidence untrustworthy, with the issue it reports.
+  const brokenBackupIssues = [
+    blockState === 'malformed' &&
+      'Tyrian workbench patch markers or stylesheet link are malformed.',
+    registration.kind === 'corrupt' && registration.reason,
+    active &&
+      !registered &&
+      'Tyrian patch evidence exists without its required desired-state record.',
     manifest !== undefined &&
-    recordedCssFile !== undefined &&
-    manifest.desiredCssFile !== recordedCssFile
-  ) {
-    issues.push('Tyrian manifest style does not match the desired-state record.');
-  }
-
-  if (productLayout.kind === 'unsupported') {
-    issues.push(productLayout.reason);
-  } else if (!checksumMatches) {
-    issues.push('product.json checksum does not match the current workbench HTML.');
-  }
-
-  if (backupMismatch) {
-    issues.push('Tyrian backup files are incomplete.');
-  }
-
-  if (backupPairInvalid) {
-    issues.push('Tyrian backup checksum does not match the backup workbench HTML.');
-  }
-
-  if (manifestExists && !manifestShapeValid) {
-    issues.push('Tyrian manifest exists but is invalid.');
-  }
-
-  issues.push(...manifestProofIssues);
-
-  if (active && !manifestExists) {
-    issues.push('Tyrian marker is present but the manifest file is missing.');
-  }
+      recordedCssFile !== undefined &&
+      manifest.desiredCssFile !== recordedCssFile &&
+      'Tyrian manifest style does not match the desired-state record.',
+    backupMismatch && 'Tyrian backup files are incomplete.',
+    backupPairInvalid && 'Tyrian backup checksum does not match the backup workbench HTML.',
+    manifestExists && !manifestShapeValid && 'Tyrian manifest exists but is invalid.',
+    ...manifestProofIssues,
+    active && !manifestExists && 'Tyrian marker is present but the manifest file is missing.',
+    active && !cssExists && 'Tyrian marker is present but the stylesheet is missing.',
+  ].filter((issue) => typeof issue === 'string');
+  const brokenBackup = brokenBackupIssues.length > 0;
+  const issues = [
+    ...(active ? ['Tyrian workbench patch evidence is present.'] : []),
+    ...(hasTyrianSidecars ? ['Tyrian-managed sidecar files are present.'] : []),
+    ...(registered ? ['Tyrian registry contains this app root.'] : []),
+    ...(productLayout.kind === 'unsupported'
+      ? [productLayout.reason]
+      : checksumMatches
+        ? []
+        : ['product.json checksum does not match the current workbench HTML.']),
+    ...brokenBackupIssues,
+  ];
 
   let classification: IslandShellStatus['classification'] = 'clean';
 
@@ -233,8 +197,6 @@ export async function inspectIslandRoot(
           installedAt: manifest.installedAt,
           desiredCssFile: manifest.desiredCssFile,
           themeVersion: manifest.themeVersion,
-          upstreamWorkbenchChecksum: manifest.upstreamWorkbenchChecksum,
-          patchedWorkbenchChecksum: manifest.patchedWorkbenchChecksum,
           cssChecksum: manifest.cssChecksum,
         };
 
@@ -414,8 +376,8 @@ function readTyrianBlockState(html: string): 'absent' | 'valid' | 'malformed' {
   return startIndexes.length === 1 &&
     endIndexes.length === 1 &&
     stylesheetIndexes.length === 1 &&
-    startIndexes[0]! < stylesheetIndexes[0]! &&
-    stylesheetIndexes[0]! < endIndexes[0]!
+    startIndexes[0] < stylesheetIndexes[0] &&
+    stylesheetIndexes[0] < endIndexes[0]
     ? 'valid'
     : 'malformed';
 }
@@ -459,30 +421,27 @@ function setWorkbenchChecksum(productJsonContent: string, workbenchHtml: string)
   return JSON.stringify(parsed, null, '\t').concat('\n');
 }
 
+/** Whether a product.json of a supported layout names this workbench HTML's checksum. */
 function doesWorkbenchChecksumValueMatch(
   productJsonContent: string,
   workbenchHtml: string
 ): boolean {
-  try {
-    return readWorkbenchChecksum(productJsonContent) === sha256Base64(workbenchHtml);
-  } catch {
-    return false;
-  }
+  const layout = readProductLayout(productJsonContent);
+  return layout.kind === 'supported' && layout.checksum === sha256Base64(workbenchHtml);
 }
 
 function readProductLayout(
   productJsonContent: string
 ): { kind: 'supported'; checksum: string } | { kind: 'unsupported'; reason: string } {
   try {
-    return { kind: 'supported', checksum: readWorkbenchChecksum(productJsonContent) };
+    return {
+      kind: 'supported',
+      checksum: parseProductJson(productJsonContent).checksums[WORKBENCH_CHECKSUM_KEY],
+    };
   } catch (error) {
     if (!(error instanceof IslandShellFailure)) throw error;
     return { kind: 'unsupported', reason: error.message };
   }
-}
-
-function readWorkbenchChecksum(productJsonContent: string): string {
-  return parseProductJson(productJsonContent).checksums[WORKBENCH_CHECKSUM_KEY] as string;
 }
 
 /** product.json must hold a string checksum for the workbench HTML. */

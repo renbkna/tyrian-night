@@ -74,26 +74,11 @@ export async function applyIslandShell(options: ApplyOptions): Promise<IslandShe
   const canonicalOptions = { ...options, appRoot };
   await assertIslandApplyReady(canonicalOptions);
 
-  return withTransitionStatus(canonicalOptions, async () => {
-    await removeStaleTemporaryFilesOf(appRoot);
+  return transitionRoot(canonicalOptions, true, async () => {
     const plan = await buildIslandApplyPlan(canonicalOptions);
-    const recordChanged = await publishManagedRootRecord(
-      appRoot,
-      plan.desiredCssFile,
-      canonicalOptions
-    );
-    const physicalChanged = await convergeAfterDesiredState(recordChanged, () =>
-      applyFileMutations(plan.mutations, plan.verify)
-    );
-
     return {
-      ...islandMutationFacts({
-        desiredStateChanged: recordChanged,
-        registryChanged: recordChanged,
-        physicalChanged,
-      }),
-      active: true,
-      status: await readIslandShellStatus(canonicalOptions),
+      desiredCssFile: plan.desiredCssFile,
+      converge: () => applyFileMutations(plan.mutations, plan.verify),
     };
   });
 }
@@ -105,7 +90,6 @@ export async function readIslandShellApplyReadiness(
   if (!platformSupport.supported) {
     return {
       kind: 'unsupported',
-      appRoot: options.appRoot,
       status: undefined,
       writeAccess: undefined,
       reason: platformSupport.reason,
@@ -117,21 +101,20 @@ export async function readIslandShellApplyReadiness(
 }
 
 async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApplyReadiness> {
-  const { appRoot } = options;
   let status: IslandShellStatus | undefined;
   let writeAccess: IslandShellWriteAccess | undefined;
 
   try {
     status = await readIslandShellStatus(options);
     if (status.classification === 'unsupported-layout') {
-      return { kind: 'unsupported', appRoot, status, writeAccess, reason: status.issues.join(' ') };
+      return { kind: 'unsupported', status, writeAccess, reason: status.issues.join(' ') };
     }
     if (status.classification === 'missing') {
-      return { kind: 'blocked', appRoot, status, writeAccess, reason: status.issues.join(' ') };
+      return { kind: 'blocked', status, writeAccess, reason: status.issues.join(' ') };
     }
     if (status.desired.kind === 'corrupt') {
       const { message } = corruptDesiredStateFailure();
-      return { kind: 'blocked', appRoot, status, writeAccess, reason: message };
+      return { kind: 'blocked', status, writeAccess, reason: message };
     }
     writeAccess = await readIslandShellWriteAccess(options);
     const plan = await buildIslandApplyPlan(options);
@@ -142,15 +125,13 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
     if (!writeAccess.writable && changed) {
       return {
         kind: 'permission-required',
-        appRoot,
-        changed,
         status,
         writeAccess,
         reason: 'Tyrian needs write access to the VS Code app files to manage Island UI.',
       };
     }
 
-    return { kind: 'ready', appRoot, changed, status, writeAccess };
+    return { kind: 'ready', status, writeAccess };
   } catch (error) {
     const failure = describeIslandShellFailure(error);
     const kind = islandFailureResultKind(failure.code);
@@ -160,8 +141,6 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
 
       return {
         kind: 'permission-required',
-        appRoot,
-        changed: true,
         status,
         writeAccess,
         reason:
@@ -171,7 +150,6 @@ async function readApplyReadiness(options: ApplyOptions): Promise<IslandShellApp
 
     return {
       kind,
-      appRoot,
       status,
       writeAccess,
       reason: failure.reason,
@@ -269,8 +247,7 @@ export async function restoreIslandShell(
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
 
-  return withTransitionStatus(canonicalOptions, async () => {
-    await removeStaleTemporaryFilesOf(appRoot);
+  return transitionRoot(canonicalOptions, false, async () => {
     const registration = await readManagedAppRootRegistration(appRoot, canonicalOptions);
     const state = await inspectIslandRoot(appRoot, registration);
     const plan = buildRestorePlan(state);
@@ -283,22 +260,36 @@ export async function restoreIslandShell(
         );
       }
     }
-    const recordChanged = await publishManagedRootRecord(appRoot, null, canonicalOptions);
-    const physicalChanged = await convergeAfterDesiredState(recordChanged, async () => {
-      if (plan.kind === 'noop') return false;
-      return applyFileMutations(buildRestoreMutations(state, plan), () =>
-        verifyIslandClassification(appRoot, { kind: 'valid', desiredCssFile: null }, 'clean')
-      );
-    });
+    return {
+      desiredCssFile: null,
+      converge: async () =>
+        plan.kind !== 'noop' &&
+        applyFileMutations(buildRestoreMutations(state, plan), () =>
+          verifyIslandClassification(appRoot, { kind: 'valid', desiredCssFile: null }, 'clean')
+        ),
+    };
+  });
+}
+
+/**
+ * One root transition: clear dead temporaries, plan, publish the desired
+ * style, then converge the app files to it. The caller holds the Island lock.
+ */
+async function transitionRoot(
+  options: { appRoot: string } & IslandShellEnvironment,
+  active: boolean,
+  plan: () => Promise<{ desiredCssFile: string | null; converge: () => Promise<boolean> }>
+): Promise<IslandShellResult> {
+  return withTransitionStatus(options, async () => {
+    await removeStaleTemporaryFilesOf(options.appRoot);
+    const { desiredCssFile, converge } = await plan();
+    const recordChanged = await publishManagedRootRecord(options.appRoot, desiredCssFile, options);
+    const physicalChanged = await convergeAfterDesiredState(recordChanged, converge);
 
     return {
-      ...islandMutationFacts({
-        desiredStateChanged: recordChanged,
-        registryChanged: recordChanged,
-        physicalChanged,
-      }),
-      active: false,
-      status: await readIslandShellStatus(canonicalOptions),
+      ...islandMutationFacts({ registryChanged: recordChanged, physicalChanged }),
+      active,
+      status: await readIslandShellStatus(options),
     };
   });
 }
@@ -327,7 +318,7 @@ async function convergeAfterDesiredState(
     if (!recordChanged) throw error;
     throw new IslandPartialMutationError(
       'Tyrian desired state was published, but the app files did not converge.',
-      { desiredStateChanged: true, registryChanged: true },
+      { registryChanged: true },
       { cause: error }
     );
   }
