@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from 'bun:test';
 
+import { sha256Base64 } from '../../apps/vscode/src/islandFileSystem.js';
 import { holdPipeLock, ISLAND_LOCK_HELD_ENV } from '../../apps/vscode/src/islandLock.js';
 import { ISLAND_CLI_BUNDLE_PATH } from '../../apps/vscode/src/generated/packageLayout.js';
 import {
@@ -203,8 +204,4 @@ function writeCss(name: string, color: string): string {
   const cssPath = path.join(root, name);
   fs.writeFileSync(cssPath, `.monaco-workbench { color: ${color}; }\n`);
   return cssPath;
-}
-
-function sha256Base64(content: string): string {
-  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }

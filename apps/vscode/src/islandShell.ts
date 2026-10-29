@@ -13,7 +13,11 @@ import {
   mergeIslandMutationFacts,
   readIslandMutationFacts,
 } from './islandMutationFacts.js';
-import { buildIslandPatchPaths, islandSidecarPaths } from './islandPatchContract.js';
+import {
+  buildIslandPatchPaths,
+  islandSidecarPaths,
+  type IslandShellEnvironment,
+} from './islandPatchContract.js';
 import {
   buildIslandApplyPlan,
   buildRestoreMutations,
@@ -46,9 +50,10 @@ import {
   IslandShellTransitionFailure,
   type IslandShellWriteAccess,
   IslandPartialMutationError,
+  errorMessage,
 } from './islandShellContract.js';
 
-export type IslandShellInventory = {
+type IslandShellInventory = {
   statuses: IslandShellStatus[];
   registryDiagnostics: string[];
 };
@@ -57,8 +62,7 @@ type ApplyOptions = {
   appRoot: string;
   cssSourcePath: string;
   themeVersion: string;
-  registryHome?: string;
-};
+} & IslandShellEnvironment;
 
 /**
  * Publish the desired style, then converge the app files to it. Callers
@@ -181,11 +185,12 @@ async function assertIslandApplyReady(options: ApplyOptions): Promise<void> {
   throw new IslandShellFailure(readiness.kind, readiness.reason);
 }
 
-export async function readIslandShellWriteAccess(options: {
-  appRoot: string;
-  cssSourcePath?: string;
-  registryHome?: string;
-}): Promise<IslandShellWriteAccess> {
+export async function readIslandShellWriteAccess(
+  options: {
+    appRoot: string;
+    cssSourcePath?: string;
+  } & IslandShellEnvironment
+): Promise<IslandShellWriteAccess> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const paths = buildIslandPatchPaths(appRoot);
   const requirements: IslandAccessRequirement[] = [
@@ -230,7 +235,7 @@ export async function readIslandShellWriteAccess(options: {
     } catch (error) {
       blockedPaths.push({
         path: requirement.path,
-        reason: error instanceof Error ? error.message : String(error),
+        reason: errorMessage(error),
       });
     }
   }
@@ -255,10 +260,11 @@ async function assertExistingParentAccessible(filePath: string, mode: number): P
 }
 
 /** Publish disabled desired state, then converge the app files to Classic UI. */
-export async function restoreIslandShell(options: {
-  appRoot: string;
-  registryHome?: string;
-}): Promise<IslandShellResult> {
+export async function restoreIslandShell(
+  options: {
+    appRoot: string;
+  } & IslandShellEnvironment
+): Promise<IslandShellResult> {
   assertIslandPlatformSupported();
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   const canonicalOptions = { ...options, appRoot };
@@ -329,7 +335,7 @@ async function convergeAfterDesiredState(
 
 /** Attach the status observed after a failed transition, when it is readable. */
 async function withTransitionStatus<T>(
-  options: { appRoot: string; registryHome?: string },
+  options: { appRoot: string } & IslandShellEnvironment,
   action: () => Promise<T>
 ): Promise<T> {
   try {
@@ -345,10 +351,11 @@ async function withTransitionStatus<T>(
   }
 }
 
-export async function restoreAllIslandShells(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<IslandShellCleanupSummary> {
+export async function restoreAllIslandShells(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<IslandShellCleanupSummary> {
   assertIslandPlatformSupported();
   const listing = await listIslandRestoreRoots(options);
   let mutation = mergeIslandMutationFacts(
@@ -395,10 +402,11 @@ export async function restoreAllIslandShells(options?: {
   };
 }
 
-export async function readIslandShellStatus(options: {
-  appRoot: string;
-  registryHome?: string;
-}): Promise<IslandShellStatus> {
+export async function readIslandShellStatus(
+  options: {
+    appRoot: string;
+  } & IslandShellEnvironment
+): Promise<IslandShellStatus> {
   const appRoot = await canonicalizeAppRoot(options.appRoot);
   let registration: ManagedRootRegistration;
 
@@ -454,10 +462,11 @@ function uninspectedStatus(
 }
 
 /** Doctor inventory: preferred and registered roots, with unreadable registry data as diagnostics. */
-export async function readIslandShellInventory(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<IslandShellInventory> {
+export async function readIslandShellInventory(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<IslandShellInventory> {
   const listing = await listIslandDoctorRoots(options);
   const statuses: IslandShellStatus[] = [];
   for (const appRoot of listing.appRoots) {

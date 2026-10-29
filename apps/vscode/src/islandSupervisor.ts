@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import type { IslandShellEnvironment } from './islandPatchContract.js';
 import { isTyrianIslandCssFile } from './generated/themeCatalog.js';
 import { type IslandMutationResult, islandMutationFacts } from './islandMutationFacts.js';
 import {
@@ -21,6 +22,7 @@ import {
   type IslandShellResult,
   type IslandShellStatus,
   type IslandShellWriteAccess,
+  errorMessage,
 } from './islandShellContract.js';
 
 export type IslandUiApplySupervisionResult = IslandMutationResult &
@@ -84,7 +86,7 @@ export type IslandUiSupervisorStatus = IslandShellStatus &
       }
   );
 
-export type IslandUiWriteAccessInspection = IslandUiSupervisorStatus['accessInspection'];
+type IslandUiWriteAccessInspection = IslandUiSupervisorStatus['accessInspection'];
 
 export type IslandUiSupervisorInventory = {
   statuses: IslandUiSupervisorStatus[];
@@ -94,12 +96,13 @@ export type IslandUiSupervisorInventory = {
   }>;
 };
 
-export async function applyIslandUiSupervised(options: {
-  appRoot: string;
-  cssSourcePath: string;
-  themeVersion: string;
-  registryHome?: string;
-}): Promise<IslandUiApplySupervisionResult> {
+export async function applyIslandUiSupervised(
+  options: {
+    appRoot: string;
+    cssSourcePath: string;
+    themeVersion: string;
+  } & IslandShellEnvironment
+): Promise<IslandUiApplySupervisionResult> {
   const readiness = await readIslandShellApplyReadiness(options);
 
   if (readiness.kind === 'permission-required') {
@@ -142,13 +145,14 @@ export async function applyIslandUiSupervised(options: {
  * Island lock, so the desired state this decision reads is the one it acts on:
  * another window cannot publish a different style in between.
  */
-export async function convergeIslandUiSupervised(options: {
-  appRoot: string;
-  islandDirectory: string;
-  themeVersion: string;
-  intent: IslandUiConvergeIntent;
-  registryHome?: string;
-}): Promise<IslandUiConvergeResult> {
+export async function convergeIslandUiSupervised(
+  options: {
+    appRoot: string;
+    islandDirectory: string;
+    themeVersion: string;
+    intent: IslandUiConvergeIntent;
+  } & IslandShellEnvironment
+): Promise<IslandUiConvergeResult> {
   const status = await readIslandShellStatus(options);
 
   if (status.desired.kind === 'corrupt') {
@@ -193,10 +197,11 @@ export async function convergeIslandUiSupervised(options: {
   return { action: 'none' };
 }
 
-export async function restoreIslandUiSupervised(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<IslandUiRestoreSupervisionResult> {
+export async function restoreIslandUiSupervised(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<IslandUiRestoreSupervisionResult> {
   const result = await restoreAllIslandShells(options);
 
   if (result.failedAppRoots.length === 0 && !result.enumerationFailure) {
@@ -223,10 +228,11 @@ export async function restoreIslandUiSupervised(options?: {
   return { ...result, kind, reason };
 }
 
-export async function readIslandUiSupervisorStatuses(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<IslandUiSupervisorInventory> {
+export async function readIslandUiSupervisorStatuses(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<IslandUiSupervisorInventory> {
   const inventory = await readIslandShellInventory(options);
   const supervisorStatuses: IslandUiSupervisorStatus[] = [];
 
@@ -244,9 +250,7 @@ export async function readIslandUiSupervisorStatuses(options?: {
     } catch (error) {
       accessInspection = {
         kind: 'failed',
-        reason:
-          (error instanceof Error ? error.message : String(error)) ||
-          'Unknown Island write-access inspection failure.',
+        reason: errorMessage(error) || 'Unknown Island write-access inspection failure.',
       };
     }
 

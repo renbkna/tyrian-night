@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 
 import { IslandMutationError } from './islandMutationFacts.js';
-import type {
-  IslandShellFailureCode,
-  IslandShellFailureDescription,
+import {
+  type IslandShellFailureCode,
+  type IslandShellFailureDescription,
+  errorMessage,
 } from './islandShellContract.js';
 
 /** A typed Island CLI failure reconstructed from its stderr envelope. */
@@ -55,10 +56,9 @@ export function runIslandJsonProcess<T>(command: string[], env?: NodeJS.ProcessE
         resolve(JSON.parse(stdout) as T);
       } catch (error) {
         reject(
-          new Error(
-            `Tyrian Night CLI returned invalid output: ${error instanceof Error ? error.message : String(error)}`,
-            { cause: error }
-          )
+          new Error(`Tyrian Night CLI returned invalid output: ${errorMessage(error)}`, {
+            cause: error,
+          })
         );
       }
     });

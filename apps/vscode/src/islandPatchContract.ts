@@ -2,30 +2,21 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
-export const WORKBENCH_DIR_RELATIVE_PATH = path.join(
-  'out',
-  'vs',
-  'code',
-  'electron-browser',
-  'workbench'
-);
-export const WORKBENCH_HTML_RELATIVE_PATH = path.join(
-  WORKBENCH_DIR_RELATIVE_PATH,
-  'workbench.html'
-);
-export const PRODUCT_JSON_RELATIVE_PATH = 'product.json';
+const WORKBENCH_DIR_RELATIVE_PATH = path.join('out', 'vs', 'code', 'electron-browser', 'workbench');
+const WORKBENCH_HTML_RELATIVE_PATH = path.join(WORKBENCH_DIR_RELATIVE_PATH, 'workbench.html');
+const PRODUCT_JSON_RELATIVE_PATH = 'product.json';
 export const WORKBENCH_CHECKSUM_KEY = 'vs/code/electron-browser/workbench/workbench.html';
 export const WORKBENCH_CSS_LINK =
   '<link rel="stylesheet" href="../../../workbench/workbench.desktop.main.css">';
 
 export const ISLAND_CSS_FILE_NAME = 'tyrian-night.island.css';
-export const ISLAND_MANIFEST_FILE_NAME = 'tyrian-night.island.json';
-export const BACKUP_HTML_FILE_NAME = 'tyrian-night.workbench.backup.html';
-export const BACKUP_PRODUCT_FILE_NAME = 'tyrian-night.product.backup.json';
-export const TYRIAN_STATE_DIR_NAME = '.tyrian-night';
-export const MANAGED_ROOTS_DIRECTORY_NAME = 'managed-app-roots';
-export const QUARANTINED_ROOTS_DIRECTORY_NAME = 'quarantined-managed-app-roots';
-export const ISLAND_LOCK_FILE_NAME = 'island.lock';
+const ISLAND_MANIFEST_FILE_NAME = 'tyrian-night.island.json';
+const BACKUP_HTML_FILE_NAME = 'tyrian-night.workbench.backup.html';
+const BACKUP_PRODUCT_FILE_NAME = 'tyrian-night.product.backup.json';
+const TYRIAN_STATE_DIR_NAME = '.tyrian-night';
+const MANAGED_ROOTS_DIRECTORY_NAME = 'managed-app-roots';
+const QUARANTINED_ROOTS_DIRECTORY_NAME = 'quarantined-managed-app-roots';
+const ISLAND_LOCK_FILE_NAME = 'island.lock';
 
 export const TYRIAN_MARKER_START = '<!-- Tyrian Night Island Start -->';
 export const TYRIAN_MARKER_END = '<!-- Tyrian Night Island End -->';
@@ -90,23 +81,37 @@ export function islandSidecarPaths(paths: IslandPatchPaths): string[] {
   return Object.values(islandSidecarPathMap(paths));
 }
 
-export function buildManagedRootsDirectoryPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, MANAGED_ROOTS_DIRECTORY_NAME);
+/** The home that holds Tyrian's per-user state; tests point it at a temporary directory. */
+export type IslandShellEnvironment = { registryHome?: string };
+
+export function islandRegistryHome(registryHome?: string): string {
+  return registryHome ?? os.homedir();
 }
 
-export function buildQuarantinedRootsDirectoryPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, QUARANTINED_ROOTS_DIRECTORY_NAME);
+function stateDirectoryPath(registryHome: string | undefined, name: string): string {
+  return path.join(islandRegistryHome(registryHome), TYRIAN_STATE_DIR_NAME, name);
 }
 
-export function buildManagedRootRecordPath(appRoot: string, registryHome = os.homedir()): string {
+export function buildManagedRootsDirectoryPath(registryHome?: string): string {
+  return stateDirectoryPath(registryHome, MANAGED_ROOTS_DIRECTORY_NAME);
+}
+
+export function buildQuarantinedRootsDirectoryPath(registryHome?: string): string {
+  return stateDirectoryPath(registryHome, QUARANTINED_ROOTS_DIRECTORY_NAME);
+}
+
+/** Desired-state record files are named by the SHA-256 of their app root. */
+export const MANAGED_ROOT_RECORD_NAME_PATTERN = /^[0-9a-f]{64}\.json$/u;
+
+export function buildManagedRootRecordPath(appRoot: string, registryHome?: string): string {
   const recordName = crypto.hash('sha256', appRoot, 'hex');
 
   return path.join(buildManagedRootsDirectoryPath(registryHome), `${recordName}.json`);
 }
 
 /** The kernel lock that serializes every Island mutation of one user. */
-export function buildIslandLockPath(registryHome = os.homedir()): string {
-  return path.join(registryHome, TYRIAN_STATE_DIR_NAME, ISLAND_LOCK_FILE_NAME);
+export function buildIslandLockPath(registryHome?: string): string {
+  return stateDirectoryPath(registryHome, ISLAND_LOCK_FILE_NAME);
 }
 
 /** Desired styles name a bundled Island CSS asset; this is also the persisted desiredCssFile format. */

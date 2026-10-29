@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import { sha256Base64 } from '../../apps/vscode/src/islandFileSystem.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -683,8 +683,4 @@ function productJson(checksum: string): string {
     null,
     '\t'
   ).concat('\n');
-}
-
-function sha256Base64(content: string): string {
-  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }

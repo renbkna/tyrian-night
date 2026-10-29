@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,7 +31,7 @@ import {
   publishManagedRootRecord,
   readManagedAppRootRegistration,
 } from '../../apps/vscode/src/islandRegistry.js';
-import { applyFileMutations } from '../../apps/vscode/src/islandFileSystem.js';
+import { applyFileMutations, sha256Base64 } from '../../apps/vscode/src/islandFileSystem.js';
 import { ISLAND_LOCK_HELD_ENV } from '../../apps/vscode/src/islandLock.js';
 import {
   buildIslandApplyPlan,
@@ -1270,10 +1269,6 @@ function productJson(checksum: string, indent: number | string = '\t'): string {
     null,
     indent
   ).concat('\n');
-}
-
-function sha256Base64(content: string): string {
-  return crypto.hash('sha256', content, 'base64').replace(/=+$/, '');
 }
 
 async function expectRestoredAppRoot(appRoot: string): Promise<void> {

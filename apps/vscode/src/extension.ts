@@ -7,10 +7,10 @@ import {
   getIslandCssFileForTheme,
   isTyrianThemeLabel,
 } from './generated/themeCatalog.js';
-import { ISLAND_CLI_BUNDLE_PATH } from './generated/packageLayout.js';
+import { ISLAND_CLI_BUNDLE_PATH, ISLAND_CSS_DIRECTORY } from './generated/packageLayout.js';
 import { readIslandPlatformSupport } from './islandPlatform.js';
 import { IslandProcessFailure, runIslandJsonProcess } from './islandProcess.js';
-import type { IslandShellStatus } from './islandShellContract.js';
+import { type IslandShellStatus, errorMessage } from './islandShellContract.js';
 import type {
   IslandUiApplySupervisionResult,
   IslandUiConvergeIntent,
@@ -67,7 +67,7 @@ export async function activate(context: TyrianExtensionContext): Promise<void> {
       await showIslandProcessFailure(error, 'startup reconciliation');
       return;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     vscode.window.showErrorMessage(`Tyrian Night: ${message}`);
   }
 }
@@ -253,7 +253,7 @@ async function applyIslandCssFile(
 }
 
 function islandDirectory(): string {
-  return path.join(extContext.extensionPath, 'island');
+  return path.join(extContext.extensionPath, ISLAND_CSS_DIRECTORY);
 }
 
 function themeVersion(): string {
@@ -473,6 +473,7 @@ function runIslandCli<Command extends IslandCliCommand>(
 
   return runIslandJsonProcess<IslandCliResults[Command]>(
     [process.execPath, cliPath, ...encodeIslandCliInvocation(command, input)],
+    // VS Code's executable is Electron; this makes it run the CLI as plain Node.
     { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   );
 }

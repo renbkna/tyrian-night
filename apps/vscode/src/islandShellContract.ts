@@ -81,7 +81,7 @@ export class IslandShellTransitionFailure extends Error {
   readonly status: IslandShellStatus | undefined;
 
   constructor(error: unknown, status: IslandShellStatus | undefined) {
-    super(error instanceof Error ? error.message : String(error), { cause: error });
+    super(errorMessage(error), { cause: error });
     this.name = 'IslandShellTransitionFailure';
     this.status = status;
   }
@@ -102,9 +102,7 @@ export type IslandShellFailureDescription = IslandMutationResult & {
 
 export function describeIslandShellFailure(error: unknown): IslandShellFailureDescription {
   const causes = collectIslandFailureCauses(error);
-  const reason =
-    causes.map((cause) => cause.reason).join(' | ') ||
-    (error instanceof Error ? error.message : String(error));
+  const reason = causes.map((cause) => cause.reason).join(' | ') || errorMessage(error);
 
   return { code: failureCodeOf(error), ...readIslandMutationFacts(error), reason, causes };
 }
@@ -162,6 +160,11 @@ export type IslandShellApplyReadiness =
       writeAccess: IslandShellWriteAccess | undefined;
       reason: string;
     };
+
+/** The message of an error, or the thrown value as text. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;

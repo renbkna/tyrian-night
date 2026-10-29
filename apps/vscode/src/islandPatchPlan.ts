@@ -35,7 +35,7 @@ const TYRIAN_STYLESHEET_PATTERN = new RegExp(
 
 type ProductJson = Record<string, unknown> & { checksums: Record<string, unknown> };
 
-export type IslandRootState = {
+type IslandRootState = {
   paths: IslandPatchPaths;
   currentHtml: string;
   currentProductJson: string;

@@ -2,11 +2,10 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { buildIslandLockPath } from './islandPatchContract.js';
+import { buildIslandLockPath, islandRegistryHome } from './islandPatchContract.js';
 import { IslandShellFailure, isNodeError } from './islandShellContract.js';
 
 /** Set in the child a lock tool runs, which already holds the lock. */
@@ -16,7 +15,7 @@ const LOCK_WAIT_SECONDS = 60;
 const LOCK_TIMEOUT_EXIT_CODE = 75;
 const PIPE_RETRY_MS = 250;
 
-export type PipeLock = { release(): Promise<void> };
+type PipeLock = { release(): Promise<void> };
 
 /**
  * Run one CLI command while holding the per-user Island lock. The operating
@@ -33,7 +32,7 @@ export async function runUnderIslandLock(command: () => Promise<void>): Promise<
   }
 
   if (process.platform === 'win32') {
-    const pipeIdentity = crypto.hash('sha256', os.homedir(), 'hex').slice(0, 16);
+    const pipeIdentity = crypto.hash('sha256', islandRegistryHome(), 'hex').slice(0, 16);
     const lock = await holdPipeLock(
       `\\\\.\\pipe\\tyrian-night-island-${pipeIdentity}`,
       LOCK_WAIT_SECONDS

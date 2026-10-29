@@ -17,15 +17,16 @@ import {
   buildManagedRootsDirectoryPath,
   buildQuarantinedRootsDirectoryPath,
   isIslandCssAssetName,
+  type IslandShellEnvironment,
+  MANAGED_ROOT_RECORD_NAME_PATTERN,
 } from './islandPatchContract.js';
 import {
   describeIslandShellFailure,
   type IslandDesiredState,
   type IslandShellFailureDescription,
   isPermissionError,
+  errorMessage,
 } from './islandShellContract.js';
-
-const RECORD_NAME_PATTERN = /^[0-9a-f]{64}\.json$/u;
 
 type ManagedRootRecord = {
   appRoot: string;
@@ -37,12 +38,8 @@ export type ManagedRootRegistration =
   | { kind: 'valid'; desiredCssFile: string | null }
   | { kind: 'corrupt'; reason: string };
 
-export type IslandShellEnvironment = {
-  registryHome?: string;
-};
-
 /** A registry root that restore either prunes (its app root is gone) or restores. */
-export type IslandRegisteredRoot = {
+type IslandRegisteredRoot = {
   readonly appRoot: string;
   pruneIfMissing(): Promise<
     { pruned: false } | { pruned: true; changed: boolean; quarantinePath?: string }
@@ -55,10 +52,11 @@ type RegistryEntry =
   | { kind: 'unreadable'; recordPath: string; error: unknown };
 
 /** Doctor roots: preferred and registered roots, with unusable registry data as diagnostics. */
-export async function listIslandDoctorRoots(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<{ appRoots: string[]; registryDiagnostics: string[] }> {
+export async function listIslandDoctorRoots(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<{ appRoots: string[]; registryDiagnostics: string[] }> {
   const environment = { registryHome: options?.registryHome };
   const appRoots = await canonicalizeAppRoots(options?.preferredAppRoots);
   const registryDiagnostics: string[] = [];
@@ -88,10 +86,11 @@ export async function listIslandDoctorRoots(options?: {
  * entries it can neither read nor move aside are the enumeration failure, and
  * every other root is still returned.
  */
-export async function listIslandRestoreRoots(options?: {
-  preferredAppRoots?: string[];
-  registryHome?: string;
-}): Promise<{
+export async function listIslandRestoreRoots(
+  options?: {
+    preferredAppRoots?: string[];
+  } & IslandShellEnvironment
+): Promise<{
   roots: IslandRegisteredRoot[];
   registryChanged: boolean;
   quarantinedRecords: string[];
@@ -171,7 +170,7 @@ async function scanRegistry(environment: IslandShellEnvironment): Promise<Regist
 
 export async function readManagedAppRootRegistration(
   appRoot: string,
-  environment?: IslandShellEnvironment
+  environment: IslandShellEnvironment
 ): Promise<ManagedRootRegistration> {
   const recordPath = buildManagedRootRecordPath(appRoot, environment?.registryHome);
   let content: string | undefined;
@@ -198,7 +197,7 @@ export async function readManagedAppRootRegistration(
 export async function publishManagedRootRecord(
   appRoot: string,
   desiredCssFile: string | null,
-  environment?: IslandShellEnvironment
+  environment: IslandShellEnvironment
 ): Promise<boolean> {
   const recordPath = buildManagedRootRecordPath(appRoot, environment?.registryHome);
   const record: ManagedRootRecord = {
@@ -295,7 +294,7 @@ async function identifyRecord(
   if ((await fs.lstat(recordPath)).isDirectory()) {
     throw new Error(`Tyrian managed app root record is a directory at '${recordPath}'.`);
   }
-  if (!RECORD_NAME_PATTERN.test(path.basename(recordPath))) {
+  if (!MANAGED_ROOT_RECORD_NAME_PATTERN.test(path.basename(recordPath))) {
     return unidentifiable(`Tyrian managed app root record is invalid at '${recordPath}'.`);
   }
 
@@ -394,8 +393,4 @@ function parseManagedRootRecord(content: string, recordPath: string): ManagedRoo
     );
   }
   return parsed as ManagedRootRecord;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

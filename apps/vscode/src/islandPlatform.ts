@@ -1,4 +1,4 @@
-export type IslandPlatformSupport = { supported: true } | { supported: false; reason: string };
+type IslandPlatformSupport = { supported: true } | { supported: false; reason: string };
 
 const ISLAND_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set(['linux', 'darwin', 'win32']);
 

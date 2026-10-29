@@ -9,6 +9,7 @@ import {
   inVscodePackage,
   VSCODE_BUNDLE_FILES,
   VSCODE_GENERATED_SOURCE_DIRECTORY,
+  VSCODE_ISLAND_DIRECTORY,
   VSCODE_PACKAGE_ICON,
   VSCODE_PACKAGE_MANIFEST,
   vscodeIslandCssFile,
@@ -78,6 +79,9 @@ export function isTyrianIslandCssFile(cssFile: string): boolean {
 function buildPackageLayoutTs() {
   return `/** Package-relative path of the bundled Island CLI the extension runs. */
 export const ISLAND_CLI_BUNDLE_PATH = ${formatTsString(VSCODE_BUNDLE_FILES.islandCli)};
+
+/** Package-relative directory of the generated Island stylesheets. */
+export const ISLAND_CSS_DIRECTORY = ${formatTsString(VSCODE_ISLAND_DIRECTORY)};
 `;
 }
 
