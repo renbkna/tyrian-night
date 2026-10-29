@@ -107,7 +107,7 @@ test('Union CSS generation lint reports the source file and line of each issue',
   }
 });
 
-test('Union CSS lint rejects unsupported CSS and specificity arms races', () => {
+test('Union CSS lint rejects unsupported CSS and long combinator chains', () => {
   const brokenCss = `
 button:first-child {
   display: flex;
@@ -131,7 +131,7 @@ button#primary {
     "Missing checked-state target 'menuitem:checked > indicator'",
     "Union CSS property 'display' is unsupported",
     "Union CSS declaration uses unsupported layout value 'flex'",
-    "Selector exceeds specificity budget: 'applicationwindow page pane button toolbutton'",
+    "Selector exceeds the budget of 3 combinators: 'applicationwindow page pane button toolbutton'",
     "Union source CSS must not use ID selectors: 'button#primary'",
   ]);
 });

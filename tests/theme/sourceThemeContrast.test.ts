@@ -91,7 +91,7 @@ test('VS Code projection owns selectors, scopes, and consumer keys', () => {
   }
 });
 
-test('VS Code projection reserves italics for intended grammar surfaces', () => {
+test('VS Code projection italicizes comments, language variables, and markup, not deprecations', () => {
   const italicScopes = VSCODE_PROJECTION.tokenColors
     .filter((token: { fontStyle?: string }) => token.fontStyle?.includes('italic'))
     .flatMap((token: { scope: string[] }) => token.scope);

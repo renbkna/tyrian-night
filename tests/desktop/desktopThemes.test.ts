@@ -79,17 +79,17 @@ test('KDE color schemes consume neutral surface, accent, and text roles', () => 
     const schemeId = kdeThemeId(source.slug);
     const colorScheme = requiredAsset(`desktop/kde/color-schemes/${schemeId}.colors`);
 
-    expect(colorScheme).toContain(`ColorScheme=${schemeId}`);
-    expect(colorScheme).toContain(`Name=${theme.name}`);
-    expect(colorScheme).toContain(
-      `BackgroundNormal=${kdeRgb(sourceColor(theme, 'ui:surface.canvas'))}`
-    );
-    expect(colorScheme).toContain(
-      `DecorationFocus=${kdeRgb(sourceColor(theme, 'ui:accent.primary'))}`
-    );
-    expect(colorScheme).toContain(
-      `ForegroundNormal=${kdeRgb(sourceColor(theme, 'ui:text.primary'))}`
-    );
+    expect(kdeSection(colorScheme, 'General')).toMatchObject({
+      ColorScheme: schemeId,
+      Name: theme.name,
+    });
+    for (const name of ['Colors:View', 'Colors:Window']) {
+      expect(kdeSection(colorScheme, name)).toMatchObject({
+        BackgroundNormal: kdeRgb(sourceColor(theme, 'ui:surface.canvas')),
+        DecorationFocus: kdeRgb(sourceColor(theme, 'ui:accent.primary')),
+        ForegroundNormal: kdeRgb(sourceColor(theme, 'ui:text.primary')),
+      });
+    }
     expect(colorScheme).not.toContain('Monochrome');
   }
 });
@@ -100,18 +100,16 @@ test('Plasma desktop-theme colors consume the KDE palette without owning ColorEf
     const schemeId = kdeThemeId(source.slug);
     const plasmaColors = requiredAsset(`desktop/kde/plasma/desktoptheme/${schemeId}/colors`);
 
-    expect(plasmaColors).toContain(`ColorScheme=${schemeId}`);
-    expect(plasmaColors).toContain(
-      `BackgroundNormal=${kdeRgb(sourceColor(theme, 'ui:surface.canvas'))}`
-    );
-    expect(plasmaColors).toContain(
-      `DecorationFocus=${kdeRgb(sourceColor(theme, 'ui:accent.primary'))}`
-    );
+    expect(kdeSection(plasmaColors, 'General').ColorScheme).toBe(schemeId);
+    expect(kdeSection(plasmaColors, 'Colors:Window')).toMatchObject({
+      BackgroundNormal: kdeRgb(sourceColor(theme, 'ui:surface.canvas')),
+      DecorationFocus: kdeRgb(sourceColor(theme, 'ui:accent.primary')),
+    });
     expect(plasmaColors).not.toContain('[ColorEffects:');
   }
 });
 
-test('KDE ids and Caelestia flavours keep the names the READMEs document', () => {
+test('KDE ids and Caelestia flavours derive from the theme slug', () => {
   expect(kdeThemeId('tyrian-night')).toBe('TyrianNight');
   expect(caelestiaFlavour('tyrian-night')).toBe('night');
 });
@@ -161,6 +159,15 @@ test('Union CSS styles combine generated Tyrian tokens with the editable rice te
     for (const token of UNION_TOKEN_CONTRACT) {
       expect(unionStyle).toContain(token);
     }
+    for (const [token, role] of [
+      ['positive', 'ui:status.successBackground'],
+      ['neutral', 'ui:status.warningBackground'],
+      ['negative', 'ui:status.errorBackground'],
+    ]) {
+      expect(unionStyle).toContain(
+        `--tyrian-${token}-bg: ${themeColor(theme, role).toLowerCase()};`
+      );
+    }
 
     for (const forbidden of UNION_FORBIDDEN_CONTRACT) {
       expect(unionStyle).not.toContain(forbidden);
@@ -200,9 +207,9 @@ test('Plasma widget skin derives popup, search, task, and row surfaces from Tyri
     expect(launcherBackground).toContain(`fill="${background}"`);
     expect(launcherBackground).toContain(`fill="${accent}"`);
     expect(launcherBackground).not.toContain('#1e1e20');
-    expect(lineEdit).toContain(`id="focus-center"`);
-    expect(lineEdit).toContain(`fill="${surfaceLow}"`);
-    expect(lineEdit).toContain(`fill="${accent}"`);
+    expect(svgFill(lineEdit, 'base-center')).toBe(surfaceLow);
+    expect(svgFill(lineEdit, 'focus-center')).toBe(surface);
+    expect(svgFill(lineEdit, 'focus-top')).toBe(accent);
     expect(viewItem).toContain(`id="selected-center"`);
     expect(viewItem).toContain(`fill="${selection}"`);
     expect(viewItem).toContain(`fill="${surface}"`);
@@ -338,6 +345,22 @@ function requiredAsset(assetPath: string): string {
   }
 
   return content;
+}
+
+function kdeSection(scheme: string, name: string): Record<string, string> {
+  const body = scheme.split(/\n\n(?=\[)/u).find((block) => block.startsWith(`[${name}]\n`));
+  if (body === undefined) throw new Error(`Missing KDE section '[${name}]'`);
+
+  return Object.fromEntries(
+    body
+      .split('\n')
+      .slice(1)
+      .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
+  );
+}
+
+function svgFill(svg: string, id: string): string | undefined {
+  return svg.match(new RegExp(`<rect id="${id}"[^>]* fill="([^"]+)"`, 'u'))?.[1];
 }
 
 function kdeRgb(color: string): string {

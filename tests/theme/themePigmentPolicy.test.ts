@@ -15,7 +15,7 @@ describe('theme pigment policy authority', () => {
     }
   });
 
-  test('green and cyan are rejected for important code roles', () => {
+  test('a code role that takes the string pigment breaks the green-cyan reservation', () => {
     const source = SOURCE_THEMES.find(({ slug }) => slug === 'tyrian-nocturne')!;
     const theme = structuredClone(sourceTheme(source));
     theme.syntax.function = theme.syntax.string;

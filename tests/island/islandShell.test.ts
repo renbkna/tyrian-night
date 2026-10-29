@@ -539,6 +539,26 @@ test('external checksum mismatches are reported but not treated as Tyrian self-h
   });
 });
 
+test('a desired style on an unpatched root is classified as managed-only', async () => {
+  const appRoot = await createAppRoot('managed-only');
+  const recordPath = buildManagedRootRecordPath(appRoot, registryHome);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(
+    recordPath,
+    JSON.stringify({ appRoot, desiredCssFile: 'tyrian-night.css' }, null, 2).concat('\n'),
+    'utf8'
+  );
+
+  await expect(readIslandShellStatus({ appRoot, registryHome })).resolves.toMatchObject({
+    classification: 'managed-only',
+    active: false,
+    managed: true,
+    verificationPassed: false,
+    // Without sidecars restore has no app files to touch; only the record goes.
+    restorePlan: 'noop',
+  });
+});
+
 test('restore strips active Island UI when backup evidence is broken', async () => {
   const appRoot = await createAppRoot('broken-backup');
   const cssSource = path.join(testRoot, 'theme.css');
@@ -563,7 +583,7 @@ test('restore strips active Island UI when backup evidence is broken', async () 
   await expectOnlyWorkbenchHtmlSidecarRemains(appRoot);
 });
 
-test('a patched root without its desired-state record is classified as repair state', async () => {
+test('a patched root without its desired-state record is classified as broken backup', async () => {
   const appRoot = await createAppRoot('missing-desired-record');
   const cssSource = path.join(testRoot, 'missing-record.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');
@@ -1030,7 +1050,7 @@ test('apply readiness reports permission-required without mutating a read-only a
   }
 });
 
-test('apply readiness reports already-current after a verified apply', async () => {
+test('apply readiness reports no change after a verified apply', async () => {
   const appRoot = await createAppRoot('already-current-readiness');
   const cssSource = path.join(testRoot, 'theme.css');
   await fs.writeFile(cssSource, '.monaco-workbench { color: cyan; }\n', 'utf8');

@@ -238,7 +238,7 @@ test('Foot themes derive their palette from neutral terminal roles', () => {
   }
 });
 
-test('Ghostty and Foot outputs are include files only, never user configs', () => {
+test('Ghostty and Foot outputs are theme files only, never user configs', () => {
   const terminalConfigOutputs = [...assets.keys()].filter(
     (assetPath) =>
       /^terminal\/(?:ghostty|foot)\//u.test(assetPath) &&
@@ -257,6 +257,7 @@ test('terminal READMEs name the catalog terminal defaults', () => {
   const footReadme = fs.readFileSync('terminal/foot/README.md', 'utf8');
   expect(footReadme).toContain(`include=~/.config/foot/themes/${dark}.ini`);
   expect(footReadme).toContain(`include=~/.config/foot/themes/${light}.ini`);
+  expect(footReadme).toContain(`include=~/.config/foot/csd/${dark}.ini`);
   expect(fs.readFileSync('terminal/fish/README.md', 'utf8')).toContain(
     `terminal/fish/themes/${dark}.fish`
   );
@@ -317,7 +318,7 @@ test('Starship prompts select their own variant palette backed by neutral roles'
   }
 });
 
-test('Fastfetch configs render the passed logo with Chafa in their own variant colors', () => {
+test('Fastfetch configs use their variant colors and render the passed logo with Chafa', () => {
   for (const source of SOURCE_THEMES) {
     const theme = sourceTheme(source);
     const variantConfig = JSON.parse(requiredAsset(`terminal/fastfetch/${source.slug}.jsonc`));

@@ -130,7 +130,7 @@ function lintRule(rule, issues) {
     if (combinatorCount > 3) {
       issues.push({
         line: rule.line,
-        message: `Selector exceeds specificity budget: '${selector}'`,
+        message: `Selector exceeds the budget of 3 combinators: '${selector}'`,
       });
     }
 

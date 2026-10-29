@@ -329,7 +329,7 @@ test('corrupt registration records recommend Classic UI restore', async () => {
   });
 });
 
-test('supervisor reports physical write access without deciding desired-state policy', async () => {
+test('supervisor reports a read-only app root as not writable', async () => {
   const appRoot = await createAppRoot('readonly-status');
   const {
     productJsonPath: productPath,

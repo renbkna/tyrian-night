@@ -106,7 +106,7 @@ test('concurrent CLI applies are serialized by the Island lock', async () => {
   });
 });
 
-test('the bundled CLI converges an installation to its desired style', async () => {
+test('the bundled CLI converge leaves an installation already on its desired style', async () => {
   const home = makeHome('converge');
   const appRoot = makeAppRoot('converge');
   const cssSource = writeCss('tyrian-nocturne.css', 'plum');

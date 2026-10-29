@@ -258,7 +258,7 @@ test('source recipes own pigments once and resolve family-derived alpha projecti
   }
 });
 
-test('color bindings contain only aliases and alpha-derived exceptions', () => {
+test('color bindings reject an alias to the role itself', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-color-bindings-'));
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
@@ -279,13 +279,20 @@ test('a color binding cannot target a role that is bound itself', () => {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
     const bindingsPath = path.join(root, 'source/themeColorBindings.cjs');
     const bindings = readSourceData<any>(bindingsPath);
-    const [boundRole] = Object.keys(bindings.aliases);
-    bindings.aliases['syntax:function'] = boundRole;
-    writeSourceData(bindingsPath, bindings);
+    const [aliasedRole] = Object.keys(bindings.aliases);
+    const [derivedRole] = Object.keys(bindings.derived);
+    for (const [kind, boundRole] of [
+      ['aliases', aliasedRole],
+      ['derived', derivedRole],
+    ] as const) {
+      const chained = structuredClone(bindings);
+      chained[kind]['syntax:function'] = boundRole;
+      writeSourceData(bindingsPath, chained);
 
-    expect(() => loadThemeRepository(root)).toThrow(
-      `targets '${boundRole}', which is bound itself`
-    );
+      expect(() => loadThemeRepository(root)).toThrow(
+        `targets '${boundRole}', which is bound itself`
+      );
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -384,15 +391,17 @@ test('color audit loads an inspection snapshot when production admission rejects
   }
 });
 
-test('color audit rejects an empty theme selection instead of auditing every theme', () => {
-  const audit = spawnSync(process.execPath, ['scripts/themeColorAudit.mjs', '--theme='], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  });
+test('color audit rejects an empty option value instead of falling back', () => {
+  for (const option of ['theme', 'root']) {
+    const audit = spawnSync(process.execPath, ['scripts/themeColorAudit.mjs', `--${option}=`], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    });
 
-  expect(audit.status).not.toBe(0);
-  expect(audit.stdout).toBe('');
-  expect(audit.stderr).toContain('Color audit --theme must not be empty.');
+    expect(audit.status).not.toBe(0);
+    expect(audit.stdout).toBe('');
+    expect(audit.stderr).toContain(`Color audit --${option} must not be empty.`);
+  }
 });
 
 test('a color binding may target a role that derives an alpha from its own pigment', () => {
@@ -441,7 +450,7 @@ test('the energy line must step its saturation bands and canvases down in order'
   }
 });
 
-test('production snapshots reject every duplicate bracket depth, including non-adjacent depths', () => {
+test('production snapshots reject a duplicate bracket color at non-adjacent depths', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tyrian-theme-bracket-gate-'));
   try {
     fs.cpSync('source', path.join(root, 'source'), { recursive: true });
@@ -862,6 +871,20 @@ test('VS Code projection rejects invalid shapes and competing consumer ownership
           projection.semanticTokenColors.push({ selector: 'label', role: 'type' });
         },
         "grammar projection references unknown role 'type'",
+      ],
+      [
+        'unqualified grammar role',
+        (projection) => {
+          projection.tokenColors[0].role = 'type';
+        },
+        "grammar projection references unknown role 'type'",
+      ],
+      [
+        'grammar role outside syntax and ui',
+        (projection) => {
+          projection.tokenColors[0].role = 'terminal:ansi.red';
+        },
+        "grammar projection references unknown role 'terminal:ansi.red'",
       ],
     ];
 

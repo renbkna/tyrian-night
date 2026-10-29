@@ -40,8 +40,9 @@ const STARSHIP_LANGUAGE_SYMBOLS = Object.freeze({
  * @typedef {{ path: string; content: string }} GeneratedAsset
  */
 
-// The theme directories are fully generated. The others share their directory with user
-// files; every slug starts with `tyrian-`, so the generator reserves `tyrian-*.<ext>` there.
+// Directories without a match (the theme directories and foot's csd/) are fully generated.
+// The others share their directory with user files; every slug starts with `tyrian-`, so the
+// generator reserves `tyrian-*.<ext>` there, plus the one greeting file it names.
 const TERMINAL_GENERATED_OWNERSHIP = [
   { directory: GHOSTTY_THEMES_DIRECTORY },
   { directory: FOOT_THEMES_DIRECTORY },

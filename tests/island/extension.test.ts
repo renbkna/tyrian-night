@@ -191,7 +191,7 @@ test('repair Island UI does not patch when warning acknowledgement is cancelled'
   expect(spawnCalls).toEqual([]);
 });
 
-test('repair without a desired or active Tyrian style changes nothing', async () => {
+test('repair without a desired or active Tyrian style asks for an apply first', async () => {
   globalStateStore.set(UNINSTALL_WARNING_ACKNOWLEDGED_KEY, true);
   const repairCommand = await activateAndGetCommand('tyrianNight.repairIslandUi');
   resetObservations();
@@ -607,7 +607,7 @@ test('Doctor reports unidentifiable registry data without mutating it', async ()
   expect(spawnCalls.map((call) => call.args[1])).toEqual(['status-all-supervised']);
 });
 
-test('Doctor exposes failed access inspection and owner-forced manual recovery', async () => {
+test('Doctor reports a failed access inspection and its recommended action', async () => {
   const doctor = await activateAndGetCommand('tyrianNight.doctorIslandUi');
   resetObservations();
   queuedSpawnResponses.push({

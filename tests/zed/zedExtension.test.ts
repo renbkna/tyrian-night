@@ -421,9 +421,13 @@ test('Zed theme maps UI, syntax, and terminal colors from their neutral owners',
     expect(theme.style['predictive.border']).toBe(source.ui['editor.predictive.border']);
     expect(theme.style['terminal.ansi.red']).toBe(source.terminal['ansi.red']);
     expect(theme.style['version_control.deleted']).toBe(source.ui['status.removed']);
-    expect(theme.style['version_control.word_deleted']).toMatch(
-      new RegExp(`^${source.ui['status.removed'].slice(0, 7)}`, 'u')
-    );
+    for (const [key, role] of [
+      ['deleted.background', 'ui:status.removedBackground'],
+      ['version_control.word_deleted', 'ui:status.removedBackground'],
+      ['hint.background', 'ui:editor.hintBackground'],
+    ] as const) {
+      expect(theme.style[key]).toBe(themeColor(source, role));
+    }
     expect(theme.style.syntax.function.color).toBe(source.syntax.function);
     // Calls keep the editor's normal weight; only definitions are bold.
     expect(theme.style.syntax.function.font_weight).toBeUndefined();
